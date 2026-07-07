@@ -1,3 +1,6 @@
+# Local working copy (never commit)
+file organizer/
+
 # Python
 __pycache__/
 *.pyc
@@ -23,14 +26,4 @@ archive/
 
 # App data / caches
 .dsb_data/
-.dsb_cache/
-*.ndex_tmp
-
-# Temp and scratch
-tmp_*/
-scratch/
-graphify-out/
-
-# OS
-Thumbs.db
-.DS_Store
+.dsb_
