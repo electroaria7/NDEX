@@ -1,0 +1,36 @@
+{
+  "supported_extensions": [
+    ".cr3",
+    ".cr2",
+    ".arw",
+    ".srf",
+    ".sr2",
+    ".nef",
+    ".nrw",
+    ".jpg",
+    ".jpeg"
+  ],
+  "folder_pattern": "{YYYY}/{MM}/{MMDD}/{type}",
+  "duplicate_policy": "rename",
+  "verify_mode": "size",
+  "dry_run": false,
+  "use_exiftool": true,
+  "fallback_to_modified_time": true,
+  "default_file_types": {
+    "jpg": true,
+    "cr3": true,
+    "cr2": true,
+    "arw": true,
+    "srf": true,
+    "sr2": true,
+    "nef": true,
+    "nrw": true
+  },
+  "raw_brands": {
+    "canon": true,
+    "sony": false,
+    "nikon": false
+  },
+  "last_source": "",
+  "last_destination": ""
+}

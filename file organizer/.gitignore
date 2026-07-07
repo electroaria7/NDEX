@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# Build output
+build/DSB/
+build/DSB.onefile/
+build/NDEX*/
+dist/
+*.spec.bak
+.build_tools/
+
+# Release output & deliverables
+release/
+_DEPLOY/
+
+# Archived dev leftovers (692MB — never commit)
+_ARCHIVE/
+archive/
+
+# App data / caches
+.dsb_data/
+.dsb_cache/
+*.ndex_tmp
+
+# Temp and scratch
+tmp_*/
+scratch/
+graphify-out/
+
+# OS
+Thumbs.db
+.DS_Store

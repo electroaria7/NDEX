@@ -1,0 +1,91 @@
+from __future__ import annotations
+
+import tempfile
+import unittest
+from pathlib import Path
+
+from ndex_auto_selector.ndex_auto_selector.services.selector import AutoSelectorService
+
+
+class AutoSelectorServiceTests(unittest.TestCase):
+    def test_analyze_matches_selected_jpg_to_cr3_case_insensitive(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            raw_source = root / "raw"
+            selected = root / "selected"
+            raw_source.mkdir()
+            selected.mkdir()
+            (raw_source / "IMG_0001.CR3").write_text("raw", encoding="utf-8")
+            (raw_source / "IMG_0002.CR3").write_text("raw", encoding="utf-8")
+            (selected / "img_0001.jpg").write_text("jpg", encoding="utf-8")
+            (selected / "IMG_9999.JPG").write_text("jpg", encoding="utf-8")
+
+            summary = AutoSelectorService().analyze(raw_source, selected)
+
+            self.assertEqual(summary.selected_count, 2)
+            self.assertEqual(summary.matched_count, 1)
+            self.assertEqual(summary.missing_count, 1)
+            self.assertEqual(summary.matches[0].raw_path, raw_source / "IMG_0001.CR3")
+
+    def test_copy_matches_renames_duplicates(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            raw_source = root / "raw"
+            selected = root / "selected"
+            work = root / "work"
+            raw_source.mkdir()
+            selected.mkdir()
+            work.mkdir()
+            (raw_source / "IMG_0001.CR3").write_text("new raw", encoding="utf-8")
+            (selected / "IMG_0001.JPG").write_text("jpg", encoding="utf-8")
+            (work / "IMG_0001.CR3").write_text("existing", encoding="utf-8")
+
+            service = AutoSelectorService()
+            summary = service.analyze(raw_source, selected)
+            result = service.copy_matches(summary.matches, work, "rename")
+
+            self.assertEqual(result.copied, 1)
+            self.assertTrue((work / "IMG_0001_001.CR3").exists())
+
+    def test_analyze_matches_embedded_img_number_token(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            raw_source = root / "raw"
+            selected = root / "selected"
+            raw_source.mkdir()
+            selected.mkdir()
+            (raw_source / "IMG_0123.CR3").write_text("raw", encoding="utf-8")
+            (selected / "client_pick_IMG_0123_edit.JPG").write_text("jpg", encoding="utf-8")
+
+            summary = AutoSelectorService().analyze(raw_source, selected)
+
+            self.assertEqual(summary.matched_count, 1)
+            self.assertEqual(summary.matches[0].raw_path, raw_source / "IMG_0123.CR3")
+
+    def test_copy_matches_writes_selected_xmp_sidecar(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            raw_source = root / "raw"
+            selected = root / "selected"
+            work = root / "work"
+            raw_source.mkdir()
+            selected.mkdir()
+            work.mkdir()
+            (raw_source / "IMG_0001.CR3").write_text("raw", encoding="utf-8")
+            (selected / "IMG_0001.JPG").write_text("jpg", encoding="utf-8")
+
+            service = AutoSelectorService()
+            summary = service.analyze(raw_source, selected)
+            result = service.copy_matches(summary.matches, work, "rename", write_xmp=True)
+
+            xmp_path = work / "IMG_0001.xmp"
+            self.assertEqual(result.xmp_written, 1)
+            self.assertTrue(xmp_path.exists())
+            xmp_text = xmp_path.read_text(encoding="utf-8")
+            self.assertIn('xmp:Rating="5"', xmp_text)
+            self.assertIn('xmp:Label="NDEX Selected"', xmp_text)
+            self.assertIn("NDEX Selected", xmp_text)
+
+
+if __name__ == "__main__":
+    unittest.main()
