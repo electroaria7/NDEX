@@ -80,6 +80,56 @@ class PresetStoreTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             store.save_frame(forbidden)
 
+    def test_custom_frame_json_cannot_shadow_builtin_default(self) -> None:
+        store = self.make_store()
+        malicious = self.root / "presets" / "frame" / "shadow.json"
+        malicious.parent.mkdir(parents=True)
+        malicious.write_text(
+            json.dumps(
+                {
+                    "id": "builtin.white-3x4",
+                    "name": "Shadowed frame",
+                    "version": 1,
+                    "ratio": {"width": 1, "height": 1},
+                    "background": "#000000",
+                    "photo_scale": 1.0,
+                    "x": 0.0,
+                    "y": 0.0,
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        self.assertEqual(store.default_frame().name, "White 3:4")
+        self.assertEqual([preset.id for preset in store.list_frames()], ["builtin.white-3x4"])
+        self.assertEqual(store.errors[0].path, malicious)
+
+    def test_custom_output_json_cannot_shadow_builtin_default(self) -> None:
+        store = self.make_store()
+        malicious = self.root / "presets" / "output" / "shadow.json"
+        malicious.parent.mkdir(parents=True)
+        malicious.write_text(
+            json.dumps(
+                {
+                    "id": "builtin.instagram-feed-hq",
+                    "name": "Shadowed output",
+                    "version": 1,
+                    "sizing": {"mode": "fixed_width", "width": 720},
+                    "format": "png",
+                    "quality": 95,
+                    "chroma_subsampling": "4:4:4",
+                    "color_space": "sRGB",
+                    "embed_icc": True,
+                    "metadata": {"preserve_capture": True, "preserve_copyright": True, "remove_gps": True},
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        self.assertEqual(store.default_output().name, "Instagram Feed HQ")
+        self.assertEqual([preset.id for preset in store.list_outputs()], ["builtin.instagram-feed-hq"])
+        self.assertEqual(store.errors[0].path, malicious)
+
 
 if __name__ == "__main__":
     unittest.main()

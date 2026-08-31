@@ -76,11 +76,15 @@ class PresetStore:
     def _load(self, kind: PresetKind) -> list[FramePreset | OutputProfile]:
         self.errors = []
         loaded = self._load_directory(self._builtin_directory(kind), kind, builtin=True)
-        loaded.extend(self._load_directory(self._custom_directory(kind), kind, builtin=False))
+        loaded.extend(
+            self._load_directory(
+                self._custom_directory(kind), kind, builtin=False, existing_ids={preset.id for preset in loaded}
+            )
+        )
         return sorted(loaded, key=lambda preset: (not preset.builtin, preset.id))
 
     def _load_directory(
-        self, directory: Path, kind: PresetKind, *, builtin: bool
+        self, directory: Path, kind: PresetKind, *, builtin: bool, existing_ids: set[str] | None = None
     ) -> list[FramePreset | OutputProfile]:
         if not directory.exists():
             return []
@@ -89,6 +93,12 @@ class PresetStore:
             try:
                 data = json.loads(path.read_text(encoding="utf-8"))
                 preset = _frame_from_dict(data, builtin, path) if kind == "frame" else _output_from_dict(data, builtin, path)
+                if not builtin and preset.id.startswith("builtin."):
+                    raise PresetError(path, "Custom preset cannot use a built-in identifier.")
+                if existing_ids is not None:
+                    if preset.id in existing_ids:
+                        raise PresetError(path, f"Duplicate preset id: {preset.id}")
+                    existing_ids.add(preset.id)
                 loaded.append(preset)
             except (OSError, json.JSONDecodeError, PresetError) as error:
                 self.errors.append(error if isinstance(error, PresetError) else PresetError(path, str(error)))
