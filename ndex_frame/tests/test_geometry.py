@@ -1,6 +1,6 @@
 import unittest
 
-from ndex_frame.core.geometry import build_render_plan, resolve_canvas
+from ndex_frame.core.geometry import build_render_plan, project_render_plan, resolve_canvas
 from ndex_frame.core.models import AspectRatio, OutputSizing
 
 
@@ -52,6 +52,25 @@ class GeometryTests(unittest.TestCase):
                     (preview_plan.photo_width, preview_plan.photo_height, preview_plan.left, preview_plan.top),
                 ):
                     self.assertLessEqual(abs(output_edge - preview_edge * scale), 1.0, (source, preview_width))
+
+    def test_projection_round_trips_all_edges_without_integer_recalculation(self) -> None:
+        sources = ((3000, 4000), (5000, 7000), (6000, 4000), (4000, 4000))
+        positions = ((0.0, 0.0), (-1.0, -1.0), (1.0, 1.0), (-0.94, -1.0), (0.94, 1.0))
+        output = (1080, 1440)
+        for source in sources:
+            for x, y in positions:
+                plan = build_render_plan(source, output, 1.0, x, y)
+                projected = project_render_plan(plan, (270, 360))
+                output_edges = (plan.left, plan.top, plan.left + plan.photo_width, plan.top + plan.photo_height)
+                preview_edges = (
+                    projected.photo_left,
+                    projected.photo_top,
+                    projected.photo_right,
+                    projected.photo_bottom,
+                )
+                for expected, actual in zip(output_edges, preview_edges):
+                    recovered = (actual - projected.canvas_left) / projected.scale
+                    self.assertLessEqual(abs(expected - recovered), 1.0e-9, (source, x, y))
 
 
 if __name__ == "__main__":

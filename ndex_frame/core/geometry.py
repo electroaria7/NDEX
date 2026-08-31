@@ -1,6 +1,24 @@
 from decimal import Decimal, ROUND_HALF_UP
+from dataclasses import dataclass
 
 from ndex_frame.core.models import AspectRatio, OutputSizing, RenderPlan
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectedRenderPlan:
+    """Floating-point viewport projection of one integer export RenderPlan."""
+
+    viewport_width: int
+    viewport_height: int
+    scale: float
+    canvas_left: float
+    canvas_top: float
+    canvas_right: float
+    canvas_bottom: float
+    photo_left: float
+    photo_top: float
+    photo_right: float
+    photo_bottom: float
 
 
 def _round(value: float) -> int:
@@ -51,3 +69,32 @@ def build_render_plan(
     left = free_x // 2 if normalized_x == 0.0 else _round((free_x / 2) * (normalized_x + 1.0))
     top = free_y // 2 if normalized_y == 0.0 else _round((free_y / 2) * (normalized_y + 1.0))
     return RenderPlan(canvas_width, canvas_height, photo_width, photo_height, left, top)
+
+
+def project_render_plan(plan: RenderPlan, viewport_size: tuple[int, int]) -> ProjectedRenderPlan:
+    """Project one output plan into a viewport without re-solving or rounding geometry."""
+    viewport_width, viewport_height = viewport_size
+    if min(viewport_width, viewport_height) <= 0:
+        raise ValueError("Viewport dimensions must be positive.")
+    scale = min(viewport_width / plan.canvas_width, viewport_height / plan.canvas_height)
+    canvas_left = (viewport_width - plan.canvas_width * scale) / 2.0
+    canvas_top = (viewport_height - plan.canvas_height * scale) / 2.0
+    canvas_right = canvas_left + plan.canvas_width * scale
+    canvas_bottom = canvas_top + plan.canvas_height * scale
+    photo_left = canvas_left + plan.left * scale
+    photo_top = canvas_top + plan.top * scale
+    photo_right = photo_left + plan.photo_width * scale
+    photo_bottom = photo_top + plan.photo_height * scale
+    return ProjectedRenderPlan(
+        viewport_width,
+        viewport_height,
+        scale,
+        canvas_left,
+        canvas_top,
+        canvas_right,
+        canvas_bottom,
+        photo_left,
+        photo_top,
+        photo_right,
+        photo_bottom,
+    )
