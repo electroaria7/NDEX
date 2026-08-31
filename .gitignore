@@ -27,3 +27,6 @@ archive/
 # App data / caches
 .dsb_data/
 .dsb_
+
+# Agent scratch state
+.superpowers/
