@@ -60,17 +60,19 @@ class GeometryTests(unittest.TestCase):
         for source in sources:
             for x, y in positions:
                 plan = build_render_plan(source, output, 1.0, x, y)
-                projected = project_render_plan(plan, (270, 360))
-                output_edges = (plan.left, plan.top, plan.left + plan.photo_width, plan.top + plan.photo_height)
-                preview_edges = (
-                    projected.photo_left,
-                    projected.photo_top,
-                    projected.photo_right,
-                    projected.photo_bottom,
-                )
-                for expected, actual in zip(output_edges, preview_edges):
-                    recovered = (actual - projected.canvas_left) / projected.scale
-                    self.assertLessEqual(abs(expected - recovered), 1.0e-9, (source, x, y))
+                for viewport in ((271, 360), (270, 361)):
+                    projected = project_render_plan(plan, viewport)
+                    output_edges = (plan.left, plan.top, plan.left + plan.photo_width, plan.top + plan.photo_height)
+                    preview_edges = (
+                        projected.photo_left,
+                        projected.photo_top,
+                        projected.photo_right,
+                        projected.photo_bottom,
+                    )
+                    for edge_index, (expected, actual) in enumerate(zip(output_edges, preview_edges)):
+                        canvas_offset = projected.canvas_left if edge_index in (0, 2) else projected.canvas_top
+                        recovered = (actual - canvas_offset) / projected.scale
+                        self.assertLessEqual(abs(expected - recovered), 1.0e-9, (source, x, y, viewport))
 
 
 if __name__ == "__main__":

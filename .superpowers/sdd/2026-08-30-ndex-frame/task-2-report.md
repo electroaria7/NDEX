@@ -111,3 +111,37 @@ OK
 ```
 
 Final verification total: 48 tests passed (8 focused geometry plus 40 existing repository tests). `git diff --check` passed. No code changes were made to `build_render_plan`.
+
+## Reviewer fix round 2: axis-correct letterbox projection tests
+
+### RED
+
+Expanded the projection matrix to include horizontal-letterbox viewport `(271, 360)` and vertical-letterbox viewport `(270, 361)` while retaining all four source sizes and five positions. The intentionally unchanged test offset every edge by `canvas_left`; the focused command then failed for the vertical-letterbox case, demonstrating that the test exposed the axis error.
+
+### GREEN and final verification
+
+Corrected the test to subtract `canvas_left` for horizontal edges (left/right) and `canvas_top` for vertical edges (top/bottom). No production code was changed. Exact final commands and summaries:
+
+```text
+python -m unittest ndex_frame.tests.test_geometry -v
+Ran 8 tests in 0.001s
+OK
+
+python -m unittest discover -s tests -v
+Ran 15 tests in 0.079s
+OK
+
+python -m unittest discover -s dsb_image_manager\tests -v
+Ran 8 tests in 1.383s
+OK
+
+python -m unittest discover -s ndex_auto_selector\tests -v
+Ran 14 tests in 0.191s
+OK
+
+python -m unittest discover -s ndex_launcher\tests -v
+Ran 3 tests in 0.004s
+OK
+```
+
+Round 2 final total: 48 tests passed. The out-of-scope invalid direct `RenderPlan`/zero-division finding was intentionally not addressed.
