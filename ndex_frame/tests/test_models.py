@@ -21,6 +21,14 @@ class ModelTests(unittest.TestCase):
         override = ImageOverride(Path("IMG_001.jpg"), 0.9, 0.1, -0.2)
         self.assertEqual(override.photo_scale, 0.9)
 
+    def test_override_scale_rejects_below_fit_range(self) -> None:
+        with self.assertRaises(ValueError):
+            ImageOverride(Path("IMG_001.jpg"), 0.09, 0.0, 0.0)
+
+    def test_override_scale_rejects_above_fit_range(self) -> None:
+        with self.assertRaises(ValueError):
+            ImageOverride(Path("IMG_001.jpg"), 1.01, 0.0, 0.0)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -81,6 +81,10 @@ class ImageOverride:
     x: float
     y: float
 
+    def __post_init__(self) -> None:
+        if not 0.10 <= self.photo_scale <= 1.00:
+            raise ValueError("photo_scale must be between 0.10 and 1.00.")
+
 
 @dataclass(frozen=True, slots=True)
 class SourceItem:
