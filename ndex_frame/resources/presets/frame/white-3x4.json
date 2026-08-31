@@ -1,0 +1,10 @@
+{
+  "id": "builtin.white-3x4",
+  "name": "White 3:4",
+  "version": 1,
+  "ratio": {"width": 3, "height": 4},
+  "background": "#FFFFFF",
+  "photo_scale": 1.0,
+  "x": 0.0,
+  "y": 0.0
+}
