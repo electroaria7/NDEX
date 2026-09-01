@@ -42,7 +42,7 @@ def main(argv: list[str] | None = None) -> int:
         output_profile=store.default_output(),
     )
     controller = WorkspaceController(state, preview_cache=PreviewCache(root / "cache"))
-    window = MainWindow(controller)
+    window = MainWindow(controller, preset_store=store)
     window.show()
     if args.source is not None:
         QTimer.singleShot(0, lambda: window.queue_source(args.source))
