@@ -38,8 +38,10 @@ def save_output_atomic(
         raise FileExistsError(destination)
 
     temporary = destination.parent / f".{destination.name}.{uuid4().hex}.ndex_tmp"
+    temporary_owned = False
     try:
         with temporary.open("xb") as handle:
+            temporary_owned = True
             if profile.format == "jpeg":
                 rendered.save(
                     handle,
@@ -80,6 +82,6 @@ def save_output_atomic(
         os.rename(temporary, destination)
         return destination
     except BaseException:
-        if temporary.exists():
+        if temporary_owned and temporary.exists():
             temporary.unlink()
         raise

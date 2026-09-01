@@ -4,6 +4,8 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from PIL import Image, JpegImagePlugin
 
@@ -69,6 +71,16 @@ class EncoderTests(unittest.TestCase):
 
         self.assertEqual(self.destination.read_bytes(), b"existing")
         self.assertEqual(list(self.output_directory.glob("*.ndex_tmp")), [])
+
+    def test_temporary_collision_preserves_file_not_owned_by_this_save(self) -> None:
+        temporary = self.output_directory / ".output.jpg.collision.ndex_tmp"
+        temporary.write_bytes(b"pre-existing temporary")
+
+        with patch("ndex_frame.imaging.encoders.uuid4", return_value=SimpleNamespace(hex="collision")):
+            with self.assertRaises(FileExistsError):
+                save_output_atomic(self.image, self.destination, self.jpeg_profile, self.prepared)
+
+        self.assertEqual(temporary.read_bytes(), b"pre-existing temporary")
 
     @unittest.skipUnless(os.name == "nt", "Windows rename semantics are required for this race test")
     def test_destination_created_immediately_before_rename_is_not_replaced(self) -> None:
