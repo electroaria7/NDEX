@@ -362,6 +362,17 @@ QPushButton#primaryButton:disabled {{
     border-color: #93C5FD;
     color: {ACCENT_TEXT};
 }}
+QPushButton#compactButton {{
+    padding: 4px 8px;
+    min-height: 22px;
+}}
+QPushButton#colorSwatch {{
+    padding: 0px;
+    margin: 0px;
+    min-width: 30px;
+    min-height: 30px;
+    border-radius: 6px;
+}}
 QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {{
     background: {CARD_BG};
     color: {TEXT_PRIMARY};
