@@ -194,6 +194,22 @@ class ExportJobTests(unittest.TestCase):
         self.assertEqual((result.exported, result.failed, result.skipped), (0, 0, 1))
         self.assertEqual(existing.read_bytes(), b"keep")
 
+    def test_progress_keyboard_interrupt_propagates(self) -> None:
+        def interrupted(event: object) -> None:
+            raise KeyboardInterrupt
+
+        with self.assertRaises(KeyboardInterrupt):
+            run_export(plan_export(self.request()), interrupted, CancelToken())
+
+    def test_progress_system_exit_propagates(self) -> None:
+        def exiting(event: object) -> None:
+            raise SystemExit(7)
+
+        with self.assertRaises(SystemExit) as raised:
+            run_export(plan_export(self.request()), exiting, CancelToken())
+
+        self.assertEqual(raised.exception.code, 7)
+
 
 if __name__ == "__main__":
     unittest.main()
