@@ -9,12 +9,12 @@ Each app can run alone. Together they share XMP sidecars and one settings file (
 
 **Windows package (recommended)**
 
-1. Download `NDEX_v1.0.0.zip` from [Releases](https://github.com/electroaria7/NDEX/releases).
+1. Download `NDEX_v1.0.1.zip` from [Releases](https://github.com/electroaria7/NDEX/releases).
 2. Unzip the folder. Keep `Apps\` together.
 3. Double-click `NDEX_Launcher.exe`.
 4. Use the four cards: **1. Backup** → **2. Select & Rate** → **3. Extract** → **4. Frame & Export**.
 
-**Installed (`NDEX_Setup_1.0.0.exe`)**
+**Installed (`NDEX_Setup_1.0.1.exe`)**
 
 When an installer build is available:
 
@@ -85,7 +85,7 @@ Shared settings `frame` section: `%LOCALAPPDATA%\NDEX\config\settings.json`
 ## Packaged layout (installer and portable)
 
 ```
-NDEX_v1.0.0\                  also installed as C:\Program Files\NDEX\
+NDEX_v1.0.1\                  also installed as C:\Program Files\NDEX\
   NDEX_Launcher.exe           start here
   Apps\
     NDEX_One.exe
@@ -115,7 +115,7 @@ powershell -ExecutionPolicy Bypass -File .\build_all.ps1
 powershell -ExecutionPolicy Bypass -File .\build_all.ps1 -Installer
 ```
 
-Output: `release\NDEX_v1.0.0\` (portable package) and `release\NDEX_Setup_1.0.0.exe`.
+Output: `release\NDEX_v1.0.1\` (portable package) and `release\NDEX_Setup_1.0.1.exe`.
 
 ```powershell
 python -m ndex_launcher.main
