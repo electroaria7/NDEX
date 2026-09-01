@@ -16,6 +16,7 @@ APP_COMMANDS = {
     "ndex_one": ("NDEX_One_OneFile.exe", "main"),
     "image_manager": ("NDEX_Image_Manager.exe", "dsb_image_manager.main"),
     "auto_selector": ("NDEX_Auto_Selector.exe", "ndex_auto_selector.main"),
+    "frame": ("NDEX_Frame.exe", "ndex_frame.main"),
     "launcher": ("NDEX_Launcher.exe", "ndex_launcher.main"),
 }
 
@@ -23,6 +24,7 @@ _DIST_SUBDIRS = (
     "dist",
     "dsb_image_manager/dist",
     "ndex_auto_selector/dist",
+    "ndex_frame/dist",
     "ndex_launcher/dist",
 )
 
