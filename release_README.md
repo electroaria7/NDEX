@@ -22,6 +22,25 @@ folder so the apps can launch each other (workflow handoff).
 
 Each app also works standalone — open only what you need.
 
+## NDEX Frame
+
+Open JPG/JPEG, PNG, or TIFF Masters. Preview and export use the same crop-free FIT layout. Frame Preset and Output Profile are independent (defaults: White 3:4 and Instagram Feed HQ 1080×1440 JPEG, Quality 95, 4:4:4, sRGB ICC). Masters and existing outputs are never overwritten (skip or auto-rename).
+
+On the right Frame panel:
+
+- **Ratio** shortcuts `3:4` / `4:5` / `1:1` apply to every loaded photo.
+- **Background** swatches White, Bright Gray, Medium Gray, Black, plus **Custom…**, also apply to the whole session.
+- **Photo Size** slider and `80%` / `90%` / `95%` apply to the selected photo until you click **Apply Current Framing to All**.
+- During **Export Selected** / **Export All**, a progress bar shows `filename · current / total`. Use **Cancel** to stop.
+
+Saved presets stay in **Manage Presets**. Frame data lives under `%LOCALAPPDATA%\NDEX\Frame\`.
+
+## Patch notes (2026-09-01)
+
+- NDEX Frame: ratio and background shortcuts on the main screen (no hex typing).
+- NDEX Frame: photo-size presets 80 / 90 / 95% and **Apply Current Framing to All**.
+- NDEX Frame: export progress bar with filename and current / total.
+
 ## Settings
 
 All apps share one settings file:
