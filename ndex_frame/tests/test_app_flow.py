@@ -108,6 +108,11 @@ class AppFlowTests(unittest.TestCase):
             with Image.open(path) as image:
                 self.assertEqual(image.size, (1080, 1440))
 
+        self.assertTrue(self.controller.state.is_modified(second.path))
+        statuses = [self.window.thumbnail_view.item(index).text() for index in range(self.window.thumbnail_view.count())]
+        self.assertEqual(sum("Exported" in text for text in statuses), 2)
+        self.assertFalse(any("Modified" in text for text in statuses))
+
     def test_preflight_reports_existing_files_as_conflicted_without_overwrite(self) -> None:
         source_dir = self.root / "conflict-masters"
         output_dir = self.root / "conflict-output"
@@ -139,6 +144,27 @@ class AppFlowTests(unittest.TestCase):
         self.window.refresh_thumbnails()
         self.assertFalse(self.window.export_all_button.isEnabled())
         self.assertFalse(self.window.export_selected_button.isEnabled())
+
+    def test_exported_status_wins_over_modified_after_successful_export(self) -> None:
+        source = SourceItem(self.root / "tweaked.jpg", 60, 80, True)
+        self.controller.state.replace_sources([source])
+        self.controller.select(source.path)
+        self.window.scale_spin.setValue(90)
+        self.assertTrue(self.controller.state.is_modified(source.path))
+        self.assertIn("Modified", self.window.thumbnail_view.item(0).text())
+        self.window._export_finished(
+            ExportResult(
+                1,
+                0,
+                0,
+                False,
+                (ExportItemResult(source.path, source.path, "exported"),),
+            )
+        )
+        text = self.window.thumbnail_view.item(0).text()
+        self.assertTrue(text.endswith("Exported") or "\nExported" in text)
+        self.assertNotIn("Modified", text)
+        self.assertTrue(self.controller.state.is_modified(source.path))
 
     def test_thumbnails_show_exported_and_error_status(self) -> None:
         first = SourceItem(self.root / "one.jpg", 60, 80, True)

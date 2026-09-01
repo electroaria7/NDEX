@@ -25,7 +25,7 @@ from PySide6.QtWidgets import (
 from ndex_frame.core.models import AspectRatio, FramePreset
 from ndex_frame.services.export_job import ExportJobSnapshot, ExportResult
 from ndex_frame.services.presets import PresetStore
-from ndex_frame.ui.profile_dialog import custom_preset_id
+from ndex_frame.ui.profile_dialog import custom_preset_id, store_preset_ids
 
 
 @dataclass(frozen=True, slots=True)
@@ -127,7 +127,7 @@ class FramePresetDialog(QDialog):
     def build_preset(self, *, save_as: bool = False) -> FramePreset:
         name = self.name_edit.text().strip() or self._preset.name
         if self._preset.builtin or save_as:
-            preset_id = custom_preset_id(name)
+            preset_id = custom_preset_id(name, store_preset_ids(self._store))
         else:
             preset_id = self._preset.id
         return FramePreset(

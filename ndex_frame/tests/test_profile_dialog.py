@@ -14,7 +14,7 @@ from PySide6.QtWidgets import QApplication, QRadioButton
 from ndex_frame.core.models import AspectRatio, FramePreset, MetadataPolicy, OutputProfile, OutputSizing
 from ndex_frame.services.presets import PresetStore
 from ndex_frame.ui.preset_dialog import ExportPreflightDialog, FramePresetDialog, PreflightCounts
-from ndex_frame.ui.profile_dialog import OutputProfileDialog
+from ndex_frame.ui.profile_dialog import OutputProfileDialog, custom_preset_id
 
 
 class ProfileDialogTests(unittest.TestCase):
@@ -126,6 +126,55 @@ class ProfileDialogTests(unittest.TestCase):
         self.assertTrue(saved.id.startswith("custom."))
         self.assertFalse(saved.builtin)
         self.assertEqual(saved.name, "White 3:4 Tight")
+
+    def test_custom_preset_ids_are_unique_for_non_ascii_and_duplicate_names(self) -> None:
+        first_korean = custom_preset_id("첫 번째")
+        second_korean = custom_preset_id("두 번째", {first_korean})
+        self.assertTrue(first_korean.startswith("custom."))
+        self.assertTrue(second_korean.startswith("custom."))
+        self.assertNotEqual(first_korean, second_korean)
+
+        first_copy = custom_preset_id("Instagram Feed HQ")
+        second_copy = custom_preset_id("Instagram Feed HQ", {first_copy})
+        self.assertTrue(first_copy.startswith("custom."))
+        self.assertTrue(second_copy.startswith("custom."))
+        self.assertNotEqual(first_copy, second_copy)
+
+    def test_duplicate_and_non_ascii_saves_do_not_overwrite_custom_presets(self) -> None:
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        settings: dict[str, dict[str, str]] = {}
+
+        def reader(section: str, defaults: dict[str, str]) -> dict[str, str]:
+            values = dict(defaults)
+            values.update(settings.get(section, {}))
+            return values
+
+        def writer(section: str, values: dict[str, str]) -> None:
+            settings.setdefault(section, {}).update(values)
+
+        store = PresetStore(Path(temporary.name), reader, writer)
+        for name in ("첫 번째", "두 번째"):
+            dialog = OutputProfileDialog(self.instagram_profile, AspectRatio(3, 4), store=store)
+            self.addCleanup(dialog.close)
+            dialog.name_edit.setText(name)
+            dialog._duplicate()
+
+        korean = [preset for preset in store.list_outputs() if preset.name in {"첫 번째", "두 번째"}]
+        self.assertEqual({preset.name for preset in korean}, {"첫 번째", "두 번째"})
+        self.assertEqual(len({preset.id for preset in korean}), 2)
+        self.assertTrue(all(preset.id.startswith("custom.") and not preset.builtin for preset in korean))
+
+        OutputProfileDialog(self.instagram_profile, AspectRatio(3, 4), store=store)._duplicate()
+        OutputProfileDialog(self.instagram_profile, AspectRatio(3, 4), store=store)._duplicate()
+        instagram_copies = [
+            preset
+            for preset in store.list_outputs()
+            if preset.name == "Instagram Feed HQ" and not preset.builtin
+        ]
+        self.assertEqual(len(instagram_copies), 2)
+        self.assertEqual(len({preset.id for preset in instagram_copies}), 2)
+        self.assertTrue(all(preset.id.startswith("custom.") for preset in instagram_copies))
 
     def test_preflight_dialog_requires_skip_or_rename_without_overwrite(self) -> None:
         dialog = ExportPreflightDialog(PreflightCounts(1, 0, 2, 0), has_conflicts=True)

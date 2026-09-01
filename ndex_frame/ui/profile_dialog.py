@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import re
+import uuid
+from collections.abc import Iterable
 
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -35,11 +37,21 @@ _SIZING_MODES = (
 )
 
 
-def custom_preset_id(name: str) -> str:
+def store_preset_ids(store: PresetStore | None) -> set[str]:
+    if store is None:
+        return set()
+    return {preset.id for preset in store.list_frames()} | {preset.id for preset in store.list_outputs()}
+
+
+def custom_preset_id(name: str, existing_ids: Iterable[str] = ()) -> str:
     slug = _UNSAFE.sub("-", name).strip("-").lower() or "preset"
     if slug[0] in ".-":
         slug = f"p{slug}"
-    return f"custom.{slug}"
+    occupied = set(existing_ids)
+    while True:
+        candidate = f"custom.{slug}.{uuid.uuid4().hex[:8]}"
+        if candidate not in occupied:
+            return candidate
 
 
 class OutputProfileDialog(QDialog):
@@ -197,7 +209,7 @@ class OutputProfileDialog(QDialog):
         name = self.name_edit.text().strip() or self._profile.name
         builtin = False
         if self._profile.builtin or save_as:
-            profile_id = custom_preset_id(name)
+            profile_id = custom_preset_id(name, store_preset_ids(self._store))
         else:
             profile_id = self._profile.id
         return OutputProfile(

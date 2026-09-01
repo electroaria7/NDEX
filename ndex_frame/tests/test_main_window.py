@@ -106,6 +106,17 @@ class MainWindowTests(unittest.TestCase):
         self.assertAlmostEqual(values[0][0], 0.0)
         self.assertAlmostEqual(values[0][1], 0.5)
 
+    def test_preview_drag_refreshes_thumbnail_status_to_modified(self) -> None:
+        source = SourceItem(Path("master.jpg"), 3000, 4000, True)
+        self.state.replace_sources([source])
+        self.controller.select(source.path)
+        window = MainWindow(controller=self.controller)
+        self.addCleanup(window.close)
+        self.assertIn("Default", window.thumbnail_view.item(0).text())
+        window._preview_dragged(0.25, -0.5)
+        self.assertTrue(self.state.is_modified(source.path))
+        self.assertIn("Modified", window.thumbnail_view.item(0).text())
+
     def test_parser_accepts_launcher_arguments(self) -> None:
         args = build_parser().parse_args(["--open", "--source", "masters"])
         self.assertTrue(args.open)

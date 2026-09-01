@@ -359,10 +359,10 @@ class MainWindow(QMainWindow):
         export_status = self._source_export_status.get(path)
         if export_status == "Error":
             return "Error"
-        if self.controller.state.is_modified(path):
-            return "Modified"
         if export_status == "Exported":
             return "Exported"
+        if self.controller.state.is_modified(path):
+            return "Modified"
         return "Default"
 
     @Slot()
@@ -430,6 +430,7 @@ class MainWindow(QMainWindow):
     @Slot(float, float)
     def _preview_dragged(self, x: float, y: float) -> None:
         self.controller.set_selected_framing(self.scale_spin.value() / 100.0, x, y)
+        self._refresh_sources()
 
     @Slot(object, object, object, object)
     def _show_preview(self, path: Path, image: QImage, plan: RenderPlan, background: str) -> None:
