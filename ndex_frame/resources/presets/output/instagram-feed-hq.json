@@ -1,0 +1,12 @@
+{
+  "id": "builtin.instagram-feed-hq",
+  "name": "Instagram Feed HQ",
+  "version": 1,
+  "sizing": {"mode": "fixed_width", "width": 1080},
+  "format": "jpeg",
+  "quality": 95,
+  "chroma_subsampling": "4:4:4",
+  "color_space": "sRGB",
+  "embed_icc": true,
+  "metadata": {"preserve_capture": true, "preserve_copyright": true, "remove_gps": true}
+}

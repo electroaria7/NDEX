@@ -15,6 +15,7 @@ NDEX_ONE_TITLE = "NDEX One"
 NDEX_IMAGE_MANAGER_TITLE = "NDEX Image Manager"
 NDEX_AUTO_SELECTOR_TITLE = "NDEX Auto Selector"
 NDEX_LAUNCHER_TITLE = "NDEX Launcher"
+NDEX_FRAME_TITLE = "NDEX Frame"
 
 BRANDING_DIR = Path("assets") / "branding"
 APP_ICON_ICO = BRANDING_DIR / "ndex_icon.ico"

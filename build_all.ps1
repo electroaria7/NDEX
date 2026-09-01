@@ -1,4 +1,4 @@
-# NDEX release builder - builds all four apps and assembles a portable release folder.
+# NDEX release builder - builds all five apps and assembles a portable release folder.
 # Usage:
 #   powershell -ExecutionPolicy Bypass -File .\build_all.ps1
 #   powershell -ExecutionPolicy Bypass -File .\build_all.ps1 -SkipBuild   # assemble only
@@ -18,16 +18,19 @@ if (-not $version) { $version = "0.0.0" }
 Write-Host "== NDEX release build v$version =="
 
 if (-not $SkipBuild) {
-    Write-Host "[1/4] NDEX One"
+    Write-Host "[1/5] NDEX One"
     powershell -ExecutionPolicy Bypass -File (Join-Path $repoRoot "build\build.ps1") -OneFile
 
-    Write-Host "[2/4] NDEX Image Manager"
+    Write-Host "[2/5] NDEX Image Manager"
     powershell -ExecutionPolicy Bypass -File (Join-Path $repoRoot "dsb_image_manager\build_package.ps1")
 
-    Write-Host "[3/4] NDEX Auto Selector"
+    Write-Host "[3/5] NDEX Auto Selector"
     powershell -ExecutionPolicy Bypass -File (Join-Path $repoRoot "ndex_auto_selector\build_package.ps1")
 
-    Write-Host "[4/4] NDEX Launcher"
+    Write-Host "[4/5] NDEX Frame"
+    powershell -ExecutionPolicy Bypass -File (Join-Path $repoRoot "ndex_frame\build_package.ps1")
+
+    Write-Host "[5/5] NDEX Launcher"
     powershell -ExecutionPolicy Bypass -File (Join-Path $repoRoot "ndex_launcher\build_package.ps1")
 }
 
@@ -39,6 +42,7 @@ $artifacts = @(
     @{ Source = "dist\NDEX_One_OneFile.exe";                 Target = "NDEX_One_OneFile.exe" },
     @{ Source = "dsb_image_manager\dist\NDEX_Image_Manager.exe"; Target = "NDEX_Image_Manager.exe" },
     @{ Source = "ndex_auto_selector\dist\NDEX_Auto_Selector.exe"; Target = "NDEX_Auto_Selector.exe" },
+    @{ Source = "ndex_frame\dist\NDEX_Frame.exe"; Target = "NDEX_Frame.exe" },
     @{ Source = "ndex_launcher\dist\NDEX_Launcher.exe";      Target = "NDEX_Launcher.exe" }
 )
 
@@ -55,6 +59,10 @@ foreach ($artifact in $artifacts) {
 
 # Bundle docs and third-party license notes
 Copy-Item (Join-Path $repoRoot "release_README.md") (Join-Path $releaseDir "README.md") -Force
+$notices = Join-Path $repoRoot "THIRD_PARTY_NOTICES.md"
+if (Test-Path $notices) {
+    Copy-Item $notices (Join-Path $releaseDir "THIRD_PARTY_NOTICES.md") -Force
+}
 $exiftoolDir = Join-Path $repoRoot "vendor\exiftool"
 if (Test-Path $exiftoolDir) {
     $licenseFiles = Get-ChildItem $exiftoolDir -Filter "*.txt" -ErrorAction SilentlyContinue

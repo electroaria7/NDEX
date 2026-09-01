@@ -20,7 +20,7 @@ from copy import deepcopy
 from pathlib import Path
 
 APP_NAME = "NDEX"
-SECTION_KEYS = ("shared", "image_manager", "auto_selector")
+SECTION_KEYS = ("shared", "image_manager", "auto_selector", "frame")
 
 
 def settings_path() -> Path:

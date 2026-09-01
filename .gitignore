@@ -27,3 +27,10 @@ archive/
 # App data / caches
 .dsb_data/
 .dsb_
+
+# Agent scratch state
+.superpowers/
+
+# NDEX Frame PyInstaller output
+ndex_frame/build/
+ndex_frame/dist/
