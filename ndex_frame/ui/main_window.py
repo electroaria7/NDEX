@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QMainWindow,
+    QProgressBar,
     QPushButton,
     QSlider,
     QSpinBox,
@@ -209,6 +210,11 @@ class MainWindow(QMainWindow):
         self.output_folder_button = QPushButton("Output Folder")
         self.output_folder_label = QLabel("Not selected")
         self.result_summary_label = QLabel()
+        self.export_progress_bar = QProgressBar()
+        self.export_progress_bar.setAccessibleName("Export progress")
+        self.export_progress_bar.setTextVisible(True)
+        self.export_progress_bar.setMinimumWidth(180)
+        self.export_progress_bar.hide()
         self.export_selected_button = QPushButton("Export Selected")
         self.export_all_button = QPushButton("Export All")
         self.cancel_button = QPushButton("Cancel")
@@ -216,6 +222,7 @@ class MainWindow(QMainWindow):
         bottom.addWidget(self.output_folder_button)
         bottom.addWidget(self.output_folder_label, 1)
         bottom.addWidget(self.result_summary_label)
+        bottom.addWidget(self.export_progress_bar, 1)
         bottom.addWidget(self.export_selected_button)
         bottom.addWidget(self.export_all_button)
         bottom.addWidget(self.cancel_button)
@@ -548,6 +555,10 @@ class MainWindow(QMainWindow):
         plan_export(self._export_request(selected, collision_policy))
         self.last_export_result = None
         self._export_total = len(selected)
+        self.export_progress_bar.setRange(0, max(1, len(selected)))
+        self.export_progress_bar.setValue(0)
+        self.export_progress_bar.setFormat("%v / %m")
+        self.export_progress_bar.show()
         self.controller.start_export(selected, collision_policy)
 
     def _prompt_export(self, sources: list[SourceItem] | None) -> None:
@@ -582,19 +593,32 @@ class MainWindow(QMainWindow):
         self._busy = busy
         exporting = self.controller._export_thread is not None
         self.cancel_button.setVisible(exporting)
+        if exporting:
+            self.export_progress_bar.show()
+        else:
+            self.export_progress_bar.hide()
         if not exporting:
             self.cancel_button.setText("Cancel")
         self._sync_controls()
 
     @Slot(object)
     def _export_progress(self, progress: object) -> None:
-        self.statusBar().showMessage(f"{progress.source.name} · {progress.index} / {progress.total}")
+        total = max(1, int(getattr(progress, "total", 1) or 1))
+        index = max(0, min(total, int(getattr(progress, "index", 0) or 0)))
+        name = getattr(getattr(progress, "source", None), "name", "")
+        self.export_progress_bar.setRange(0, total)
+        self.export_progress_bar.setValue(index)
+        self.export_progress_bar.setFormat(f"{name} · %v / %m" if name else "%v / %m")
+        self.export_progress_bar.show()
+        self.statusBar().showMessage(f"{name} · {index} / {total}".strip(" ·"))
 
     @Slot(object)
     def _export_finished(self, result: object) -> None:
         self.last_export_result = result  # type: ignore[assignment]
         self.cancel_button.hide()
         self.cancel_button.setText("Cancel")
+        self.export_progress_bar.hide()
+        self.export_progress_bar.reset()
         for item in getattr(result, "items", ()):
             if item.state == "exported":
                 self._source_export_status[item.source] = "Exported"

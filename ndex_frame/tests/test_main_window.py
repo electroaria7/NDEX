@@ -15,6 +15,7 @@ from PySide6.QtWidgets import QApplication, QFileDialog
 from ndex_frame.core.geometry import build_render_plan, project_render_plan
 from ndex_frame.core.models import AspectRatio, FramePreset, MetadataPolicy, OutputProfile, OutputSizing, SourceItem
 from ndex_frame.main import build_parser
+from ndex_frame.services.export_job import ExportProgress, ExportResult
 from ndex_frame.ui.main_window import MainWindow
 from ndex_frame.ui.preview_widget import PreviewWidget
 from ndex_frame.ui.workspace import WorkspaceController, WorkspaceState
@@ -68,6 +69,22 @@ class MainWindowTests(unittest.TestCase):
             [button.text() for button in window.photo_size_preset_buttons],
             ["80%", "90%", "95%"],
         )
+        self.assertTrue(window.export_progress_bar.isHidden())
+        self.assertEqual(window.export_progress_bar.accessibleName(), "Export progress")
+
+    def test_export_progress_bar_tracks_files_and_hides_when_finished(self) -> None:
+        window = MainWindow(controller=self.controller)
+        self.addCleanup(window.close)
+        window._export_progress(ExportProgress(1, 3, Path("one.jpg"), "started"))
+        self.assertFalse(window.export_progress_bar.isHidden())
+        self.assertEqual(window.export_progress_bar.maximum(), 3)
+        self.assertEqual(window.export_progress_bar.value(), 1)
+        self.assertIn("one.jpg", window.export_progress_bar.format())
+        window._export_progress(ExportProgress(2, 3, Path("two.jpg"), "exported"))
+        self.assertEqual(window.export_progress_bar.value(), 2)
+        window.set_interactive_dialogs(False)
+        window._export_finished(ExportResult(2, 0, 0, False, ()))
+        self.assertTrue(window.export_progress_bar.isHidden())
 
     def test_ratio_and_background_presets_update_working_frame(self) -> None:
         window = MainWindow(controller=self.controller)
