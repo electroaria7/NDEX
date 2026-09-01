@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import subprocess
 import unittest
 from pathlib import Path
 
@@ -111,6 +112,54 @@ class PackagingScriptTests(unittest.TestCase):
         self.assertIn("installer.iss", script)
         self.assertIn("ISCC", script)
         self.assertIn("ndex_frame\\PATCH_NOTES.md", script)
+
+    def test_gitignore_excludes_generated_work_products_not_source_build_scripts(self) -> None:
+        ignored = (
+            ".ndex_data/config/settings.json",
+            "dsb_image_manager/build/NDEX_Image_Manager.spec",
+            "ndex_auto_selector/build/NDEX_Auto_Selector.spec",
+            "ndex_launcher/build/NDEX_Launcher.spec",
+            "ndex_frame/build/NDEX_Frame.spec",
+            "ndex_frame/dist/NDEX_Frame.exe",
+            "release/NDEX_v1.0.0/NDEX_Launcher.exe",
+        )
+        kept = (
+            "build/installer.iss",
+            "build/build.ps1",
+            "build/NDEX_One.spec",
+            "ndex_frame/build_package.ps1",
+            "cleanup.ps1",
+        )
+        for relative in ignored:
+            with self.subTest(ignored=relative):
+                self.assertTrue(self._is_git_ignored(relative), relative)
+        for relative in kept:
+            with self.subTest(kept=relative):
+                self.assertFalse(self._is_git_ignored(relative), relative)
+
+    def test_cleanup_script_removes_app_build_dirs_and_local_data(self) -> None:
+        script = (REPO_ROOT / "cleanup.ps1").read_text(encoding="utf-8")
+        required = (
+            r"dsb_image_manager\build",
+            r"ndex_auto_selector\build",
+            r"ndex_frame\build",
+            r"ndex_launcher\build",
+            ".ndex_data",
+            r"ndex_frame\dist",
+            r"build\NDEX_One.onefile",
+        )
+        for token in required:
+            with self.subTest(token=token):
+                self.assertIn(token, script)
+        self.assertNotIn("installer.iss", script)
+
+    def _is_git_ignored(self, relative: str) -> bool:
+        completed = subprocess.run(
+            ["git", "check-ignore", "-q", relative],
+            cwd=REPO_ROOT,
+            check=False,
+        )
+        return completed.returncode == 0
 
 
 if __name__ == "__main__":

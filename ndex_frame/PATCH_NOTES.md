@@ -36,6 +36,7 @@
 - Start Menu group **NDEX** lists Launcher plus numbered workflow shortcuts 1–4, including **4. Frame & Export - NDEX Frame**.
 - Desktop icon launches **NDEX Launcher**.
 - Build with `build_all.ps1 -Installer` (requires Inno Setup `ISCC`) to produce `release\NDEX_Setup_1.0.0.exe`.
+- Ignore and delete generated PyInstaller work dirs (`*/build`, `.ndex_data`, `dist`, `release`). Source stays in `/build` (`build.ps1`, `installer.iss`, NDEX One specs). `cleanup.ps1 -IncludeDist` wipes those artifacts.
 
 
 ## 2026-08-30

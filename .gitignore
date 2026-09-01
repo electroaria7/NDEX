@@ -8,10 +8,12 @@ __pycache__/
 .venv/
 venv/
 
-# Build output
+# Build output — keep /build scripts and NDEX One spec files
 build/DSB/
 build/DSB.onefile/
 build/NDEX*/
+build/dist_installer/
+*/build/
 dist/
 *.spec.bak
 .build_tools/
@@ -20,17 +22,14 @@ dist/
 release/
 _DEPLOY/
 
-# Archived dev leftovers (692MB — never commit)
+# Archived dev leftovers (never commit)
 _ARCHIVE/
 archive/
 
 # App data / caches
 .dsb_data/
+.ndex_data/
 .dsb_
 
 # Agent scratch state
 .superpowers/
-
-# NDEX Frame PyInstaller output
-ndex_frame/build/
-ndex_frame/dist/
