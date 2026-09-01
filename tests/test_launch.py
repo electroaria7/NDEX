@@ -9,6 +9,11 @@ from ndex_common import launch as launch_mod
 
 
 class LaunchResolutionTests(unittest.TestCase):
+    def assertSameFile(self, actual: Path | None, expected: Path) -> None:
+        self.assertIsNotNone(actual)
+        if actual is not None:
+            self.assertTrue(actual.samefile(expected))
+
     def test_frozen_launcher_finds_apps_folder_executables(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -24,7 +29,7 @@ class LaunchResolutionTests(unittest.TestCase):
                 patch.object(launch_mod, "_repo_root", return_value=None),
             ):
                 found = launch_mod._find_executable("NDEX_Frame.exe")
-            self.assertEqual(found, frame)
+            self.assertSameFile(found, frame)
 
     def test_frozen_launcher_accepts_ndex_one_onefile_alias(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -41,7 +46,7 @@ class LaunchResolutionTests(unittest.TestCase):
                 patch.object(launch_mod, "_repo_root", return_value=None),
             ):
                 found = launch_mod._find_executable("NDEX_One.exe")
-            self.assertEqual(found, one)
+            self.assertSameFile(found, one)
 
     def test_app_commands_use_stable_ndex_one_name(self) -> None:
         self.assertEqual(launch_mod.APP_COMMANDS["ndex_one"][0], "NDEX_One.exe")
@@ -61,7 +66,7 @@ class LaunchResolutionTests(unittest.TestCase):
                 patch.object(launch_mod, "_repo_root", return_value=None),
             ):
                 found = launch_mod._find_executable("NDEX_Image_Manager.exe")
-            self.assertEqual(found, manager)
+            self.assertSameFile(found, manager)
 
     def test_frozen_search_does_not_use_parent_directory(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
