@@ -30,3 +30,7 @@ archive/
 
 # Agent scratch state
 .superpowers/
+
+# NDEX Frame PyInstaller output
+ndex_frame/build/
+ndex_frame/dist/

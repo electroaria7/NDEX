@@ -1,8 +1,8 @@
 """Workflow session state for the NDEX Launcher.
 
 Reads the shared settings file to show where the user left off in the
-backup -> select -> extract workflow, and builds the handoff arguments
-each step should launch with.
+backup -> select -> extract -> frame workflow, and builds the handoff
+arguments each step should launch with.
 """
 
 from __future__ import annotations
@@ -38,11 +38,13 @@ def gather_workflow_state() -> list[StepState]:
     data = load_all()
     image_manager = data.get("image_manager", {}) if isinstance(data.get("image_manager"), dict) else {}
     auto_selector = data.get("auto_selector", {}) if isinstance(data.get("auto_selector"), dict) else {}
+    frame = data.get("frame", {}) if isinstance(data.get("frame"), dict) else {}
 
     backup_destination = str(data.get("last_destination", "") or "")
     manager_source = str(image_manager.get("last_source", "") or "")
     selector_jpg = str(auto_selector.get("last_selected_jpg", "") or "")
     selector_raw = str(auto_selector.get("last_raw_source", "") or "")
+    frame_source = str(frame.get("last_source", "") or "")
 
     steps = [
         StepState(
@@ -63,10 +65,17 @@ def gather_workflow_state() -> list[StepState]:
             description="Match selected JPGs to CR3 originals + XMP",
             last_folder=selector_jpg,
         ),
+        StepState(
+            key="frame",
+            title="4. Frame & Export - NDEX Frame",
+            description="Preview Masters and export framed Instagram images",
+            last_folder=frame_source,
+        ),
     ]
 
     steps[1].launch_args = _image_manager_args(steps[1])
     steps[2].launch_args = _auto_selector_args(selector_jpg, selector_raw)
+    steps[3].launch_args = _image_manager_args(steps[3])
     return steps
 
 

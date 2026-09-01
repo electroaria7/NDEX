@@ -20,6 +20,11 @@ CARD_BG = "#ffffff"
 TEXT_PRIMARY = "#18202f"
 TEXT_MUTED = "#64748b"
 ACCENT = "#2563eb"
+COMPACT_LAYOUT_WIDTH = 1100
+
+
+def uses_compact_card_layout(width: int) -> bool:
+    return width < COMPACT_LAYOUT_WIDTH
 
 
 class LauncherApp(tk.Tk):
@@ -33,6 +38,9 @@ class LauncherApp(tk.Tk):
         self._apply_window_branding()
 
         self.status_labels: dict[str, tk.StringVar] = {}
+        self._cards: dict[str, ttk.Frame] = {}
+        self._arrows: list[ttk.Label] = []
+        self._compact_layout: bool | None = None
         self._configure_style()
         self._build_ui()
         self.refresh_status()
@@ -83,22 +91,18 @@ class LauncherApp(tk.Tk):
             ttk.Label(header, text=NDEX_LAUNCHER_TITLE, style="Title.TLabel").pack(side=tk.LEFT)
         ttk.Label(
             header,
-            text="Photo workflow: backup, select, extract",
+            text="Photo workflow: backup, select, extract, frame",
         ).pack(side=tk.LEFT, padx=(14, 0), pady=(6, 0))
 
-        body = ttk.Frame(self, padding=20)
-        body.pack(fill=tk.BOTH, expand=True)
-        for column in (0, 2, 4):
-            body.columnconfigure(column, weight=1, uniform="steps")
-        body.rowconfigure(0, weight=1)
+        self._body = ttk.Frame(self, padding=20)
+        self._body.pack(fill=tk.BOTH, expand=True)
 
-        self._cards: dict[str, ttk.Frame] = {}
-        for index, key in enumerate(("ndex_one", "image_manager", "auto_selector")):
-            card = ttk.Frame(body, padding=16, style="Card.TFrame")
-            card.grid(row=0, column=index * 2, sticky="nsew")
-            self._cards[key] = card
-            if index < 2:
-                ttk.Label(body, text="→", style="Arrow.TLabel").grid(row=0, column=index * 2 + 1, padx=6)
+        self._cards = {}
+        self._arrows = []
+        for step in gather_workflow_state():
+            self._cards[step.key] = ttk.Frame(self._body, padding=16, style="Card.TFrame")
+        self.bind("<Configure>", self._on_window_configure, add="+")
+        self._apply_card_layout(self.winfo_width())
 
         footer = ttk.Frame(self, padding=(20, 0, 20, 14))
         footer.pack(fill=tk.X)
@@ -109,9 +113,52 @@ class LauncherApp(tk.Tk):
             foreground=TEXT_MUTED,
         ).pack(side=tk.RIGHT)
 
+    def _on_window_configure(self, event: tk.Event) -> None:
+        if event.widget is not self:
+            return
+        self._apply_card_layout(event.width)
+
+    def _apply_card_layout(self, width: int) -> None:
+        compact = uses_compact_card_layout(width)
+        if compact == self._compact_layout:
+            return
+        self._compact_layout = compact
+        for card in self._cards.values():
+            card.grid_forget()
+        for arrow in self._arrows:
+            arrow.destroy()
+        self._arrows = []
+        for index in range(8):
+            self._body.columnconfigure(index, weight=0, uniform="")
+            self._body.rowconfigure(index, weight=0)
+
+        cards = list(self._cards.values())
+        if compact:
+            positions = ((0, 0), (0, 1), (1, 0), (1, 1))
+            for card, (row, column) in zip(cards, positions, strict=False):
+                card.grid(row=row, column=column, sticky="nsew", padx=8, pady=8)
+            for column in (0, 1):
+                self._body.columnconfigure(column, weight=1, uniform="steps")
+            for row in (0, 1):
+                self._body.rowconfigure(row, weight=1)
+            return
+
+        for index, card in enumerate(cards):
+            card.grid(row=0, column=index * 2, sticky="nsew")
+            self._body.columnconfigure(index * 2, weight=1, uniform="steps")
+            if index < len(cards) - 1:
+                arrow = ttk.Label(self._body, text="→", style="Arrow.TLabel")
+                arrow.grid(row=0, column=index * 2 + 1, padx=6)
+                self._arrows.append(arrow)
+        self._body.rowconfigure(0, weight=1)
+
     def refresh_status(self) -> None:
         steps = gather_workflow_state()
         for step in steps:
+            if step.key not in self._cards:
+                self._cards[step.key] = ttk.Frame(self._body, padding=16, style="Card.TFrame")
+                self._compact_layout = None
+                self._apply_card_layout(self.winfo_width())
             self._render_card(step)
 
     def _render_card(self, step: StepState) -> None:
