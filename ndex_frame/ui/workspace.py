@@ -182,6 +182,7 @@ class WorkspaceController(QObject):
         self._export_thread: QThread | None = None
         self._export_worker: _ExportWorker | None = None
         self._cancel_token: CancelToken | None = None
+        self._pending_export_result: ExportResult | None = None
 
     def import_paths(self, paths: list[Path], *, recursive: bool = False) -> None:
         job = _ImportRunnable(paths, recursive)
@@ -274,10 +275,12 @@ class WorkspaceController(QObject):
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
         worker.progress.connect(self._relay_export_progress, Qt.ConnectionType.QueuedConnection)
-        worker.completed.connect(self._finish_export, Qt.ConnectionType.QueuedConnection)
+        worker.completed.connect(self._record_export_result, Qt.ConnectionType.QueuedConnection)
+        worker.completed.connect(worker.deleteLater)
         worker.completed.connect(thread.quit)
-        thread.finished.connect(worker.deleteLater)
+        thread.finished.connect(self._export_thread_finished, Qt.ConnectionType.QueuedConnection)
         thread.finished.connect(thread.deleteLater)
+        self._pending_export_result = None
         self._export_thread, self._export_worker, self._cancel_token = thread, worker, cancel
         self.busyChanged.emit(True)
         thread.start()
@@ -291,9 +294,18 @@ class WorkspaceController(QObject):
         self.exportProgress.emit(progress)
 
     @Slot(object)
-    def _finish_export(self, result: ExportResult) -> None:
+    def _record_export_result(self, result: ExportResult) -> None:
+        self._pending_export_result = result
+
+    @Slot()
+    def _export_thread_finished(self) -> None:
+        result = self._pending_export_result
         self._export_thread = None
         self._export_worker = None
         self._cancel_token = None
+        self._pending_export_result = None
         self.busyChanged.emit(False)
-        self.exportFinished.emit(result)
+        if result is not None:
+            self.exportFinished.emit(result)
+        else:
+            self.errorOccurred.emit("Export worker stopped without a result.")

@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 import os
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+os.environ["QT_QPA_PLATFORM"] = "offscreen"
 
+import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QImage, QPixmap
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QFileDialog
 
 from ndex_frame.core.geometry import build_render_plan, project_render_plan
 from ndex_frame.core.models import AspectRatio, FramePreset, MetadataPolicy, OutputProfile, OutputSizing, SourceItem
@@ -44,6 +46,21 @@ class MainWindowTests(unittest.TestCase):
         self.assertEqual(window.scale_slider.maximum(), 100)
         self.assertEqual(window.x_spin.minimum(), -1.0)
         self.assertEqual(window.x_spin.maximum(), 1.0)
+        self.assertEqual(window.frame_preset_combo.accessibleName(), "Frame Preset")
+        self.assertEqual(window.output_profile_combo.accessibleName(), "Output Profile")
+        self.assertEqual(window.thumbnail_view.accessibleName(), "Source Images")
+        self.assertEqual(window.scale_slider.accessibleName(), "Photo Size")
+
+    def test_selecting_output_folder_enables_export_after_import(self) -> None:
+        self.state.replace_sources([SourceItem(Path("master.jpg"), 3000, 4000, True)])
+        window = MainWindow(controller=self.controller)
+        self.addCleanup(window.close)
+        self.assertFalse(window.export_all_button.isEnabled())
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.object(QFileDialog, "getExistingDirectory", return_value=directory):
+                window._choose_output_folder()
+            self.assertTrue(window.export_all_button.isEnabled())
+            self.assertTrue(window.export_selected_button.isEnabled())
 
     def test_preview_projects_exact_export_plan(self) -> None:
         widget = PreviewWidget()

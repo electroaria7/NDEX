@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from ndex_frame.core.models import (
     AspectRatio,
@@ -11,7 +13,8 @@ from ndex_frame.core.models import (
     OutputSizing,
     SourceItem,
 )
-from ndex_frame.ui.workspace import WorkspaceState
+from ndex_frame.services.export_job import CancelToken, ExportResult
+from ndex_frame.ui.workspace import WorkspaceController, WorkspaceState
 
 
 class WorkspaceStateTests(unittest.TestCase):
@@ -71,6 +74,45 @@ class WorkspaceStateTests(unittest.TestCase):
         self.assertEqual([item.path for item in self.workspace.sources], [self.second_path, self.first_path])
         self.assertEqual(self.workspace.selected_path, self.second_path)
         self.assertEqual(self.workspace.overrides, {})
+
+    def test_export_cleanup_waits_for_thread_finished_and_next_job_can_start(self) -> None:
+        controller = WorkspaceController(self.workspace)
+        token = CancelToken()
+        pending = ExportResult(0, 0, 0, False, ())
+        thread_marker = object()
+        worker_marker = object()
+        controller._export_thread = thread_marker
+        controller._export_worker = worker_marker
+        controller._cancel_token = token
+        busy: list[bool] = []
+        finished: list[ExportResult] = []
+        controller.busyChanged.connect(busy.append)
+        controller.exportFinished.connect(finished.append)
+
+        controller._record_export_result(pending)
+        self.assertIs(controller._export_thread, thread_marker)
+        self.assertIs(controller._export_worker, worker_marker)
+        self.assertIs(controller._cancel_token, token)
+        self.assertEqual(busy, [])
+        self.assertEqual(finished, [])
+        with self.assertRaisesRegex(RuntimeError, "already running"):
+            controller.start_export()
+
+        controller._export_thread_finished()
+        self.assertIsNone(controller._export_thread)
+        self.assertIsNone(controller._export_worker)
+        self.assertIsNone(controller._cancel_token)
+        self.assertEqual(busy, [False])
+        self.assertEqual(finished, [pending])
+
+        class PlannedAgain(Exception):
+            pass
+
+        with tempfile.TemporaryDirectory() as directory:
+            self.workspace.output_directory = Path(directory)
+            with patch("ndex_frame.ui.workspace.plan_export", side_effect=PlannedAgain):
+                with self.assertRaises(PlannedAgain):
+                    controller.start_export()
 
 
 if __name__ == "__main__":
