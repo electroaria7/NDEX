@@ -6,8 +6,9 @@ from dataclasses import replace
 from pathlib import Path
 
 from PySide6.QtCore import QSignalBlocker, Qt, Slot
-from PySide6.QtGui import QCloseEvent, QImage, QPixmap
+from PySide6.QtGui import QCloseEvent, QColor, QImage, QPixmap
 from PySide6.QtWidgets import (
+    QColorDialog,
     QComboBox,
     QDialog,
     QDoubleSpinBox,
@@ -18,6 +19,7 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QMainWindow,
+    QProgressBar,
     QPushButton,
     QSlider,
     QSpinBox,
@@ -28,8 +30,9 @@ from PySide6.QtWidgets import (
 )
 
 from ndex_common.branding import NDEX_FRAME_TITLE
+from ndex_frame.core.framing_choices import normalize_hex_color
 from ndex_frame.core.geometry import resolve_canvas
-from ndex_frame.core.models import FramePreset, OutputProfile, RenderPlan, SourceItem
+from ndex_frame.core.models import AspectRatio, FramePreset, OutputProfile, RenderPlan, SourceItem
 from ndex_frame.services.export_job import ExportRequest, ExportResult, plan_export
 from ndex_frame.services.presets import PresetStore
 from ndex_frame.ui.preset_dialog import (
@@ -38,6 +41,11 @@ from ndex_frame.ui.preset_dialog import (
     FramePresetDialog,
     ManagePresetsDialog,
     summarize_preflight,
+)
+from ndex_frame.ui.framing_widgets import (
+    make_background_preset_buttons,
+    make_photo_size_preset_buttons,
+    make_ratio_preset_buttons,
 )
 from ndex_frame.ui.preview_widget import PreviewWidget
 from ndex_frame.ui.profile_dialog import OutputProfileDialog
@@ -136,10 +144,28 @@ class MainWindow(QMainWindow):
         self.frame_panel.setMinimumWidth(225)
         frame_layout = QFormLayout(self.frame_panel)
         frame_layout.addRow(QLabel("Frame"))
+        ratio_row = QWidget()
+        ratio_layout = QHBoxLayout(ratio_row)
+        ratio_layout.setContentsMargins(0, 0, 0, 0)
+        self.ratio_width_spin = QSpinBox()
+        self.ratio_height_spin = QSpinBox()
+        for spin in (self.ratio_width_spin, self.ratio_height_spin):
+            spin.setRange(1, 99)
+        self.ratio_width_spin.setAccessibleName("Ratio width")
+        self.ratio_height_spin.setAccessibleName("Ratio height")
+        ratio_layout.addWidget(self.ratio_width_spin)
+        ratio_layout.addWidget(QLabel(":"))
+        ratio_layout.addWidget(self.ratio_height_spin)
+        ratio_layout.addStretch(1)
         self.ratio_label = QLabel()
+        frame_layout.addRow("Ratio", ratio_row)
+        ratio_presets, self.ratio_preset_buttons = make_ratio_preset_buttons(self._apply_ratio_preset)
+        frame_layout.addRow("", ratio_presets)
+        background_presets, self.background_preset_buttons, self.custom_background_button = (
+            make_background_preset_buttons(self._apply_background, self._pick_background)
+        )
         self.background_label = QLabel()
-        frame_layout.addRow("Ratio", self.ratio_label)
-        frame_layout.addRow("Background", self.background_label)
+        frame_layout.addRow("Background", background_presets)
         scale_row = QWidget()
         scale_layout = QHBoxLayout(scale_row)
         scale_layout.setContentsMargins(0, 0, 0, 0)
@@ -151,7 +177,11 @@ class MainWindow(QMainWindow):
         self.scale_spin.setSuffix("%")
         scale_layout.addWidget(self.scale_slider)
         scale_layout.addWidget(self.scale_spin)
+        size_presets, self.photo_size_preset_buttons = make_photo_size_preset_buttons(
+            self._apply_photo_size_preset
+        )
         frame_layout.addRow("Photo Size", scale_row)
+        frame_layout.addRow("", size_presets)
         self.x_spin = QDoubleSpinBox()
         self.y_spin = QDoubleSpinBox()
         for spin in (self.x_spin, self.y_spin):
@@ -180,6 +210,11 @@ class MainWindow(QMainWindow):
         self.output_folder_button = QPushButton("Output Folder")
         self.output_folder_label = QLabel("Not selected")
         self.result_summary_label = QLabel()
+        self.export_progress_bar = QProgressBar()
+        self.export_progress_bar.setAccessibleName("Export progress")
+        self.export_progress_bar.setTextVisible(True)
+        self.export_progress_bar.setMinimumWidth(180)
+        self.export_progress_bar.hide()
         self.export_selected_button = QPushButton("Export Selected")
         self.export_all_button = QPushButton("Export All")
         self.cancel_button = QPushButton("Cancel")
@@ -187,6 +222,7 @@ class MainWindow(QMainWindow):
         bottom.addWidget(self.output_folder_button)
         bottom.addWidget(self.output_folder_label, 1)
         bottom.addWidget(self.result_summary_label)
+        bottom.addWidget(self.export_progress_bar, 1)
         bottom.addWidget(self.export_selected_button)
         bottom.addWidget(self.export_all_button)
         bottom.addWidget(self.cancel_button)
@@ -207,6 +243,8 @@ class MainWindow(QMainWindow):
         self.scale_spin.valueChanged.connect(self._framing_controls_changed)
         self.x_spin.valueChanged.connect(self._framing_controls_changed)
         self.y_spin.valueChanged.connect(self._framing_controls_changed)
+        self.ratio_width_spin.valueChanged.connect(self._ratio_changed)
+        self.ratio_height_spin.valueChanged.connect(self._ratio_changed)
         self.preview_widget.framingDragged.connect(self._preview_dragged)
         self.reset_override_button.clicked.connect(self._reset_override)
         self.apply_all_button.clicked.connect(self._apply_all)
@@ -398,11 +436,16 @@ class MainWindow(QMainWindow):
         frame = state.working_frame
         self.ratio_label.setText(f"{frame.ratio.width}:{frame.ratio.height}")
         self.background_label.setText(frame.background)
+        blockers = [
+            QSignalBlocker(control)
+            for control in (self.scale_slider, self.scale_spin, self.x_spin, self.y_spin, self.ratio_width_spin, self.ratio_height_spin)
+        ]
+        self.ratio_width_spin.setValue(frame.ratio.width)
+        self.ratio_height_spin.setValue(frame.ratio.height)
         if state.selected_path is None:
             values = (frame.photo_scale, frame.x, frame.y)
         else:
             values = state.effective_framing(state.selected_path)
-        blockers = [QSignalBlocker(control) for control in (self.scale_slider, self.scale_spin, self.x_spin, self.y_spin)]
         self.scale_slider.setValue(round(values[0] * 100))
         self.scale_spin.setValue(round(values[0] * 100))
         self.x_spin.setValue(values[1])
@@ -425,6 +468,35 @@ class MainWindow(QMainWindow):
     def _apply_all(self) -> None:
         self.controller.apply_current_framing_to_all()
         self._refresh_sources()
+
+    def _ratio_changed(self) -> None:
+        self.controller.update_working_frame(
+            ratio=AspectRatio(self.ratio_width_spin.value(), self.ratio_height_spin.value())
+        )
+        self._sync_controls()
+
+    def _apply_ratio_preset(self, ratio: AspectRatio) -> None:
+        self.controller.update_working_frame(ratio=ratio)
+        self._sync_controls()
+
+    def _apply_background(self, color: str) -> None:
+        normalized = normalize_hex_color(color)
+        if normalized is None:
+            self._sync_controls()
+            return
+        self.controller.update_working_frame(background=normalized)
+        self._sync_controls()
+
+    def _pick_background(self) -> None:
+        if not self._interactive_dialogs:
+            return
+        current = QColor(self.controller.state.working_frame.background)
+        chosen = QColorDialog.getColor(current, self, "Frame background")
+        if chosen.isValid():
+            self._apply_background(chosen.name())
+
+    def _apply_photo_size_preset(self, percent: int) -> None:
+        self.scale_spin.setValue(percent)
 
     @Slot()
     def _framing_controls_changed(self) -> None:
@@ -483,6 +555,10 @@ class MainWindow(QMainWindow):
         plan_export(self._export_request(selected, collision_policy))
         self.last_export_result = None
         self._export_total = len(selected)
+        self.export_progress_bar.setRange(0, max(1, len(selected)))
+        self.export_progress_bar.setValue(0)
+        self.export_progress_bar.setFormat("%v / %m")
+        self.export_progress_bar.show()
         self.controller.start_export(selected, collision_policy)
 
     def _prompt_export(self, sources: list[SourceItem] | None) -> None:
@@ -517,19 +593,32 @@ class MainWindow(QMainWindow):
         self._busy = busy
         exporting = self.controller._export_thread is not None
         self.cancel_button.setVisible(exporting)
+        if exporting:
+            self.export_progress_bar.show()
+        else:
+            self.export_progress_bar.hide()
         if not exporting:
             self.cancel_button.setText("Cancel")
         self._sync_controls()
 
     @Slot(object)
     def _export_progress(self, progress: object) -> None:
-        self.statusBar().showMessage(f"{progress.source.name} · {progress.index} / {progress.total}")
+        total = max(1, int(getattr(progress, "total", 1) or 1))
+        index = max(0, min(total, int(getattr(progress, "index", 0) or 0)))
+        name = getattr(getattr(progress, "source", None), "name", "")
+        self.export_progress_bar.setRange(0, total)
+        self.export_progress_bar.setValue(index)
+        self.export_progress_bar.setFormat(f"{name} · %v / %m" if name else "%v / %m")
+        self.export_progress_bar.show()
+        self.statusBar().showMessage(f"{name} · {index} / {total}".strip(" ·"))
 
     @Slot(object)
     def _export_finished(self, result: object) -> None:
         self.last_export_result = result  # type: ignore[assignment]
         self.cancel_button.hide()
         self.cancel_button.setText("Cancel")
+        self.export_progress_bar.hide()
+        self.export_progress_bar.reset()
         for item in getattr(result, "items", ()):
             if item.state == "exported":
                 self._source_export_status[item.source] = "Exported"

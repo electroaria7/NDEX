@@ -244,6 +244,11 @@ class WorkspaceController(QObject):
             self.selectionChanged.emit(self.state.selected_path)
             self.request_preview(self.state.selected_path)
 
+    def update_working_frame(self, **changes: object) -> None:
+        self.state.working_frame = replace(self.state.working_frame, **changes)
+        if self.state.selected_path is not None:
+            self.request_preview(self.state.selected_path)
+
     def request_preview(self, path: Path, max_edge: int = 1600) -> None:
         source = self.state.source(path)
         job = _PreviewRunnable(source, self.preview_cache, max_edge)

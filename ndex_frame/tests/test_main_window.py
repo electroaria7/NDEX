@@ -15,6 +15,7 @@ from PySide6.QtWidgets import QApplication, QFileDialog
 from ndex_frame.core.geometry import build_render_plan, project_render_plan
 from ndex_frame.core.models import AspectRatio, FramePreset, MetadataPolicy, OutputProfile, OutputSizing, SourceItem
 from ndex_frame.main import build_parser
+from ndex_frame.services.export_job import ExportProgress, ExportResult
 from ndex_frame.ui.main_window import MainWindow
 from ndex_frame.ui.preview_widget import PreviewWidget
 from ndex_frame.ui.workspace import WorkspaceController, WorkspaceState
@@ -52,6 +53,87 @@ class MainWindowTests(unittest.TestCase):
         self.assertEqual(window.output_profile_combo.accessibleName(), "Output Profile")
         self.assertEqual(window.thumbnail_view.accessibleName(), "Source Images")
         self.assertEqual(window.scale_slider.accessibleName(), "Photo Size")
+        self.assertEqual(window.ratio_width_spin.value(), 3)
+        self.assertEqual(window.ratio_height_spin.value(), 4)
+        self.assertEqual(
+            [button.accessibleName() for button in window.background_preset_buttons],
+            ["White", "Bright Gray", "Medium Gray", "Black"],
+        )
+        self.assertEqual(window.custom_background_button.text(), "Custom…")
+        self.assertIsNone(getattr(window, "background_edit", None))
+        self.assertEqual(
+            [button.text() for button in window.ratio_preset_buttons],
+            ["3:4", "4:5", "1:1"],
+        )
+        self.assertEqual(
+            [button.text() for button in window.photo_size_preset_buttons],
+            ["80%", "90%", "95%"],
+        )
+        self.assertTrue(window.export_progress_bar.isHidden())
+        self.assertEqual(window.export_progress_bar.accessibleName(), "Export progress")
+
+    def test_export_progress_bar_tracks_files_and_hides_when_finished(self) -> None:
+        window = MainWindow(controller=self.controller)
+        self.addCleanup(window.close)
+        window._export_progress(ExportProgress(1, 3, Path("one.jpg"), "started"))
+        self.assertFalse(window.export_progress_bar.isHidden())
+        self.assertEqual(window.export_progress_bar.maximum(), 3)
+        self.assertEqual(window.export_progress_bar.value(), 1)
+        self.assertIn("one.jpg", window.export_progress_bar.format())
+        window._export_progress(ExportProgress(2, 3, Path("two.jpg"), "exported"))
+        self.assertEqual(window.export_progress_bar.value(), 2)
+        window.set_interactive_dialogs(False)
+        window._export_finished(ExportResult(2, 0, 0, False, ()))
+        self.assertTrue(window.export_progress_bar.isHidden())
+
+    def test_ratio_and_background_presets_update_working_frame(self) -> None:
+        window = MainWindow(controller=self.controller)
+        self.addCleanup(window.close)
+        window.ratio_preset_buttons[1].click()
+        self.assertEqual(
+            (self.state.working_frame.ratio.width, self.state.working_frame.ratio.height),
+            (4, 5),
+        )
+        window.ratio_width_spin.setValue(3)
+        window.ratio_height_spin.setValue(4)
+        self.assertEqual(
+            (self.state.working_frame.ratio.width, self.state.working_frame.ratio.height),
+            (3, 4),
+        )
+        window.background_preset_buttons[3].click()
+        self.assertEqual(self.state.working_frame.background, "#000000")
+        window._apply_background("#AABBCC")
+        self.assertEqual(self.state.working_frame.background, "#AABBCC")
+
+    def test_apply_all_copies_selected_size_ratio_and_color_to_every_photo(self) -> None:
+        first = SourceItem(Path("first.jpg"), 3000, 4000, True)
+        second = SourceItem(Path("second.jpg"), 5000, 7000, True)
+        self.state.replace_sources([first, second])
+        window = MainWindow(controller=self.controller)
+        self.addCleanup(window.close)
+        window.ratio_preset_buttons[2].click()
+        window.background_preset_buttons[1].click()
+        window.photo_size_preset_buttons[0].click()
+        self.assertTrue(self.state.is_modified(first.path))
+        self.assertFalse(self.state.is_modified(second.path))
+        window.apply_all_button.click()
+        self.assertEqual(self.state.working_frame.ratio.width, 1)
+        self.assertEqual(self.state.working_frame.ratio.height, 1)
+        self.assertEqual(self.state.working_frame.background, "#D0D0D0")
+        self.assertEqual(self.state.working_frame.photo_scale, 0.80)
+        self.assertEqual(self.state.overrides, {})
+        self.assertEqual(self.state.effective_framing(second.path), (0.80, 0.0, 0.0))
+
+    def test_photo_size_preset_sets_selected_scale(self) -> None:
+        source = SourceItem(Path("master.jpg"), 3000, 4000, True)
+        self.state.replace_sources([source])
+        window = MainWindow(controller=self.controller)
+        self.addCleanup(window.close)
+        window.photo_size_preset_buttons[0].click()
+        self.assertEqual(self.state.effective_framing(source.path)[0], 0.80)
+        self.assertEqual(window.scale_spin.value(), 80)
+        window.photo_size_preset_buttons[2].click()
+        self.assertEqual(self.state.effective_framing(source.path)[0], 0.95)
 
     def test_selecting_output_folder_enables_export_after_import(self) -> None:
         self.state.replace_sources([SourceItem(Path("master.jpg"), 3000, 4000, True)])
