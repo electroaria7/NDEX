@@ -1,4 +1,4 @@
-# NDEX release builder - builds all five apps and assembles a portable release folder.
+# NDEX release builder - builds all five apps and assembles a structured package.
 # Usage:
 #   powershell -ExecutionPolicy Bypass -File .\build_all.ps1
 #   powershell -ExecutionPolicy Bypass -File .\build_all.ps1 -SkipBuild   # assemble only
@@ -36,44 +36,59 @@ if (-not $SkipBuild) {
     powershell -ExecutionPolicy Bypass -File (Join-Path $repoRoot "ndex_launcher\build_package.ps1")
 }
 
-# Assemble portable release folder (all EXEs side by side so in-app handoff finds them)
+# Structured package: Launcher at root, workflow apps in Apps\, docs in Docs\
 $releaseDir = Join-Path $repoRoot "release\NDEX_v$version"
-New-Item -ItemType Directory -Force -Path $releaseDir | Out-Null
+$appsDir = Join-Path $releaseDir "Apps"
+$docsDir = Join-Path $releaseDir "Docs"
+New-Item -ItemType Directory -Force -Path $appsDir | Out-Null
+New-Item -ItemType Directory -Force -Path $docsDir | Out-Null
 
 $artifacts = @(
-    @{ Source = "dist\NDEX_One_OneFile.exe";                 Target = "NDEX_One_OneFile.exe" },
-    @{ Source = "dsb_image_manager\dist\NDEX_Image_Manager.exe"; Target = "NDEX_Image_Manager.exe" },
-    @{ Source = "ndex_auto_selector\dist\NDEX_Auto_Selector.exe"; Target = "NDEX_Auto_Selector.exe" },
-    @{ Source = "ndex_frame\dist\NDEX_Frame.exe"; Target = "NDEX_Frame.exe" },
-    @{ Source = "ndex_launcher\dist\NDEX_Launcher.exe";      Target = "NDEX_Launcher.exe" }
+    @{ Source = "dist\NDEX_One_OneFile.exe"; Target = "Apps\NDEX_One.exe" },
+    @{ Source = "dsb_image_manager\dist\NDEX_Image_Manager.exe"; Target = "Apps\NDEX_Image_Manager.exe" },
+    @{ Source = "ndex_auto_selector\dist\NDEX_Auto_Selector.exe"; Target = "Apps\NDEX_Auto_Selector.exe" },
+    @{ Source = "ndex_frame\dist\NDEX_Frame.exe"; Target = "Apps\NDEX_Frame.exe" },
+    @{ Source = "ndex_launcher\dist\NDEX_Launcher.exe"; Target = "NDEX_Launcher.exe" }
 )
 
 $missing = @()
 foreach ($artifact in $artifacts) {
     $sourcePath = Join-Path $repoRoot $artifact.Source
+    $destPath = Join-Path $releaseDir $artifact.Target
+    $destParent = Split-Path $destPath -Parent
+    if (-not (Test-Path $destParent)) {
+        New-Item -ItemType Directory -Force -Path $destParent | Out-Null
+    }
     if (Test-Path $sourcePath) {
-        Copy-Item $sourcePath (Join-Path $releaseDir $artifact.Target) -Force
+        Copy-Item $sourcePath $destPath -Force
         Write-Host "  + $($artifact.Target)"
     } else {
         $missing += $artifact.Source
     }
 }
 
-# Bundle docs and third-party license notes
-Copy-Item (Join-Path $repoRoot "release_README.md") (Join-Path $releaseDir "README.md") -Force
+Copy-Item (Join-Path $repoRoot "README.md") (Join-Path $docsDir "README.md") -Force
+$koreanReadme = Join-Path $repoRoot "README.ko.md"
+if (Test-Path $koreanReadme) {
+    Copy-Item $koreanReadme (Join-Path $docsDir "README.ko.md") -Force
+}
+$suiteNotes = Join-Path $repoRoot "PATCH_NOTES.md"
+if (Test-Path $suiteNotes) {
+    Copy-Item $suiteNotes (Join-Path $docsDir "PATCH_NOTES.md") -Force
+}
 $frameNotes = Join-Path $repoRoot "ndex_frame\PATCH_NOTES.md"
 if (Test-Path $frameNotes) {
-    Copy-Item $frameNotes (Join-Path $releaseDir "FRAME_PATCH_NOTES.md") -Force
+    Copy-Item $frameNotes (Join-Path $docsDir "FRAME_PATCH_NOTES.md") -Force
 }
 $notices = Join-Path $repoRoot "THIRD_PARTY_NOTICES.md"
 if (Test-Path $notices) {
-    Copy-Item $notices (Join-Path $releaseDir "THIRD_PARTY_NOTICES.md") -Force
+    Copy-Item $notices (Join-Path $docsDir "THIRD_PARTY_NOTICES.md") -Force
 }
 $exiftoolDir = Join-Path $repoRoot "vendor\exiftool"
 if (Test-Path $exiftoolDir) {
     $licenseFiles = Get-ChildItem $exiftoolDir -Filter "*.txt" -ErrorAction SilentlyContinue
     if ($licenseFiles) {
-        $thirdParty = Join-Path $releaseDir "third_party_licenses"
+        $thirdParty = Join-Path $docsDir "Licenses"
         New-Item -ItemType Directory -Force -Path $thirdParty | Out-Null
         $licenseFiles | Copy-Item -Destination $thirdParty -Force
     }

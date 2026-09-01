@@ -33,10 +33,11 @@ Source: "{#ReleaseFolder}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubd
 
 [Icons]
 Name: "{group}\NDEX Launcher"; Filename: "{app}\NDEX_Launcher.exe"; Comment: "Photo workflow hub"
-Name: "{group}\1. Backup - NDEX One"; Filename: "{app}\NDEX_One_OneFile.exe"
-Name: "{group}\2. Select & Rate - Image Manager"; Filename: "{app}\NDEX_Image_Manager.exe"
-Name: "{group}\3. Extract - Auto Selector"; Filename: "{app}\NDEX_Auto_Selector.exe"
-Name: "{group}\4. Frame & Export - NDEX Frame"; Filename: "{app}\NDEX_Frame.exe"
+Name: "{group}\1. Backup - NDEX One"; Filename: "{app}\Apps\NDEX_One.exe"
+Name: "{group}\2. Select & Rate - Image Manager"; Filename: "{app}\Apps\NDEX_Image_Manager.exe"
+Name: "{group}\3. Extract - Auto Selector"; Filename: "{app}\Apps\NDEX_Auto_Selector.exe"
+Name: "{group}\4. Frame & Export - NDEX Frame"; Filename: "{app}\Apps\NDEX_Frame.exe"
+Name: "{group}\Docs"; Filename: "{app}\Docs"
 Name: "{autodesktop}\NDEX"; Filename: "{app}\NDEX_Launcher.exe"; Tasks: desktopicon
 
 [Run]

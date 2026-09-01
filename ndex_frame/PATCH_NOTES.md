@@ -37,6 +37,7 @@
 - Desktop icon launches **NDEX Launcher**.
 - Build with `build_all.ps1 -Installer` (requires Inno Setup `ISCC`) to produce `release\NDEX_Setup_1.0.0.exe`.
 - Ignore and delete generated PyInstaller work dirs (`*/build`, `.ndex_data`, `dist`, `release`). Source stays in `/build` (`build.ps1`, `installer.iss`, NDEX One specs). `cleanup.ps1 -IncludeDist` wipes those artifacts.
+- Packaged layout: `NDEX_Launcher.exe` at the root, workflow EXEs in `Apps\`, manuals in `Docs\`. English `README.md` and Korean `README.ko.md` cover the same Quick start and product sections.
 
 
 ## 2026-08-30

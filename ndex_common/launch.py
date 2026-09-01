@@ -1,7 +1,7 @@
 """Launch sibling NDEX apps (Adobe-style handoff between programs).
 
 Resolution order:
-1. Packaged EXE next to the current executable (frozen distribution).
+1. Packaged layout: next to the current EXE, then ``Apps\\`` beside it.
 2. Known dist folders in the repo tree.
 3. Dev fallback: run the app module with the current Python interpreter.
 """
@@ -13,11 +13,15 @@ import sys
 from pathlib import Path
 
 APP_COMMANDS = {
-    "ndex_one": ("NDEX_One_OneFile.exe", "main"),
+    "ndex_one": ("NDEX_One.exe", "main"),
     "image_manager": ("NDEX_Image_Manager.exe", "dsb_image_manager.main"),
     "auto_selector": ("NDEX_Auto_Selector.exe", "ndex_auto_selector.main"),
     "frame": ("NDEX_Frame.exe", "ndex_frame.main"),
     "launcher": ("NDEX_Launcher.exe", "ndex_launcher.main"),
+}
+
+_EXE_ALIASES = {
+    "NDEX_One.exe": ("NDEX_One_OneFile.exe",),
 }
 
 _DIST_SUBDIRS = (
@@ -49,18 +53,26 @@ def launch_app(app_key: str, extra_args: list[str] | tuple[str, ...] = ()) -> bo
     return False
 
 
+def _candidate_names(exe_name: str) -> tuple[str, ...]:
+    return (exe_name, *_EXE_ALIASES.get(exe_name, ()))
+
+
 def _find_executable(exe_name: str) -> Path | None:
+    names = _candidate_names(exe_name)
     candidates: list[Path] = []
 
     if getattr(sys, "frozen", False):
         exe_dir = Path(sys.executable).resolve().parent
-        candidates.append(exe_dir / exe_name)
-        candidates.append(exe_dir.parent / exe_name)
+        for root in (exe_dir, exe_dir.parent):
+            for name in names:
+                candidates.append(root / name)
+                candidates.append(root / "Apps" / name)
 
     repo_root = _repo_root()
     if repo_root is not None:
         for subdir in _DIST_SUBDIRS:
-            candidates.append(repo_root / subdir / exe_name)
+            for name in names:
+                candidates.append(repo_root / subdir / name)
 
     for candidate in candidates:
         if candidate.is_file():
