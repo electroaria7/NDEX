@@ -72,6 +72,12 @@ $koreanReadme = Join-Path $repoRoot "README.ko.md"
 if (Test-Path $koreanReadme) {
     Copy-Item $koreanReadme (Join-Path $docsDir "README.ko.md") -Force
 }
+foreach ($legal in @("LICENSE", "TERMS.md", "TERMS.ko.md")) {
+    $legalPath = Join-Path $repoRoot $legal
+    if (Test-Path $legalPath) {
+        Copy-Item $legalPath (Join-Path $docsDir $legal) -Force
+    }
+}
 $suiteNotes = Join-Path $repoRoot "PATCH_NOTES.md"
 if (Test-Path $suiteNotes) {
     Copy-Item $suiteNotes (Join-Path $docsDir "PATCH_NOTES.md") -Force

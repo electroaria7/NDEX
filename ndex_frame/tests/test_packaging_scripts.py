@@ -119,6 +119,28 @@ class PackagingScriptTests(unittest.TestCase):
         self.assertIn("ISCC", script)
         self.assertIn("ndex_frame\\PATCH_NOTES.md", script)
         self.assertIn("README.ko.md", script)
+        self.assertIn("LICENSE", script)
+        self.assertIn("TERMS.md", script)
+
+    def test_installer_shows_user_agreement_in_english_and_korean(self) -> None:
+        script = (REPO_ROOT / "build" / "installer.iss").read_text(encoding="utf-8")
+        self.assertIn("TERMS.md", script)
+        self.assertIn("TERMS.ko.md", script)
+        self.assertIn("LicenseFile", script)
+
+    def test_license_and_terms_are_free_open_source(self) -> None:
+        license_text = (REPO_ROOT / "LICENSE").read_text(encoding="utf-8")
+        terms = (REPO_ROOT / "TERMS.md").read_text(encoding="utf-8")
+        terms_ko = (REPO_ROOT / "TERMS.ko.md").read_text(encoding="utf-8")
+        self.assertIn("MIT License", license_text)
+        self.assertIn("Permission is hereby granted, free of charge", license_text)
+        self.assertIn("free of charge", terms.lower())
+        self.assertIn("MIT License", terms)
+        self.assertIn("AS IS", terms)
+        self.assertIn("your photographs", terms.lower())
+        self.assertIn("무료", terms_ko)
+        self.assertIn("MIT", terms_ko)
+        self.assertIn("있는 그대로", terms_ko)
 
     def test_english_and_korean_readmes_both_have_quick_start(self) -> None:
         english = (REPO_ROOT / "README.md").read_text(encoding="utf-8")

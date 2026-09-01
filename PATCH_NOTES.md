@@ -34,3 +34,4 @@ See `ndex_frame/PATCH_NOTES.md` (copied to `Docs\FRAME_PATCH_NOTES.md`): ratio/c
 
 - Suite installer `NDEX_Setup_1.0.0.exe` installs the structured folder into `C:\Program Files\NDEX`.
 - Desktop icon and post-install run launch **NDEX Launcher**.
+- MIT `LICENSE` plus English/Korean user agreement (`TERMS.md`, `TERMS.ko.md`). The installer shows the agreement before install. Copies go in `Docs\`. NDEX stays free of charge.

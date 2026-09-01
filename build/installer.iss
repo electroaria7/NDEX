@@ -22,8 +22,8 @@ WizardStyle=modern
 PrivilegesRequired=admin
 
 [Languages]
-Name: "english"; MessagesFile: "compiler:Default.isl"
-Name: "korean"; MessagesFile: "compiler:Languages\Korean.isl"
+Name: "english"; MessagesFile: "compiler:Default.isl"; LicenseFile: "..\TERMS.md"
+Name: "korean"; MessagesFile: "compiler:Languages\Korean.isl"; LicenseFile: "..\TERMS.ko.md"
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop icon"; GroupDescription: "Additional icons:"

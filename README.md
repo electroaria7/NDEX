@@ -92,6 +92,9 @@ NDEX_v1.0.0\                  also installed as C:\Program Files\NDEX\
     README.ko.md              same content in Korean
     PATCH_NOTES.md
     FRAME_PATCH_NOTES.md
+    LICENSE
+    TERMS.md
+    TERMS.ko.md
     THIRD_PARTY_NOTICES.md
     Licenses\
 ```
@@ -141,7 +144,8 @@ build/, *_package.ps1 PyInstaller / Inno Setup
 vendor/exiftool/      ExifTool (CR3 metadata and previews)
 ```
 
-## License notices
+## License and user agreement
 
-ExifTool in `vendor/exiftool` uses Phil Harvey’s Artistic/GPL license.
-Qt/PySide6, shiboken6, and Pillow notices are in `THIRD_PARTY_NOTICES.md`.
+NDEX is free open-source software under the [MIT License](LICENSE). Installing or running it means you accept the [User Agreement](TERMS.md) ([한국어](TERMS.ko.md)).
+
+Your photographs stay on your computer. There is no warranty. Third-party components (Qt/PySide6, Pillow, ExifTool) keep their own licenses; see `THIRD_PARTY_NOTICES.md`.

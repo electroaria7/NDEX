@@ -92,6 +92,9 @@ NDEX_v1.0.0\                  설치 위치: C:\Program Files\NDEX\
     README.ko.md              이 파일 (한국어, 같은 내용)
     PATCH_NOTES.md
     FRAME_PATCH_NOTES.md
+    LICENSE
+    TERMS.md
+    TERMS.ko.md
     THIRD_PARTY_NOTICES.md
     Licenses\
 ```
@@ -141,7 +144,8 @@ build/, *_package.ps1 PyInstaller / Inno Setup
 vendor/exiftool/      ExifTool (CR3 메타데이터·프리뷰)
 ```
 
-## 라이선스 고지
+## 라이선스와 사용자 약관
 
-`vendor/exiftool`의 ExifTool은 Phil Harvey의 Artistic/GPL 라이선스입니다.
-Qt/PySide6, shiboken6, Pillow 고지는 `THIRD_PARTY_NOTICES.md`를 보세요.
+NDEX는 [MIT License](LICENSE)의 무료 오픈소스입니다. 설치하거나 실행하면 [사용자 약관](TERMS.ko.md) ([English](TERMS.md))에 동의한 것으로 봅니다.
+
+사진은 사용자 컴퓨터에 남습니다. 보증은 없습니다. Qt/PySide6, Pillow, ExifTool은 각자 라이선스를 따르며 `THIRD_PARTY_NOTICES.md`를 보세요.
