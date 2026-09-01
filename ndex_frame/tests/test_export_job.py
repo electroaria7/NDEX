@@ -164,6 +164,36 @@ class ExportJobTests(unittest.TestCase):
         self.assertEqual((result.exported, result.skipped, result.failed), (0, 1, 0))
         self.assertEqual((self.output / "IMG_001.jpg").read_bytes(), b"existing")
 
+    def test_exported_progress_error_does_not_double_count_or_stop_batch(self) -> None:
+        second = self.input / "IMG_002.png"
+        Image.new("RGB", (40, 20), "green").save(second)
+        snapshot = plan_export(
+            self.request(sources=(self.source(), self.source(second)), collision_policy="rename")
+        )
+
+        def broken_after_export(event: object) -> None:
+            if getattr(event, "state") == "exported":
+                raise RuntimeError("observer failed")
+
+        result = run_export(snapshot, broken_after_export, CancelToken())
+
+        self.assertEqual((result.exported, result.failed, result.skipped), (2, 0, 0))
+        self.assertEqual([item.state for item in result.items], ["exported", "exported"])
+        self.assertTrue((self.output / "IMG_001.jpg").is_file())
+        self.assertTrue((self.output / "IMG_002.jpg").is_file())
+
+    def test_progress_observer_errors_are_ignored_for_every_state(self) -> None:
+        existing = self.output / "IMG_001.jpg"
+        existing.write_bytes(b"keep")
+
+        def always_broken(event: object) -> None:
+            raise RuntimeError("observer failed")
+
+        result = run_export(plan_export(self.request()), always_broken, CancelToken())
+
+        self.assertEqual((result.exported, result.failed, result.skipped), (0, 0, 1))
+        self.assertEqual(existing.read_bytes(), b"keep")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -89,6 +89,16 @@ class CancelToken:
         return self._event.is_set()
 
 
+def _notify_progress(progress: Callable[[ExportProgress], None], event: ExportProgress) -> None:
+    """Notify a best-effort observer without letting it change export results."""
+    try:
+        progress(event)
+    except Exception:
+        # Progress is observational: an ordinary UI/adapter callback failure
+        # must not reclassify completed work or stop subsequent items.
+        pass
+
+
 def _path_key(path: Path) -> str:
     return os.path.normcase(str(path.resolve()))
 
@@ -174,19 +184,21 @@ def run_export(
     for index, item in enumerate(snapshot.items, start=1):
         if cancel.is_cancelled():
             cancelled = True
-            progress(ExportProgress(index, total, item.source.path, "cancelled", "Export cancelled."))
+            _notify_progress(
+                progress, ExportProgress(index, total, item.source.path, "cancelled", "Export cancelled.")
+            )
             break
 
         if item.action == "skip":
             results.append(ExportItemResult(item.source.path, item.destination, "skipped", item.message))
-            progress(ExportProgress(index, total, item.source.path, "skipped", item.message))
+            _notify_progress(progress, ExportProgress(index, total, item.source.path, "skipped", item.message))
             continue
         if item.action == "error":
             results.append(ExportItemResult(item.source.path, item.destination, "failed", item.message))
-            progress(ExportProgress(index, total, item.source.path, "failed", item.message))
+            _notify_progress(progress, ExportProgress(index, total, item.source.path, "failed", item.message))
             continue
 
-        progress(ExportProgress(index, total, item.source.path, "started"))
+        _notify_progress(progress, ExportProgress(index, total, item.source.path, "started"))
         prepared = None
         rendered = None
         try:
@@ -194,11 +206,11 @@ def run_export(
             rendered = render(prepared, item.render_plan, snapshot.frame.background)
             save_output_atomic(rendered, item.destination, snapshot.output, prepared)
             results.append(ExportItemResult(item.source.path, item.destination, "exported"))
-            progress(ExportProgress(index, total, item.source.path, "exported"))
+            _notify_progress(progress, ExportProgress(index, total, item.source.path, "exported"))
         except Exception as error:
             message = str(error) or error.__class__.__name__
             results.append(ExportItemResult(item.source.path, item.destination, "failed", message))
-            progress(ExportProgress(index, total, item.source.path, "failed", message))
+            _notify_progress(progress, ExportProgress(index, total, item.source.path, "failed", message))
         finally:
             if rendered is not None:
                 rendered.close()
