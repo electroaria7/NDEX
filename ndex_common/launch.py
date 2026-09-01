@@ -1,7 +1,8 @@
 """Launch sibling NDEX apps (Adobe-style handoff between programs).
 
 Resolution order:
-1. Packaged layout: next to the current EXE, then ``Apps\\`` beside it.
+1. Packaged layout: the current EXE's folder, then ``Apps\\`` beside it.
+   Frozen apps do not search parent directories.
 2. Known dist folders in the repo tree.
 3. Dev fallback: run the app module with the current Python interpreter.
 """
@@ -42,6 +43,9 @@ def launch_app(app_key: str, extra_args: list[str] | tuple[str, ...] = ()) -> bo
         subprocess.Popen([str(executable), *extra_args], close_fds=True)
         return True
 
+    if getattr(sys, "frozen", False):
+        return False
+
     repo_root = _repo_root()
     if repo_root is not None:
         subprocess.Popen(
@@ -62,17 +66,18 @@ def _find_executable(exe_name: str) -> Path | None:
     candidates: list[Path] = []
 
     if getattr(sys, "frozen", False):
+        # Packaged layout only: this EXE's folder, then Apps\ beside it.
+        # Do not walk parent directories or the PyInstaller extract tree.
         exe_dir = Path(sys.executable).resolve().parent
-        for root in (exe_dir, exe_dir.parent):
-            for name in names:
-                candidates.append(root / name)
-                candidates.append(root / "Apps" / name)
-
-    repo_root = _repo_root()
-    if repo_root is not None:
-        for subdir in _DIST_SUBDIRS:
-            for name in names:
-                candidates.append(repo_root / subdir / name)
+        for name in names:
+            candidates.append(exe_dir / name)
+            candidates.append(exe_dir / "Apps" / name)
+    else:
+        repo_root = _repo_root()
+        if repo_root is not None:
+            for subdir in _DIST_SUBDIRS:
+                for name in names:
+                    candidates.append(repo_root / subdir / name)
 
     for candidate in candidates:
         if candidate.is_file():

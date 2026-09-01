@@ -14,6 +14,8 @@ from src.logger import AppLogger
 from src.metadata import MetadataExtractor
 from src.scanner import analyze_source
 
+from ndex_common.crashlog import install_crash_logging
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=f"{NDEX_ONE_TITLE} - Data Sort Backup")
@@ -129,6 +131,7 @@ def _format_type_counts(counts: dict[str, int]) -> str:
 
 
 def main() -> int:
+    install_crash_logging("NDEX One")
     parser = build_parser()
     args = parser.parse_args()
 

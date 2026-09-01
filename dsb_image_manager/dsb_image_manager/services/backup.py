@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import os
 import shutil
 from pathlib import Path
 
 from ..core.file_types import backup_type_folder
 from ..core.models import BackupSummary, DuplicatePolicy, ImageRecord
+
+TEMP_SUFFIX = ".ndex_tmp"
 
 
 class BackupService:
@@ -28,7 +31,7 @@ class BackupService:
                     continue
                 if action == "overwrite":
                     summary.overwritten += 1
-                shutil.copy2(record.file_path, final_path)
+                self._copy_atomic(record.file_path, final_path)
                 summary.copied += 1
             except Exception as exc:  # pragma: no cover - filesystem errors vary
                 summary.errors += 1
@@ -45,6 +48,25 @@ class BackupService:
             / f"{capture.month:02d}{capture.day:02d}"
             / backup_type_folder(record.file_path)
         )
+
+    @staticmethod
+    def _copy_atomic(source_path: Path, final_path: Path) -> None:
+        """Copy via temp file + size check + replace so overwrite cannot truncate the original."""
+        temp_path = final_path.parent / f".{final_path.name}{TEMP_SUFFIX}"
+        try:
+            shutil.copy2(source_path, temp_path)
+            if source_path.stat().st_size != temp_path.stat().st_size:
+                raise OSError(
+                    f"size mismatch after copy: {source_path.name} "
+                    f"({source_path.stat().st_size} -> {temp_path.stat().st_size})"
+                )
+            os.replace(temp_path, final_path)
+        finally:
+            if temp_path.exists():
+                try:
+                    temp_path.unlink()
+                except OSError:
+                    pass
 
     @staticmethod
     def _resolve_duplicate(destination_path: Path, duplicate_policy: DuplicatePolicy) -> tuple[Path, str]:

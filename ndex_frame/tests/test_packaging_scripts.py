@@ -75,6 +75,10 @@ class PackagingScriptTests(unittest.TestCase):
         self.assertIn('Join-Path $releaseDir "Docs"', script)
         self.assertIn("README.ko.md", script)
         self.assertIn("PATCH_NOTES.md", script)
+        self.assertIn("SHA256SUMS.txt", script)
+        self.assertIn("Get-FileHash", script)
+        self.assertIn("describe --tags --exact-match", script)
+        self.assertIn("GITHUB_REF_TYPE", script)
         frame_index = script.index(r"ndex_frame\build_package.ps1")
         launcher_index = script.index(r"ndex_launcher\build_package.ps1")
         self.assertLess(frame_index, launcher_index)
@@ -109,6 +113,7 @@ class PackagingScriptTests(unittest.TestCase):
         self.assertIn("3. Extract - Auto Selector", script)
         self.assertIn("4. Frame & Export - NDEX Frame", script)
         self.assertIn(f"NDEX_Setup_{version}", script)
+        self.assertIn("AppVerName={#MyAppName} {#MyAppVersion} Beta", script)
         self.assertNotIn(r"dist\NDEX_One\*", script)
         self.assertNotIn('#define MyAppName "NDEX One"', script)
 
@@ -167,6 +172,21 @@ class PackagingScriptTests(unittest.TestCase):
                 self.assertNotIn("<12.0.0", text)
                 self.assertRegex(text, r"Pillow>=12\.3\.0")
 
+    def test_requirements_lock_pins_runtime_dependencies(self) -> None:
+        lock = (REPO_ROOT / "requirements.lock").read_text(encoding="utf-8")
+        self.assertIn("Pillow==12.3.0", lock)
+        self.assertIn("PySide6==6.11.2", lock)
+        self.assertIn("shiboken6==6.11.2", lock)
+
+    def test_github_actions_runs_windows_unit_tests(self) -> None:
+        workflow = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        self.assertIn("windows-latest", workflow)
+        self.assertIn("3.10", workflow)
+        self.assertIn("3.12", workflow)
+        self.assertIn("requirements.lock", workflow)
+        self.assertIn("unittest discover -s tests", workflow)
+        self.assertIn("unittest discover -s ndex_frame/tests", workflow)
+
     def test_readmes_send_users_to_github_releases(self) -> None:
         english = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
         korean = (REPO_ROOT / "README.ko.md").read_text(encoding="utf-8")
@@ -175,6 +195,8 @@ class PackagingScriptTests(unittest.TestCase):
         version = _ndex_version()
         self.assertIn(f"NDEX_v{version}.zip", english)
         self.assertIn(f"NDEX_v{version}.zip", korean)
+        self.assertIn("Public beta", english)
+        self.assertIn("공개 베타", korean)
         self.assertNotIn("distribution branch", english.lower())
         self.assertNotIn("distribution 브랜치", korean)
 

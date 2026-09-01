@@ -52,6 +52,29 @@ class ImageManagerServiceTests(unittest.TestCase):
             self.assertEqual(len(copied), 1)
             self.assertIn("JPG", copied[0].parts)
 
+    def test_backup_overwrite_replaces_atomically_without_leaving_temp(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "source"
+            source.mkdir()
+            destination = root / "backup"
+            self._make_jpg(source / "IMG_0009.JPG")
+
+            result = ImageScanner().scan(source)
+            first = BackupService().backup(result.records, destination)
+            self.assertEqual(first.copied, 1)
+            target = next(destination.rglob("IMG_0009.JPG"))
+            original = target.read_bytes()
+
+            Image.new("RGB", (64, 48), color=(10, 20, 30)).save(source / "IMG_0009.JPG", format="JPEG")
+            result = ImageScanner().scan(source)
+            second = BackupService().backup(result.records, destination, duplicate_policy="overwrite")
+
+            self.assertEqual(second.copied, 1)
+            self.assertEqual(second.overwritten, 1)
+            self.assertNotEqual(target.read_bytes(), original)
+            self.assertFalse(list(destination.rglob("*.ndex_tmp")))
+
     def test_export_copies_selected_images_with_renamed_pattern(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

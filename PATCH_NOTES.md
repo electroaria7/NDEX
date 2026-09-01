@@ -2,17 +2,25 @@
 
 ## 2026-09-01
 
-### Release 1.0.1 — UI consistency
+### Versioning — public beta `0.9.1`
+
+NDEX is a public beta, not a 1.0 product. `NDEX_VERSION` is `0.9.1` (`NDEX_CHANNEL = "beta"`). Next packages: `NDEX_v0.9.1.zip` / `NDEX_Setup_0.9.1.exe`.
+
+GitHub tags `v1.0.0` and `v1.0.1` stay as historical downloads of this same line under a premature stable number.
+
+If `NDEX_Setup_1.0.1.exe` is already installed, uninstall it before installing `0.9.1`. Inno Setup will treat `0.9.1` as older than `1.0.1`.
+
+### UI consistency (published on GitHub as 1.0.1)
 
 - Shared visual theme across Launcher, NDEX One, Image Manager, Auto Selector, and Frame.
 - Consistent headers, cards, accent actions, and spacing in the Tk apps.
 - NDEX Frame matches the suite chrome (Fusion stylesheet, side panels, primary Export All).
 - Frame background color swatches no longer clip; Custom… stays fully visible.
-- Package artifacts: `NDEX_v1.0.1.zip` / `NDEX_Setup_1.0.1.exe`.
+- Those GitHub artifacts were `NDEX_v1.0.1.zip` / `NDEX_Setup_1.0.1.exe`.
 
-### Release 1.0.0 and source-only main
+### First public zip (published on GitHub as 1.0.0) and source-only main
 
-- Windows users download `NDEX_v1.0.0.zip` from GitHub Releases and run `NDEX_Launcher.exe`.
+- Windows users downloaded `NDEX_v1.0.0.zip` from GitHub Releases and ran `NDEX_Launcher.exe`.
 - The `main` branch is source only. The extra `distribution` branch was removed.
 - `main` is protected: pull requests required, force-push and deletion blocked.
 - Rebuilt 1.0.0 with Pillow `>=12.3.0` so the packaged apps pick up current image-decoder fixes.
@@ -26,7 +34,7 @@
 - Both files open with a **Quick start** for installer, portable folder, and source.
 - Packaged copies live in `Docs\` next to the apps.
 
-### Structured 1.0 package
+### Packaged layout
 
 Installer and portable folder now share this layout:
 
@@ -50,6 +58,6 @@ See `ndex_frame/PATCH_NOTES.md` (copied to `Docs\FRAME_PATCH_NOTES.md`): ratio/c
 
 ### Installer
 
-- Suite installer `NDEX_Setup_1.0.0.exe` installs the structured folder into `C:\Program Files\NDEX`.
+- GitHub first shipped the suite installer as `NDEX_Setup_1.0.0.exe`. Current builds produce `NDEX_Setup_0.9.1.exe` into `C:\Program Files\NDEX`.
 - Desktop icon and post-install run launch **NDEX Launcher**.
 - MIT `LICENSE` plus English/Korean user agreement (`TERMS.md`, `TERMS.ko.md`). The installer shows the agreement before install. Copies go in `Docs\`. NDEX stays free of charge.

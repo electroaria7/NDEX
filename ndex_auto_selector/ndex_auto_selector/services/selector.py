@@ -36,12 +36,12 @@ class AutoSelectorService:
         jpg_files = self._list_jpg_files(selected_jpg_dir, recursive=recursive)
         matches = []
         for jpg_path in jpg_files:
-            raw_path = self._find_matching_raw(raw_by_stem, jpg_path.stem)
+            raw_path, status = self._find_matching_raw(raw_by_stem, jpg_path.stem)
             matches.append(
                 SelectionMatch(
                     jpg_path=jpg_path,
                     raw_path=raw_path,
-                    status="matched" if raw_path else "missing",
+                    status=status,
                 )
             )
         return AnalysisSummary(
@@ -67,6 +67,12 @@ class AutoSelectorService:
 
         for index, match in enumerate(matches, start=1):
             try:
+                if match.status == "ambiguous":
+                    result.ambiguous += 1
+                    result.messages.append(
+                        f"ambiguous RAW match for {match.jpg_path.name}; skipped copy"
+                    )
+                    continue
                 if match.raw_path is None:
                     result.missing += 1
                     result.messages.append(f"missing CR3 for {match.jpg_path.name}")
@@ -105,25 +111,34 @@ class AutoSelectorService:
         return result
 
     @staticmethod
-    def _index_cr3_files(root: Path, recursive: bool) -> dict[str, Path]:
+    def _index_cr3_files(root: Path, recursive: bool) -> dict[str, list[Path]]:
         files = root.rglob("*") if recursive else root.glob("*")
         raw_files = sorted(
             (path for path in files if path.is_file() and path.suffix.casefold() in RAW_EXTENSIONS),
             key=lambda path: (path.stem.casefold(), len(path.parts), str(path).casefold()),
         )
-        index: dict[str, Path] = {}
+        index: dict[str, list[Path]] = {}
         for path in raw_files:
             for key in AutoSelectorService._match_keys(path.stem):
-                index.setdefault(key, path)
+                bucket = index.setdefault(key, [])
+                if path not in bucket:
+                    bucket.append(path)
         return index
 
     @staticmethod
-    def _find_matching_raw(raw_by_stem: dict[str, Path], jpg_stem: str) -> Path | None:
+    def _find_matching_raw(
+        raw_by_stem: dict[str, list[Path]], jpg_stem: str
+    ) -> tuple[Path | None, str]:
+        candidates: list[Path] = []
         for key in AutoSelectorService._match_keys(jpg_stem):
-            raw_path = raw_by_stem.get(key)
-            if raw_path:
-                return raw_path
-        return None
+            for path in raw_by_stem.get(key, ()):
+                if path not in candidates:
+                    candidates.append(path)
+        if len(candidates) == 1:
+            return candidates[0], "matched"
+        if len(candidates) > 1:
+            return None, "ambiguous"
+        return None, "missing"
 
     @staticmethod
     def _match_keys(stem: str) -> list[str]:

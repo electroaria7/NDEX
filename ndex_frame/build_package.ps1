@@ -14,9 +14,9 @@ $versionFile = Join-Path $workPath "NDEX_Frame_version.txt"
 
 $env:PYTHONPATH = "$buildTools;$env:PYTHONPATH"
 
-$versionLine = Get-Content (Join-Path $repoRoot "ndex_common\version.py") | Where-Object { $_ -match "NDEX_VERSION" }
+$versionLine = Get-Content (Join-Path $repoRoot "ndex_common\version.py") | Where-Object { $_ -match "^\s*NDEX_VERSION\s*=" }
 $version = ($versionLine -split '"')[1]
-if (-not $version) { $version = "0.0.0" }
+if (-not $version) { throw "Could not read NDEX_VERSION from ndex_common\version.py" }
 $parts = @($version.Split("."))
 while ($parts.Count -lt 4) { $parts += "0" }
 $v1 = [int]$parts[0]

@@ -31,11 +31,11 @@
 ### Suite installer and launcher workflow
 
 - NDEX Launcher already exposes the four-step workflow: Backup (NDEX One) → Select (Image Manager) → Extract (Auto Selector) → Frame (NDEX Frame).
-- Replaced the NDEX One-only Inno Setup script with a **NDEX 1.0.0 suite installer**.
+- Replaced the NDEX One-only Inno Setup script with a suite installer (GitHub first shipped this as `NDEX_Setup_1.0.0.exe`; current version is public beta `0.9.1`).
 - Installs the assembled portable folder into `{autopf}\NDEX` so all five EXEs stay side by side (required for in-app handoff).
 - Start Menu group **NDEX** lists Launcher plus numbered workflow shortcuts 1–4, including **4. Frame & Export - NDEX Frame**.
 - Desktop icon launches **NDEX Launcher**.
-- Build with `build_all.ps1 -Installer` (requires Inno Setup `ISCC`) to produce `release\NDEX_Setup_1.0.0.exe`.
+- Build with `build_all.ps1 -Installer` (requires Inno Setup `ISCC`) to produce `release\NDEX_Setup_0.9.1.exe`.
 - Ignore and delete generated PyInstaller work dirs (`*/build`, `.ndex_data`, `dist`, `release`). Source stays in `/build` (`build.ps1`, `installer.iss`, NDEX One specs). `cleanup.ps1 -IncludeDist` wipes those artifacts.
 - Packaged layout: `NDEX_Launcher.exe` at the root, workflow EXEs in `Apps\`, manuals in `Docs\`. English `README.md` and Korean `README.ko.md` cover the same Quick start and product sections.
 

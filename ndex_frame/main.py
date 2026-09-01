@@ -13,6 +13,7 @@ from PySide6.QtWidgets import QApplication
 
 from ndex_common import settings
 from ndex_common.branding import NDEX_FRAME_TITLE
+from ndex_common.crashlog import install_crash_logging
 from ndex_common.theme import apply_qt_theme
 from ndex_frame.services.cache import PreviewCache
 from ndex_frame.services.export_job import CancelToken, ExportRequest, ExportResult, plan_export, run_export
@@ -156,6 +157,7 @@ def _run_gui(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    install_crash_logging("NDEX Frame")
     args = build_parser().parse_args(argv)
     if args.smoke_export is not None:
         return _run_smoke_export(*args.smoke_export)

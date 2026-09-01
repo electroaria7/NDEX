@@ -4,6 +4,7 @@ import tkinter as tk
 from tkinter import messagebox, ttk
 
 from ndex_common.branding import NDEX_LAUNCHER_TITLE
+from ndex_common.crashlog import install_crash_logging
 from ndex_common.launch import launch_app
 from ndex_common.settings import settings_path
 from ndex_common.theme import (
@@ -172,6 +173,7 @@ def run_app() -> None:
 
 
 def main() -> int:
+    install_crash_logging("NDEX Launcher")
     run_app()
     return 0
 
