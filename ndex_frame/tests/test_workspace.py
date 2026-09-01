@@ -76,7 +76,9 @@ class WorkspaceStateTests(unittest.TestCase):
         self.assertEqual(self.workspace.overrides, {})
 
     def test_export_cleanup_waits_for_thread_finished_and_next_job_can_start(self) -> None:
-        controller = WorkspaceController(self.workspace)
+        controller = WorkspaceController(
+            self.workspace, settings_writer=lambda _section, _values: None
+        )
         token = CancelToken()
         pending = ExportResult(0, 0, 0, False, ())
         thread_marker = object()

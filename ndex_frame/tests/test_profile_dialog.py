@@ -58,13 +58,26 @@ class ProfileDialogTests(unittest.TestCase):
         self.assertEqual(dialog.format_combo.currentData(), "jpeg")
         self.assertEqual(dialog.quality_spin.value(), 95)
         self.assertEqual(dialog.chroma_combo.currentData(), "4:4:4")
+        self.assertFalse(dialog.chroma_combo.isEnabled())
         self.assertEqual(dialog.color_space_combo.currentData(), "sRGB")
         self.assertTrue(dialog.embed_icc_checkbox.isChecked())
+        self.assertFalse(dialog.embed_icc_checkbox.isEnabled())
         dialog.quality_spin.setValue(80)
+        dialog.chroma_combo.setCurrentIndex(dialog.chroma_combo.findData("4:2:0"))
         dialog.embed_icc_checkbox.setChecked(False)
         saved = dialog.build_profile()
         self.assertEqual(saved.quality, 80)
-        self.assertFalse(saved.embed_icc)
+        self.assertEqual(saved.chroma_subsampling, "4:4:4")
+        self.assertTrue(saved.embed_icc)
+
+    def test_chroma_and_embed_icc_display_encoder_behavior_not_profile_values(self) -> None:
+        mismatched = replace(self.instagram_profile, chroma_subsampling="4:2:0", embed_icc=False)
+        dialog = OutputProfileDialog(mismatched, AspectRatio(3, 4))
+        self.addCleanup(dialog.close)
+        self.assertEqual(dialog.chroma_combo.currentData(), "4:4:4")
+        self.assertTrue(dialog.embed_icc_checkbox.isChecked())
+        self.assertFalse(dialog.chroma_combo.isEnabled())
+        self.assertFalse(dialog.embed_icc_checkbox.isEnabled())
 
     def test_builtin_actions_duplicate_custom_actions_save(self) -> None:
         builtin = OutputProfileDialog(self.instagram_profile, AspectRatio(3, 4))

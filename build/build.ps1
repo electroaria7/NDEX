@@ -17,7 +17,7 @@ if (-not (Test-Path $VendorExifTool)) {
     Write-Warning "The build will continue, but CR3 metadata extraction in the packaged app will fall back if ExifTool is missing."
 }
 
-python -m pip install --upgrade pyinstaller
+python -m pip install --upgrade "pyinstaller==6.11.1"
 if ($OneFile) {
     python -m PyInstaller --noconfirm --clean $OneFileSpecPath
 }

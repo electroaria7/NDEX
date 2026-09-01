@@ -24,10 +24,7 @@ $v2 = [int]$parts[1]
 $v3 = [int]$parts[2]
 $v4 = [int]$parts[3]
 
-python -c "import PyInstaller" 2>$null
-if ($LASTEXITCODE -ne 0) {
-    python -m pip install "pyinstaller==6.11.1"
-}
+python -m pip install "pyinstaller==6.11.1"
 
 New-Item -ItemType Directory -Force -Path $distPath, $workPath | Out-Null
 

@@ -32,7 +32,9 @@ class MainWindowTests(unittest.TestCase):
             "jpeg", 95, "4:4:4", "sRGB", True, MetadataPolicy()
         )
         self.state = WorkspaceState(working_frame=frame, output_profile=output)
-        self.controller = WorkspaceController(self.state)
+        self.controller = WorkspaceController(
+            self.state, settings_writer=lambda _section, _values: None
+        )
 
     def test_composes_preview_first_single_window(self) -> None:
         window = MainWindow(controller=self.controller)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 
@@ -9,6 +10,8 @@ from PIL import Image
 from PIL.ImageQt import ImageQt
 from PySide6.QtCore import QObject, QRunnable, Qt, QThread, QThreadPool, Signal, Slot
 from PySide6.QtGui import QImage
+
+from ndex_common import settings
 
 from ndex_frame.core.geometry import build_render_plan, resolve_canvas
 from ndex_frame.core.models import FramePreset, ImageOverride, MetadataPolicy, OutputProfile, SourceItem
@@ -96,6 +99,7 @@ class _ImportRunnable(QRunnable):
         self.paths = paths
         self.recursive = recursive
         self.signals = _ImportSignals()
+        self.source_folder = next((path.resolve() for path in paths if path.is_dir()), None)
 
     @Slot()
     def run(self) -> None:
@@ -173,11 +177,13 @@ class WorkspaceController(QObject):
         *,
         preview_cache: PreviewCache | None = None,
         thread_pool: QThreadPool | None = None,
+        settings_writer: Callable[[str, dict], None] | None = None,
     ) -> None:
         super().__init__()
         self.state = state
         self.preview_cache = preview_cache or PreviewCache(Path.home() / ".ndex" / "frame" / "cache")
         self.thread_pool = thread_pool or QThreadPool.globalInstance()
+        self._settings_writer = settings_writer or settings.update_section
         self._jobs: set[QRunnable] = set()
         self._export_thread: QThread | None = None
         self._export_worker: _ExportWorker | None = None
@@ -196,6 +202,12 @@ class WorkspaceController(QObject):
     def _finish_import(self, job: QRunnable, sources: list[SourceItem]) -> None:
         self._jobs.discard(job)
         self.state.replace_sources(sources)
+        source_folder = getattr(job, "source_folder", None)
+        if source_folder is not None:
+            try:
+                self._settings_writer("frame", {"last_source": str(source_folder)})
+            except OSError:
+                pass
         self.sourcesChanged.emit()
         self.busyChanged.emit(False)
         if self.state.selected_path is not None:
@@ -288,6 +300,14 @@ class WorkspaceController(QObject):
     def cancel_export(self) -> None:
         if self._cancel_token is not None:
             self._cancel_token.cancel()
+
+    def shutdown(self, timeout_ms: int = 30_000) -> None:
+        self.cancel_export()
+        thread = self._export_thread
+        if thread is not None:
+            thread.quit()
+            thread.wait(timeout_ms)
+        self.thread_pool.waitForDone(timeout_ms)
 
     @Slot(object)
     def _relay_export_progress(self, progress: ExportProgress) -> None:

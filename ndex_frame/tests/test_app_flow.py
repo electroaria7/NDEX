@@ -5,13 +5,16 @@ import os
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
 
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from PIL import Image
 from PySide6.QtWidgets import QApplication
 
+from ndex_common import settings as shared_settings
 from ndex_frame.core.models import SourceItem
 from ndex_frame.services.cache import PreviewCache
 from ndex_frame.services.export_job import ExportItemResult, ExportResult
@@ -36,13 +39,18 @@ class AppFlowTests(unittest.TestCase):
             output_profile=self.store.default_output(),
         )
         self.controller = WorkspaceController(
-            state, preview_cache=PreviewCache(self.root / "cache")
+            state, preview_cache=PreviewCache(self.root / "cache"),
+            settings_writer=lambda _section, _values: None,
         )
         self.window = MainWindow(self.controller, preset_store=self.store)
         self.window.set_interactive_dialogs(False)
         self.addCleanup(self.window.close)
 
     def tearDown(self) -> None:
+        self.controller.cancel_export()
+        thread = self.controller._export_thread
+        if thread is not None:
+            thread.wait(5000)
         self.window.close()
         self.controller.thread_pool.waitForDone(5000)
         QApplication.processEvents()
@@ -191,6 +199,57 @@ class AppFlowTests(unittest.TestCase):
         self.window.cancel_button.show()
         self.window.request_cancel()
         self.assertEqual(self.window.cancel_button.text(), "Cancelling…")
+
+    def test_successful_folder_import_writes_frame_last_source(self) -> None:
+        source_dir = self.root / "remember-masters"
+        source_dir.mkdir()
+        Image.new("RGB", (32, 32), (10, 20, 30)).save(source_dir / "shot.jpg")
+        local = self.root / "localappdata"
+        local.mkdir()
+        with patch.dict(os.environ, {"LOCALAPPDATA": str(local)}):
+            state = WorkspaceState(
+                working_frame=self.store.default_frame(),
+                output_profile=self.store.default_output(),
+            )
+            controller = WorkspaceController(
+                state, preview_cache=PreviewCache(self.root / "cache-last-source")
+            )
+            self.addCleanup(lambda: controller.thread_pool.waitForDone(5000))
+            controller.import_paths([source_dir])
+            self._wait_until(lambda: len(controller.state.sources) == 1)
+            controller.thread_pool.waitForDone(5000)
+            QApplication.processEvents()
+            stored = shared_settings.get_section("frame")
+        self.assertEqual(stored.get("last_source"), str(source_dir.resolve()))
+
+    def test_closing_window_cancels_export_and_waits_for_thread(self) -> None:
+        source_dir = self.root / "close-masters"
+        output_dir = self.root / "close-output"
+        source_dir.mkdir()
+        output_dir.mkdir()
+        Image.new("RGB", (20, 20), (1, 2, 3)).save(source_dir / "one.jpg")
+        self.controller.import_paths([source_dir])
+        self._wait_until(lambda: len(self.controller.state.sources) == 1)
+        self._wait_idle()
+        self.controller.state.output_directory = output_dir
+        self.window.sync_output_folder_label()
+
+        started = threading.Event()
+
+        def blocking_export(snapshot, progress, cancel):
+            started.set()
+            while not cancel.is_cancelled():
+                time.sleep(0.02)
+            return ExportResult(0, 0, 0, True, ())
+
+        with patch("ndex_frame.ui.workspace.run_export", side_effect=blocking_export):
+            self.window.confirm_export(collision_policy="rename")
+            self._wait_until(started.is_set)
+            thread = self.controller._export_thread
+            self.assertIsNotNone(thread)
+            self.assertTrue(thread.isRunning())
+            self.window.close()
+            self.assertFalse(thread.isRunning())
 
     def test_completion_dialog_lists_counts_and_open_folder(self) -> None:
         dialog = ExportCompletionDialog(ExportResult(2, 1, 3, True, ()), 4, self.root / "output")

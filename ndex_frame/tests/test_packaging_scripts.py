@@ -65,6 +65,16 @@ class PackagingScriptTests(unittest.TestCase):
         launcher_index = script.index(r"ndex_launcher\build_package.ps1")
         self.assertLess(frame_index, launcher_index)
 
+    def test_frame_build_always_installs_pinned_pyinstaller(self) -> None:
+        script = (FRAME_ROOT / "build_package.ps1").read_text(encoding="utf-8")
+        self.assertIn('python -m pip install "pyinstaller==6.11.1"', script)
+        self.assertNotIn('python -c "import PyInstaller"', script)
+
+    def test_ndex_one_build_upgrades_pinned_pyinstaller(self) -> None:
+        script = (REPO_ROOT / "build" / "build.ps1").read_text(encoding="utf-8").replace("\r\n", "\n")
+        self.assertIn('python -m pip install --upgrade "pyinstaller==6.11.1"', script)
+        self.assertNotIn("python -m pip install --upgrade pyinstaller\n", script)
+
 
 if __name__ == "__main__":
     unittest.main()

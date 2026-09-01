@@ -161,9 +161,13 @@ class OutputProfileDialog(QDialog):
         self.height_spin.setValue(profile.sizing.height or 1440)
         self.long_edge_spin.setValue(profile.sizing.long_edge or profile.sizing.width or 1080)
         self.quality_spin.setValue(profile.quality)
-        self._set_combo(self.chroma_combo, profile.chroma_subsampling)
+        self._set_combo(self.chroma_combo, "4:4:4")
         self._set_combo(self.color_space_combo, profile.color_space)
-        self.embed_icc_checkbox.setChecked(profile.embed_icc)
+        self.embed_icc_checkbox.setChecked(True)
+        self.chroma_combo.setEnabled(False)
+        self.embed_icc_checkbox.setEnabled(False)
+        self.chroma_combo.setToolTip("v0.1 encoder always writes 4:4:4")
+        self.embed_icc_checkbox.setToolTip("v0.1 encoder always embeds the sRGB ICC profile")
         self.preserve_capture_checkbox.setChecked(profile.metadata.preserve_capture)
         self.preserve_copyright_checkbox.setChecked(profile.metadata.preserve_copyright)
         self.remove_gps_checkbox.setChecked(profile.metadata.remove_gps)
@@ -219,9 +223,9 @@ class OutputProfileDialog(QDialog):
             self._current_sizing(),
             self.format_combo.currentData(),
             self.quality_spin.value(),
-            self.chroma_combo.currentData(),
+            "4:4:4",
             self.color_space_combo.currentData(),
-            self.embed_icc_checkbox.isChecked(),
+            True,
             MetadataPolicy(
                 self.preserve_capture_checkbox.isChecked(),
                 self.preserve_copyright_checkbox.isChecked(),

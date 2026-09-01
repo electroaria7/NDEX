@@ -6,6 +6,7 @@ from io import BytesIO
 from pathlib import Path
 
 from PIL import Image, ImageCms
+from PIL.ExifTags import IFD
 
 from ndex_frame.core.models import MetadataPolicy
 from ndex_frame.imaging.color import prepare_master, srgb_profile_bytes
@@ -71,6 +72,22 @@ class ColorPreparationTests(unittest.TestCase):
             4: (88.0, 0.0, 0.0),
         }
         Image.new("RGB", (20, 10), (60, 80, 100)).save(self.exif_path, exif=exif)
+
+        self.subifd_path = self.temp_path / "subifd-metadata.jpg"
+        subifd = Image.Exif()
+        subifd[DATETIME_TAG] = "2026:08:30 12:34:56"
+        subifd[IFD.Exif] = {
+            DATETIME_ORIGINAL_TAG: "2026:08:30 12:34:56",
+            DATETIME_DIGITIZED_TAG: "2026:08:30 12:34:57",
+        }
+        subifd[COPYRIGHT_TAG] = "Joseph"
+        subifd[IFD.GPSInfo] = {
+            1: "N",
+            2: (40.0, 0.0, 0.0),
+            3: "W",
+            4: (88.0, 0.0, 0.0),
+        }
+        Image.new("RGB", (20, 10), (60, 80, 100)).save(self.subifd_path, exif=subifd)
 
         self.lab_profile_path = self.temp_path / "invalid-lab-profile.jpg"
         lab_image, lab_bytes = image_with_profile("LAB")
@@ -155,6 +172,40 @@ class ColorPreparationTests(unittest.TestCase):
         self.assertNotIn(DATETIME_DIGITIZED_TAG, exif)
         self.assertNotIn(COPYRIGHT_TAG, exif)
         self.assertIn(GPS_TAG, exif)
+
+    def test_preserve_capture_false_strips_exif_subifd_dates(self) -> None:
+        with Image.open(self.subifd_path) as source:
+            source_exif = source.getexif()
+            self.assertIsNone(source_exif.get(DATETIME_ORIGINAL_TAG))
+            self.assertEqual(source_exif.get_ifd(IFD.Exif).get(DATETIME_ORIGINAL_TAG), "2026:08:30 12:34:56")
+            self.assertEqual(source_exif.get_ifd(IFD.Exif).get(DATETIME_DIGITIZED_TAG), "2026:08:30 12:34:57")
+
+        policy = MetadataPolicy(preserve_capture=False, preserve_copyright=True, remove_gps=True)
+        prepared = prepare_master(self.subifd_path, policy)
+        exif = Image.Exif()
+        exif.load(prepared.exif_bytes)
+        exif_ifd = exif.get_ifd(IFD.Exif)
+
+        self.assertNotIn(DATETIME_TAG, exif)
+        self.assertNotIn(DATETIME_ORIGINAL_TAG, exif)
+        self.assertNotIn(DATETIME_DIGITIZED_TAG, exif)
+        self.assertNotIn(DATETIME_ORIGINAL_TAG, exif_ifd)
+        self.assertNotIn(DATETIME_DIGITIZED_TAG, exif_ifd)
+        self.assertEqual(exif.get(COPYRIGHT_TAG), "Joseph")
+        self.assertNotIn(GPS_TAG, exif)
+        self.assertFalse(exif.get_ifd(IFD.GPSInfo))
+
+    def test_default_policy_keeps_subifd_capture_dates(self) -> None:
+        prepared = prepare_master(self.subifd_path, MetadataPolicy())
+        exif = Image.Exif()
+        exif.load(prepared.exif_bytes)
+        exif_ifd = exif.get_ifd(IFD.Exif)
+
+        self.assertEqual(exif.get(DATETIME_TAG), "2026:08:30 12:34:56")
+        self.assertEqual(exif_ifd.get(DATETIME_ORIGINAL_TAG), "2026:08:30 12:34:56")
+        self.assertEqual(exif_ifd.get(DATETIME_DIGITIZED_TAG), "2026:08:30 12:34:57")
+        self.assertEqual(exif.get(COPYRIGHT_TAG), "Joseph")
+        self.assertNotIn(GPS_TAG, exif)
 
     def test_mismatched_non_rgb_profile_reports_transform_error(self) -> None:
         with self.assertRaises(ImageCms.PyCMSError):

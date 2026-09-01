@@ -5,6 +5,7 @@ from io import BytesIO
 from pathlib import Path
 
 from PIL import Image, ImageCms, ImageOps
+from PIL.ExifTags import IFD
 
 from ndex_frame.core.models import MetadataPolicy
 
@@ -34,6 +35,9 @@ def sanitize_exif(source_exif: Image.Exif, policy: MetadataPolicy) -> bytes:
     if not policy.preserve_capture:
         for tag in _CAPTURE_DATE_TAGS:
             sanitized.pop(tag, None)
+        exif_ifd = sanitized.get_ifd(IFD.Exif)
+        for tag in _CAPTURE_DATE_TAGS:
+            exif_ifd.pop(tag, None)
     if not policy.preserve_copyright:
         sanitized.pop(_COPYRIGHT_TAG, None)
     if policy.remove_gps:

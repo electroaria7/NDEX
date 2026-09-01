@@ -6,7 +6,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from PySide6.QtCore import QSignalBlocker, Qt, Slot
-from PySide6.QtGui import QImage, QPixmap
+from PySide6.QtGui import QCloseEvent, QImage, QPixmap
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -68,6 +68,12 @@ class MainWindow(QMainWindow):
         self._connect_signals()
         self._sync_controls()
         self._refresh_sources()
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        self._interactive_dialogs = False
+        self.request_cancel()
+        self.controller.shutdown()
+        super().closeEvent(event)
 
     def set_interactive_dialogs(self, enabled: bool) -> None:
         self._interactive_dialogs = enabled
