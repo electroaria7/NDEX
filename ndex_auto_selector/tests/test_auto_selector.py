@@ -86,6 +86,33 @@ class AutoSelectorServiceTests(unittest.TestCase):
             self.assertIn('xmp:Label="NDEX Selected"', xmp_text)
             self.assertIn("NDEX Selected", xmp_text)
 
+    def test_analyze_marks_ambiguous_when_duplicate_raw_tokens_exist(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            raw_source = root / "raw"
+            selected = root / "selected"
+            card_a = raw_source / "card_a"
+            card_b = raw_source / "card_b"
+            for folder in (card_a, card_b, selected):
+                folder.mkdir(parents=True)
+            (card_a / "IMG_0001.CR3").write_text("raw-a", encoding="utf-8")
+            (card_b / "IMG_0001.CR3").write_text("raw-b", encoding="utf-8")
+            (selected / "IMG_0001.JPG").write_text("jpg", encoding="utf-8")
+
+            summary = AutoSelectorService().analyze(raw_source, selected, recursive=True)
+
+            self.assertEqual(summary.selected_count, 1)
+            self.assertEqual(summary.matched_count, 0)
+            self.assertEqual(summary.ambiguous_count, 1)
+            self.assertEqual(summary.matches[0].status, "ambiguous")
+            self.assertIsNone(summary.matches[0].raw_path)
+
+            result = AutoSelectorService().copy_matches(summary.matches, root / "work")
+            self.assertEqual(result.ambiguous, 1)
+            self.assertEqual(result.copied, 0)
+            self.assertFalse(list((root / "work").glob("*.CR3")))
+
 
 if __name__ == "__main__":
     unittest.main()
+

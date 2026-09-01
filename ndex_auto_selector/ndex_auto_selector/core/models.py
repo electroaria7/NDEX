@@ -30,11 +30,15 @@ class AnalysisSummary:
 
     @property
     def matched_count(self) -> int:
-        return sum(1 for match in self.matches if match.raw_path is not None)
+        return sum(1 for match in self.matches if match.status == "matched")
 
     @property
     def missing_count(self) -> int:
-        return self.selected_count - self.matched_count
+        return sum(1 for match in self.matches if match.status == "missing")
+
+    @property
+    def ambiguous_count(self) -> int:
+        return sum(1 for match in self.matches if match.status == "ambiguous")
 
 
 @dataclass(slots=True)
@@ -45,5 +49,6 @@ class CopyResult:
     skipped: int = 0
     overwritten: int = 0
     missing: int = 0
+    ambiguous: int = 0
     errors: int = 0
     messages: list[str] = field(default_factory=list)

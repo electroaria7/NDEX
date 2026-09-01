@@ -81,6 +81,27 @@ class XmpExportTests(unittest.TestCase):
             self.assertIn("NDEX Maybe", text)
             ET.fromstring(text)
 
+    def test_export_jpg_sidecar_does_not_collide_with_raw(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            raw = root / "IMG_0004.CR3"
+            jpg = root / "IMG_0004.JPG"
+            raw.write_bytes(b"fake raw")
+            jpg.write_bytes(b"fake jpg")
+
+            summary = XmpExportService().export(
+                [
+                    _make_record(raw, pick_status="Pick", rating=5),
+                    _make_record(jpg, pick_status="Maybe", rating=2),
+                ]
+            )
+
+            self.assertEqual(summary.written, 2)
+            self.assertTrue((root / "IMG_0004.xmp").exists())
+            self.assertTrue((root / "IMG_0004.JPG.xmp").exists())
+            self.assertIn('xmp:Rating="5"', (root / "IMG_0004.xmp").read_text(encoding="utf-8"))
+            self.assertIn('xmp:Rating="2"', (root / "IMG_0004.JPG.xmp").read_text(encoding="utf-8"))
+
 
 if __name__ == "__main__":
     unittest.main()

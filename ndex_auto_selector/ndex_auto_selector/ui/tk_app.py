@@ -172,7 +172,7 @@ class AutoSelectorApp(tk.Tk):
         self.match_tree.heading("status", text="Status")
         self.match_tree.column("jpg", width=220, anchor="w")
         self.match_tree.column("cr3", width=260, anchor="w")
-        self.match_tree.column("status", width=88, anchor="w")
+        self.match_tree.column("status", width=100, anchor="w")
         match_scroll = ttk.Scrollbar(right, orient="vertical", command=self.match_tree.yview)
         match_scroll.grid(row=1, column=1, sticky="ns", pady=(6, 10))
         self.match_tree.configure(yscrollcommand=match_scroll.set)
@@ -328,7 +328,8 @@ class AutoSelectorApp(tk.Tk):
         self.status_var.set("CR3 복제 완료")
         self._log(
             f"복제 완료: copied={result.copied}, xmp={result.xmp_written}, skipped={result.skipped}, "
-            f"overwritten={result.overwritten}, missing={result.missing}, errors={result.errors}"
+            f"overwritten={result.overwritten}, ambiguous={result.ambiguous}, "
+            f"missing={result.missing}, errors={result.errors}"
         )
         for message in result.messages[:80]:
             self._log(message)
@@ -350,6 +351,7 @@ class AutoSelectorApp(tk.Tk):
             "요약\n"
             f"Selected JPG: {self.summary.selected_count}\n"
             f"Matched CR3: {self.summary.matched_count}\n"
+            f"Ambiguous: {self.summary.ambiguous_count}\n"
             f"Missing CR3: {self.summary.missing_count}"
         )
 

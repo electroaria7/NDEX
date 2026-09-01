@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import queue
 import threading
+import time
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
@@ -68,6 +70,8 @@ class ImageManagerApp(tk.Tk):
         self.thumbnail_images: dict[int, ImageTk.PhotoImage] = {}
         self.star_labels: list[tk.Label] = []
         self._preview_resize_job: str | None = None
+        self.ui_queue: queue.Queue = queue.Queue()
+        self._last_progress_emit = 0.0
 
         self.file_filter = tk.StringVar(value="all")
         self.pick_filter = tk.StringVar(value="all")
@@ -86,6 +90,7 @@ class ImageManagerApp(tk.Tk):
         self._build_menu()
         self._build_ui()
         self._bind_shortcuts()
+        self.after(100, self._process_ui_queue)
 
         if initial_source is not None:
             self.after(200, lambda: self._open_initial_source(Path(initial_source)))
@@ -419,14 +424,35 @@ class ImageManagerApp(tk.Tk):
             result = ImageScanner().scan(
                 source_dir,
                 recursive=True,
-                progress_callback=lambda index, total, path: self.after(
-                    0, self.status.set, f"Scanning {index}/{total}: {path.name}"
-                ),
+                progress_callback=self._queue_scan_progress,
             )
-            self.after(0, self._scan_finished, result.catalog_path)
+            self.ui_queue.put(("scan_done", result.catalog_path))
         except Exception as exc:
-            self.after(0, lambda: messagebox.showerror("Scan failed", str(exc)))
-            self.after(0, self.status.set, "Scan failed.")
+            self.ui_queue.put(("scan_error", str(exc)))
+
+    def _queue_scan_progress(self, index: int, total: int, path: Path) -> None:
+        now = time.monotonic()
+        if index < total and (now - self._last_progress_emit) < 0.1:
+            return
+        self._last_progress_emit = now
+        self.ui_queue.put(("scan_progress", index, total, path.name))
+
+    def _process_ui_queue(self) -> None:
+        while True:
+            try:
+                event = self.ui_queue.get_nowait()
+            except queue.Empty:
+                break
+            kind = event[0]
+            if kind == "scan_progress":
+                _, index, total, name = event
+                self.status.set(f"Scanning {index}/{total}: {name}")
+            elif kind == "scan_done":
+                self._scan_finished(event[1])
+            elif kind == "scan_error":
+                self.status.set("Scan failed.")
+                messagebox.showerror("Scan failed", event[1])
+        self.after(100, self._process_ui_queue)
 
     def _scan_finished(self, catalog_path: Path) -> None:
         if self.catalog:
