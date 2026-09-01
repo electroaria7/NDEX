@@ -7,17 +7,22 @@ Each app can run alone. Together they share XMP sidecars and one settings file (
 
 ## Quick start
 
+**Windows package (recommended)**
+
+1. Download `NDEX_v1.0.0.zip` from [Releases](https://github.com/electroaria7/NDEX/releases).
+2. Unzip the folder. Keep `Apps\` together.
+3. Double-click `NDEX_Launcher.exe`.
+4. Use the four cards: **1. Backup** → **2. Select & Rate** → **3. Extract** → **4. Frame & Export**.
+
 **Installed (`NDEX_Setup_1.0.0.exe`)**
+
+When an installer build is available:
 
 1. Run the installer. Files go to `C:\Program Files\NDEX`.
 2. Open **NDEX Launcher** from the Start menu or the desktop icon.
-3. Use the four cards in order: **1. Backup** → **2. Select & Rate** → **3. Extract** → **4. Frame & Export**.
-
-**Portable folder (`NDEX_v1.0.0`)**
-
-1. Keep the whole folder together. Do not split `Apps\`.
-2. Double-click `NDEX_Launcher.exe`.
 3. Follow the same four cards.
+
+This GitHub `main` branch is **source code**, not the install package.
 
 **From source (developers)**
 

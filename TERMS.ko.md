@@ -2,7 +2,7 @@
 
 NDEX는 **무료**이며 **오픈소스**입니다. 구매, 구독, 계정은 없습니다.
 
-NDEX를 설치·복사·실행하면 이 약관과 [MIT License](LICENSE)에 동의하는 것으로 봅니다.
+NDEX를 설치·복사·실행하면 이 약관과 [MIT License](LICENSE)에 동의하는 것으로 봅니다. 공식 Windows 패키지는 GitHub [Release](https://github.com/electroaria7/NDEX/releases) 파일입니다. `main` 브랜치는 소스 코드입니다.
 
 ## 1. 할 수 있는 일
 

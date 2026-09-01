@@ -2,7 +2,7 @@
 
 NDEX is **free of charge** and **open source**. There is no purchase, subscription, or account.
 
-By installing, copying, or running NDEX you agree to this agreement and to the [MIT License](LICENSE).
+By installing, copying, or running NDEX you agree to this agreement and to the [MIT License](LICENSE). Official Windows packages are the GitHub [Release](https://github.com/electroaria7/NDEX/releases) files. The `main` branch is source code.
 
 ## 1. What you may do
 

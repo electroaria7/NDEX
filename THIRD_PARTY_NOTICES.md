@@ -54,13 +54,13 @@ under the licenses above.
 shiboken6 is the Qt for Python binding generator / runtime helper and is
 required by PySide6.
 
-## Pillow 11.3.0
+## Pillow 12.3.0
 
-- Package: `pillow==11.3.0` (`PIL`)
+- Package: `pillow==12.3.0` (`PIL`)
 - License: MIT-CMU
 - Project: https://python-pillow.github.io
 - Full wheel license (including bundled codec notices):
-  https://github.com/python-pillow/Pillow/blob/11.3.0/LICENSE
+  https://github.com/python-pillow/Pillow/blob/12.3.0/LICENSE
 
 Pillow (the friendly PIL fork) is licensed under the open source MIT-CMU License:
 
@@ -97,6 +97,6 @@ OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
 PERFORMANCE OF THIS SOFTWARE.
 ```
 
-The Pillow 11.3.0 wheel LICENSE file also includes notices for bundled
+The Pillow 12.3.0 wheel LICENSE file also includes notices for bundled
 third-party codecs (brotli, freetype, harfbuzz, libjpeg-turbo, libpng,
 openjpeg, zlib, and others). See the URL above for that complete text.

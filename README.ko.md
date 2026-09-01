@@ -7,17 +7,22 @@
 
 ## 빠른 시작
 
+**Windows 패키지 (권장)**
+
+1. [Releases](https://github.com/electroaria7/NDEX/releases)에서 `NDEX_v1.0.0.zip`을 받습니다.
+2. 압축을 풉니다. `Apps\` 폴더는 그대로 둡니다.
+3. `NDEX_Launcher.exe`를 더블클릭합니다.
+4. 카드 순서대로 진행합니다: **1. Backup** → **2. Select & Rate** → **3. Extract** → **4. Frame & Export**.
+
 **설치본 (`NDEX_Setup_1.0.0.exe`)**
+
+설치 프로그램이 있을 때:
 
 1. 설치 프로그램을 실행합니다. 파일은 `C:\Program Files\NDEX`에 들어갑니다.
 2. 시작 메뉴 또는 바탕화면의 **NDEX Launcher**를 엽니다.
-3. 카드 순서대로 진행합니다: **1. Backup** → **2. Select & Rate** → **3. Extract** → **4. Frame & Export**.
-
-**포터블 폴더 (`NDEX_v1.0.0`)**
-
-1. 폴더 전체를 함께 둡니다. `Apps\`를 분리하지 마세요.
-2. `NDEX_Launcher.exe`를 더블클릭합니다.
 3. 같은 네 장의 카드로 작업합니다.
+
+이 GitHub `main` 브랜치는 **소스 코드**이며 설치 패키지가 아닙니다.
 
 **소스에서 실행 (개발)**
 

@@ -2,6 +2,16 @@
 
 ## 2026-09-01
 
+### Release 1.0.0 and source-only main
+
+- Windows users download `NDEX_v1.0.0.zip` from GitHub Releases and run `NDEX_Launcher.exe`.
+- The `main` branch is source only. The extra `distribution` branch was removed.
+- `main` is protected: pull requests required, force-push and deletion blocked.
+- Rebuilt 1.0.0 with Pillow `>=12.3.0` so the packaged apps pick up current image-decoder fixes.
+- English and Korean README/terms now point at Releases instead of cloning source for install.
+- Generated per-app PyInstaller `build/` output is no longer tracked on `main`.
+- EXEs remain unsigned. An Inno Setup installer is produced only when `ISCC` is installed.
+
 ### Quick start and bilingual docs
 
 - Root `README.md` is English. `README.ko.md` has the same sections in Korean.

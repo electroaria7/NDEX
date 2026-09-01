@@ -154,6 +154,28 @@ class PackagingScriptTests(unittest.TestCase):
         self.assertIn("[한국어](README.ko.md)", english)
         self.assertIn("[English](README.md)", korean)
 
+    def test_runtime_dependencies_require_patched_pillow(self) -> None:
+        files = (
+            REPO_ROOT / "requirements.txt",
+            REPO_ROOT / "ndex_frame" / "requirements.txt",
+            REPO_ROOT / "dsb_image_manager" / "requirements.txt",
+        )
+        for path in files:
+            with self.subTest(path=str(path.relative_to(REPO_ROOT))):
+                text = path.read_text(encoding="utf-8")
+                self.assertNotIn("<12.0.0", text)
+                self.assertRegex(text, r"Pillow>=12\.3\.0")
+
+    def test_readmes_send_users_to_github_releases(self) -> None:
+        english = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+        korean = (REPO_ROOT / "README.ko.md").read_text(encoding="utf-8")
+        self.assertIn("https://github.com/electroaria7/NDEX/releases", english)
+        self.assertIn("https://github.com/electroaria7/NDEX/releases", korean)
+        self.assertIn("NDEX_v1.0.0.zip", english)
+        self.assertIn("NDEX_v1.0.0.zip", korean)
+        self.assertNotIn("distribution branch", english.lower())
+        self.assertNotIn("distribution 브랜치", korean)
+
     def test_gitignore_excludes_generated_work_products_not_source_build_scripts(self) -> None:
         ignored = (
             ".ndex_data/config/settings.json",
