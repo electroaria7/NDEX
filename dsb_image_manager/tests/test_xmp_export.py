@@ -5,6 +5,7 @@ import unittest
 import xml.etree.ElementTree as ET
 from datetime import datetime
 from pathlib import Path
+from unittest.mock import patch
 
 from dsb_image_manager.dsb_image_manager.core.models import ImageRecord
 from dsb_image_manager.dsb_image_manager.services.xmp_export import XmpExportService
@@ -101,6 +102,25 @@ class XmpExportTests(unittest.TestCase):
             self.assertTrue((root / "IMG_0004.JPG.xmp").exists())
             self.assertIn('xmp:Rating="5"', (root / "IMG_0004.xmp").read_text(encoding="utf-8"))
             self.assertIn('xmp:Rating="2"', (root / "IMG_0004.JPG.xmp").read_text(encoding="utf-8"))
+
+    def test_export_records_parse_and_value_errors_per_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            raw = root / "IMG_0005.CR3"
+            raw.write_bytes(b"fake raw")
+            record = _make_record(raw, pick_status="Pick", rating=4)
+
+            with patch(
+                "dsb_image_manager.dsb_image_manager.services.xmp_export.write_xmp_sidecar",
+                side_effect=ValueError("invalid sidecar"),
+            ):
+                summary = XmpExportService().export([record])
+
+            self.assertEqual(summary.written, 0)
+            self.assertEqual(summary.errors, 1)
+            self.assertEqual(len(summary.messages), 1)
+            self.assertIn("IMG_0005.CR3", summary.messages[0])
+            self.assertIn("invalid sidecar", summary.messages[0])
 
 
 if __name__ == "__main__":

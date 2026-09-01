@@ -8,6 +8,7 @@ from src.branding import NDEX_AUTO_SELECTOR_TITLE
 
 from ndex_auto_selector.ndex_auto_selector.services.selector import AutoSelectorService
 from ndex_auto_selector.ndex_auto_selector.ui.tk_app import run_app
+from ndex_common.crashlog import install_crash_logging
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -49,6 +50,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
+    install_crash_logging("NDEX Auto Selector")
     args = build_parser().parse_args()
 
     if args.open:

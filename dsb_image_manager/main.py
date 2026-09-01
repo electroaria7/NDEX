@@ -9,6 +9,7 @@ from dsb_image_manager.dsb_image_manager.services.backup import BackupService
 from dsb_image_manager.dsb_image_manager.services.scanner import ImageScanner
 from dsb_image_manager.dsb_image_manager.services.xmp_export import XmpExportService
 from dsb_image_manager.dsb_image_manager.ui.tk_app import run_app
+from ndex_common.crashlog import install_crash_logging
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -46,6 +47,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
+    install_crash_logging("NDEX Image Manager")
     args = build_parser().parse_args()
 
     if args.open:

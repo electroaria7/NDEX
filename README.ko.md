@@ -5,16 +5,18 @@
 사진 작업 흐름(백업 → 선별 → 원본 추출 → 프레임·내보내기)을 위한 Windows 데스크톱 유틸리티입니다.
 각 앱은 혼자 실행할 수 있고, XMP 사이드카와 공용 설정으로 느슨하게 연동됩니다 (Lightroom / Evoto 호환).
 
+**공개 베타 (`0.9.1`).** GitHub 태그 `v1.0.0` / `v1.0.1`은 같은 줄에 안정 버전 번호를 붙인 기록입니다.
+
 ## 빠른 시작
 
 **Windows 패키지 (권장)**
 
-1. [Releases](https://github.com/electroaria7/NDEX/releases)에서 `NDEX_v1.0.1.zip`을 받습니다.
+1. [Releases](https://github.com/electroaria7/NDEX/releases)에서 `NDEX_v0.9.1.zip`을 받습니다.
 2. 압축을 풉니다. `Apps\` 폴더는 그대로 둡니다.
 3. `NDEX_Launcher.exe`를 더블클릭합니다.
 4. 카드 순서대로 진행합니다: **1. Backup** → **2. Select & Rate** → **3. Extract** → **4. Frame & Export**.
 
-**설치본 (`NDEX_Setup_1.0.1.exe`)**
+**설치본 (`NDEX_Setup_0.9.1.exe`)**
 
 설치 프로그램이 있을 때:
 
@@ -85,7 +87,7 @@ Frame 데이터: `%LOCALAPPDATA%\NDEX\Frame\`
 ## 패키지 구성 (설치본·포터블)
 
 ```
-NDEX_v1.0.1\                  설치 위치: C:\Program Files\NDEX\
+NDEX_v0.9.1\                  설치 위치: C:\Program Files\NDEX\
   NDEX_Launcher.exe           여기서 시작
   Apps\
     NDEX_One.exe
@@ -115,7 +117,7 @@ powershell -ExecutionPolicy Bypass -File .\build_all.ps1
 powershell -ExecutionPolicy Bypass -File .\build_all.ps1 -Installer
 ```
 
-결과: `release\NDEX_v1.0.1\` (포터블)과 `release\NDEX_Setup_1.0.1.exe`.
+결과: `release\NDEX_v0.9.1\` (포터블)과 `release\NDEX_Setup_0.9.1.exe`.
 
 ```powershell
 python -m ndex_launcher.main

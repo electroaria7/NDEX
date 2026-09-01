@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from typing import Iterable
 
@@ -55,7 +56,7 @@ class XmpExportService:
                     keywords=keywords,
                 )
                 summary.written += 1
-            except OSError as exc:
+            except (OSError, ValueError, TypeError, ET.ParseError) as exc:
                 summary.errors += 1
                 summary.messages.append(f"{record.file_path.name}: {exc}")
 

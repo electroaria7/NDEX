@@ -13,9 +13,28 @@ $ErrorActionPreference = "Stop"
 $repoRoot = $PSScriptRoot
 
 # Read version from ndex_common/version.py
-$versionLine = Get-Content (Join-Path $repoRoot "ndex_common\version.py") | Where-Object { $_ -match 'NDEX_VERSION' }
+$versionLine = Get-Content (Join-Path $repoRoot "ndex_common\version.py") | Where-Object { $_ -match '^\s*NDEX_VERSION\s*=' }
 $version = ($versionLine -split '"')[1]
-if (-not $version) { $version = "0.0.0" }
+if (-not $version) { throw "Could not read NDEX_VERSION from ndex_common\version.py" }
+
+$releaseTag = $null
+if ($env:GITHUB_REF_TYPE -eq "tag" -and $env:GITHUB_REF_NAME) {
+    $releaseTag = $env:GITHUB_REF_NAME
+} else {
+    try {
+        $releaseTag = git -C $repoRoot describe --tags --exact-match 2>$null
+        if ($LASTEXITCODE -ne 0) { $releaseTag = $null }
+    } catch {
+        $releaseTag = $null
+    }
+}
+if ($releaseTag) {
+    $normalizedTag = $releaseTag
+    if ($normalizedTag.StartsWith("v")) { $normalizedTag = $normalizedTag.Substring(1) }
+    if ($normalizedTag -ne $version) {
+        throw "Git tag '$releaseTag' does not match NDEX_VERSION '$version'."
+    }
+}
 
 Write-Host "== NDEX release build v$version =="
 
@@ -104,6 +123,16 @@ if ($missing.Count -gt 0) {
     Write-Warning "Missing artifacts (build them first): $($missing -join ', ')"
     exit 1
 }
+
+$sumsPath = Join-Path $releaseDir "SHA256SUMS.txt"
+$sums = @()
+Get-ChildItem -Path $releaseDir -Recurse -File | Where-Object { $_.Name -ne "SHA256SUMS.txt" } | Sort-Object FullName | ForEach-Object {
+    $hash = (Get-FileHash -Algorithm SHA256 -Path $_.FullName).Hash.ToLowerInvariant()
+    $relative = $_.FullName.Substring($releaseDir.Length).TrimStart("\", "/") -replace "\\", "/"
+    $sums += "$hash  $relative"
+}
+Set-Content -Path $sumsPath -Value $sums -Encoding ascii
+Write-Host "  + SHA256SUMS.txt ($($sums.Count) files)"
 
 if ($Installer) {
     $iscc = Get-Command ISCC -ErrorAction SilentlyContinue
