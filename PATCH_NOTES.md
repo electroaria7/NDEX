@@ -1,14 +1,28 @@
 # NDEX Patch Notes
 
-## 2026-09-01
+## 2026-09-01 — 0.9.1 public beta
 
-### Versioning — public beta `0.9.1`
-
-NDEX is a public beta, not a 1.0 product. `NDEX_VERSION` is `0.9.1` (`NDEX_CHANNEL = "beta"`). Next packages: `NDEX_v0.9.1.zip` / `NDEX_Setup_0.9.1.exe`.
+NDEX is a public beta, not a 1.0 product. `NDEX_VERSION` is `0.9.1` (`NDEX_CHANNEL = "beta"`). Packages: `NDEX_v0.9.1.zip` / `NDEX_Setup_0.9.1.exe`.
 
 GitHub tags `v1.0.0` and `v1.0.1` stay as historical downloads of this same line under a premature stable number.
 
 If `NDEX_Setup_1.0.1.exe` is already installed, uninstall it before installing `0.9.1`. Inno Setup will treat `0.9.1` as older than `1.0.1`.
+
+### Workflow correctness
+
+- Backup copies write to a temp file, then replace the destination so a failed copy does not leave a truncated file.
+- Image Manager XMP export: RAW sidecars use `stem.xmp`; JPG sidecars use `file.JPG.xmp`, so a RAW and JPG with the same stem no longer share one sidecar. Existing `stem.xmp` files are still read.
+- Image Manager folder scans run on a background queue, so the UI stays responsive on large folders.
+- Auto Selector reports ambiguous RAW filename matches instead of picking one silently.
+- XMP export records per-file parse errors instead of aborting the whole batch.
+
+### Foundation
+
+- Shared `settings.json` updates take a lock, reload, merge, and write atomically (`schema_version`).
+- Packaged apps write crash logs to `%LOCALAPPDATA%\NDEX\logs\`.
+- Windows CI runs unit tests on Python 3.10 and 3.12 against `requirements.lock`.
+- Release folders include `SHA256SUMS.txt`. The build fails if a git tag does not match `NDEX_VERSION`.
+- Frozen launcher lookup stays in the exe directory and `Apps\`.
 
 ### UI consistency (published on GitHub as 1.0.1)
 

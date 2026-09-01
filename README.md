@@ -12,7 +12,7 @@ This is a **public beta**, not a 1.0 product. EXEs are unsigned, so Windows Smar
 ## Public beta
 
 - Current version: **0.9.1**. Packages: `NDEX_v0.9.1.zip` (portable) and `NDEX_Setup_0.9.1.exe` (installer).
-- GitHub tags `v1.0.0` and `v1.0.1` were this same beta line with a premature stable number. Those downloads still work; new builds use `0.9.1`.
+- GitHub tags `v1.0.0` and `v1.0.1` were this same beta line with a premature stable number. Those downloads still work; the current release is **0.9.1**.
 - If `NDEX_Setup_1.0.1.exe` is already installed, uninstall it before installing `0.9.1`. Windows treats `0.9.1` as older than `1.0.1`.
 - Changelog: [PATCH_NOTES.md](PATCH_NOTES.md).
 
@@ -96,6 +96,7 @@ Shared settings `frame` section: `%LOCALAPPDATA%\NDEX\config\settings.json`
 ```
 NDEX_v0.9.1\                  also installed as C:\Program Files\NDEX\
   NDEX_Launcher.exe           start here
+  SHA256SUMS.txt
   Apps\
     NDEX_One.exe
     NDEX_Image_Manager.exe
