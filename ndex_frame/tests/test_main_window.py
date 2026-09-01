@@ -52,6 +52,42 @@ class MainWindowTests(unittest.TestCase):
         self.assertEqual(window.output_profile_combo.accessibleName(), "Output Profile")
         self.assertEqual(window.thumbnail_view.accessibleName(), "Source Images")
         self.assertEqual(window.scale_slider.accessibleName(), "Photo Size")
+        self.assertEqual(window.ratio_width_spin.value(), 3)
+        self.assertEqual(window.ratio_height_spin.value(), 4)
+        self.assertEqual(
+            [button.text() for button in window.background_preset_buttons],
+            ["White", "Bright Gray", "Medium Gray"],
+        )
+        self.assertEqual(
+            [button.text() for button in window.photo_size_preset_buttons],
+            ["80%", "90%", "95%"],
+        )
+
+    def test_ratio_and_background_presets_update_working_frame(self) -> None:
+        window = MainWindow(controller=self.controller)
+        self.addCleanup(window.close)
+        window.ratio_width_spin.setValue(4)
+        window.ratio_height_spin.setValue(5)
+        self.assertEqual(
+            (self.state.working_frame.ratio.width, self.state.working_frame.ratio.height),
+            (4, 5),
+        )
+        window.background_preset_buttons[2].click()
+        self.assertEqual(self.state.working_frame.background, "#808080")
+        window.background_edit.setText("#AABBCC")
+        window.background_edit.editingFinished.emit()
+        self.assertEqual(self.state.working_frame.background, "#AABBCC")
+
+    def test_photo_size_preset_sets_selected_scale(self) -> None:
+        source = SourceItem(Path("master.jpg"), 3000, 4000, True)
+        self.state.replace_sources([source])
+        window = MainWindow(controller=self.controller)
+        self.addCleanup(window.close)
+        window.photo_size_preset_buttons[0].click()
+        self.assertEqual(self.state.effective_framing(source.path)[0], 0.80)
+        self.assertEqual(window.scale_spin.value(), 80)
+        window.photo_size_preset_buttons[2].click()
+        self.assertEqual(self.state.effective_framing(source.path)[0], 0.95)
 
     def test_selecting_output_folder_enables_export_after_import(self) -> None:
         self.state.replace_sources([SourceItem(Path("master.jpg"), 3000, 4000, True)])

@@ -140,6 +140,24 @@ class ProfileDialogTests(unittest.TestCase):
         self.assertFalse(saved.builtin)
         self.assertEqual(saved.name, "White 3:4 Tight")
 
+    def test_frame_dialog_exposes_background_and_photo_size_presets(self) -> None:
+        frame = FramePreset(
+            "builtin.white-3x4", "White 3:4", 1, AspectRatio(3, 4), "#FFFFFF", 1.0, 0.0, 0.0, True
+        )
+        dialog = FramePresetDialog(frame)
+        self.addCleanup(dialog.close)
+        self.assertEqual(
+            [button.text() for button in dialog.background_preset_buttons],
+            ["White", "Bright Gray", "Medium Gray"],
+        )
+        dialog.background_preset_buttons[1].click()
+        self.assertEqual(dialog.background_edit.text(), "#D0D0D0")
+        dialog.photo_size_preset_buttons[0].click()
+        self.assertEqual(dialog.scale_spin.value(), 80)
+        saved = dialog.build_preset()
+        self.assertEqual(saved.background, "#D0D0D0")
+        self.assertEqual(saved.photo_scale, 0.80)
+
     def test_custom_preset_ids_are_unique_for_non_ascii_and_duplicate_names(self) -> None:
         first_korean = custom_preset_id("첫 번째")
         second_korean = custom_preset_id("두 번째", {first_korean})
