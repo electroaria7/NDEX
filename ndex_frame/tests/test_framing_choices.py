@@ -5,6 +5,7 @@ import unittest
 from ndex_frame.core.framing_choices import (
     BACKGROUND_PRESETS,
     PHOTO_SIZE_PRESETS,
+    RATIO_PRESETS,
     normalize_hex_color,
 )
 
@@ -12,11 +13,15 @@ from ndex_frame.core.framing_choices import (
 class FramingChoicesTests(unittest.TestCase):
     def test_background_presets_include_white_and_grays(self) -> None:
         names = [name for name, _color in BACKGROUND_PRESETS]
-        self.assertEqual(names, ["White", "Bright Gray", "Medium Gray"])
+        self.assertEqual(names, ["White", "Bright Gray", "Medium Gray", "Black"])
         colors = dict(BACKGROUND_PRESETS)
         self.assertEqual(colors["White"], "#FFFFFF")
         self.assertEqual(colors["Bright Gray"], "#D0D0D0")
         self.assertEqual(colors["Medium Gray"], "#808080")
+        self.assertEqual(colors["Black"], "#000000")
+
+    def test_ratio_presets_include_common_instagram_shapes(self) -> None:
+        self.assertEqual(RATIO_PRESETS, (("3:4", 3, 4), ("4:5", 4, 5), ("1:1", 1, 1)))
 
     def test_photo_size_presets_are_eighty_ninety_ninety_five(self) -> None:
         self.assertEqual(PHOTO_SIZE_PRESETS, (80, 90, 95))

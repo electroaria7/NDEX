@@ -6,6 +6,12 @@ BACKGROUND_PRESETS: tuple[tuple[str, str], ...] = (
     ("White", "#FFFFFF"),
     ("Bright Gray", "#D0D0D0"),
     ("Medium Gray", "#808080"),
+    ("Black", "#000000"),
+)
+RATIO_PRESETS: tuple[tuple[str, int, int], ...] = (
+    ("3:4", 3, 4),
+    ("4:5", 4, 5),
+    ("1:1", 1, 1),
 )
 PHOTO_SIZE_PRESETS: tuple[int, ...] = (80, 90, 95)
 

@@ -55,8 +55,14 @@ class MainWindowTests(unittest.TestCase):
         self.assertEqual(window.ratio_width_spin.value(), 3)
         self.assertEqual(window.ratio_height_spin.value(), 4)
         self.assertEqual(
-            [button.text() for button in window.background_preset_buttons],
-            ["White", "Bright Gray", "Medium Gray"],
+            [button.accessibleName() for button in window.background_preset_buttons],
+            ["White", "Bright Gray", "Medium Gray", "Black"],
+        )
+        self.assertEqual(window.custom_background_button.text(), "Custom…")
+        self.assertIsNone(getattr(window, "background_edit", None))
+        self.assertEqual(
+            [button.text() for button in window.ratio_preset_buttons],
+            ["3:4", "4:5", "1:1"],
         )
         self.assertEqual(
             [button.text() for button in window.photo_size_preset_buttons],
@@ -66,17 +72,40 @@ class MainWindowTests(unittest.TestCase):
     def test_ratio_and_background_presets_update_working_frame(self) -> None:
         window = MainWindow(controller=self.controller)
         self.addCleanup(window.close)
-        window.ratio_width_spin.setValue(4)
-        window.ratio_height_spin.setValue(5)
+        window.ratio_preset_buttons[1].click()
         self.assertEqual(
             (self.state.working_frame.ratio.width, self.state.working_frame.ratio.height),
             (4, 5),
         )
-        window.background_preset_buttons[2].click()
-        self.assertEqual(self.state.working_frame.background, "#808080")
-        window.background_edit.setText("#AABBCC")
-        window.background_edit.editingFinished.emit()
+        window.ratio_width_spin.setValue(3)
+        window.ratio_height_spin.setValue(4)
+        self.assertEqual(
+            (self.state.working_frame.ratio.width, self.state.working_frame.ratio.height),
+            (3, 4),
+        )
+        window.background_preset_buttons[3].click()
+        self.assertEqual(self.state.working_frame.background, "#000000")
+        window._apply_background("#AABBCC")
         self.assertEqual(self.state.working_frame.background, "#AABBCC")
+
+    def test_apply_all_copies_selected_size_ratio_and_color_to_every_photo(self) -> None:
+        first = SourceItem(Path("first.jpg"), 3000, 4000, True)
+        second = SourceItem(Path("second.jpg"), 5000, 7000, True)
+        self.state.replace_sources([first, second])
+        window = MainWindow(controller=self.controller)
+        self.addCleanup(window.close)
+        window.ratio_preset_buttons[2].click()
+        window.background_preset_buttons[1].click()
+        window.photo_size_preset_buttons[0].click()
+        self.assertTrue(self.state.is_modified(first.path))
+        self.assertFalse(self.state.is_modified(second.path))
+        window.apply_all_button.click()
+        self.assertEqual(self.state.working_frame.ratio.width, 1)
+        self.assertEqual(self.state.working_frame.ratio.height, 1)
+        self.assertEqual(self.state.working_frame.background, "#D0D0D0")
+        self.assertEqual(self.state.working_frame.photo_scale, 0.80)
+        self.assertEqual(self.state.overrides, {})
+        self.assertEqual(self.state.effective_framing(second.path), (0.80, 0.0, 0.0))
 
     def test_photo_size_preset_sets_selected_scale(self) -> None:
         source = SourceItem(Path("master.jpg"), 3000, 4000, True)

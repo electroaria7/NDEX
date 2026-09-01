@@ -16,7 +16,6 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
     QListWidget,
     QListWidgetItem,
     QMainWindow,
@@ -42,7 +41,11 @@ from ndex_frame.ui.preset_dialog import (
     ManagePresetsDialog,
     summarize_preflight,
 )
-from ndex_frame.ui.framing_widgets import make_background_preset_buttons, make_photo_size_preset_buttons
+from ndex_frame.ui.framing_widgets import (
+    make_background_preset_buttons,
+    make_photo_size_preset_buttons,
+    make_ratio_preset_buttons,
+)
 from ndex_frame.ui.preview_widget import PreviewWidget
 from ndex_frame.ui.profile_dialog import OutputProfileDialog
 from ndex_frame.ui.workspace import WorkspaceController
@@ -155,21 +158,13 @@ class MainWindow(QMainWindow):
         ratio_layout.addStretch(1)
         self.ratio_label = QLabel()
         frame_layout.addRow("Ratio", ratio_row)
-        background_presets, self.background_preset_buttons = make_background_preset_buttons(
-            self._apply_background
+        ratio_presets, self.ratio_preset_buttons = make_ratio_preset_buttons(self._apply_ratio_preset)
+        frame_layout.addRow("", ratio_presets)
+        background_presets, self.background_preset_buttons, self.custom_background_button = (
+            make_background_preset_buttons(self._apply_background, self._pick_background)
         )
-        background_row = QWidget()
-        background_layout = QHBoxLayout(background_row)
-        background_layout.setContentsMargins(0, 0, 0, 0)
-        self.background_edit = QLineEdit()
-        self.background_edit.setAccessibleName("Background color")
-        self.background_edit.setPlaceholderText("#FFFFFF")
-        self.pick_background_button = QPushButton("Pick…")
-        background_layout.addWidget(self.background_edit, 1)
-        background_layout.addWidget(self.pick_background_button)
         self.background_label = QLabel()
         frame_layout.addRow("Background", background_presets)
-        frame_layout.addRow("", background_row)
         scale_row = QWidget()
         scale_layout = QHBoxLayout(scale_row)
         scale_layout.setContentsMargins(0, 0, 0, 0)
@@ -243,8 +238,6 @@ class MainWindow(QMainWindow):
         self.y_spin.valueChanged.connect(self._framing_controls_changed)
         self.ratio_width_spin.valueChanged.connect(self._ratio_changed)
         self.ratio_height_spin.valueChanged.connect(self._ratio_changed)
-        self.background_edit.editingFinished.connect(self._commit_background_edit)
-        self.pick_background_button.clicked.connect(self._pick_background)
         self.preview_widget.framingDragged.connect(self._preview_dragged)
         self.reset_override_button.clicked.connect(self._reset_override)
         self.apply_all_button.clicked.connect(self._apply_all)
@@ -442,8 +435,6 @@ class MainWindow(QMainWindow):
         ]
         self.ratio_width_spin.setValue(frame.ratio.width)
         self.ratio_height_spin.setValue(frame.ratio.height)
-        with QSignalBlocker(self.background_edit):
-            self.background_edit.setText(frame.background)
         if state.selected_path is None:
             values = (frame.photo_scale, frame.x, frame.y)
         else:
@@ -477,6 +468,10 @@ class MainWindow(QMainWindow):
         )
         self._sync_controls()
 
+    def _apply_ratio_preset(self, ratio: AspectRatio) -> None:
+        self.controller.update_working_frame(ratio=ratio)
+        self._sync_controls()
+
     def _apply_background(self, color: str) -> None:
         normalized = normalize_hex_color(color)
         if normalized is None:
@@ -484,9 +479,6 @@ class MainWindow(QMainWindow):
             return
         self.controller.update_working_frame(background=normalized)
         self._sync_controls()
-
-    def _commit_background_edit(self) -> None:
-        self._apply_background(self.background_edit.text())
 
     def _pick_background(self) -> None:
         if not self._interactive_dialogs:

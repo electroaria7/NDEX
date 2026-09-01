@@ -5,9 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from PySide6.QtCore import QUrl
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtGui import QColor, QDesktopServices
 from PySide6.QtWidgets import (
     QButtonGroup,
+    QColorDialog,
     QDialog,
     QDialogButtonBox,
     QDoubleSpinBox,
@@ -72,8 +73,8 @@ class FramePresetDialog(QDialog):
         self.ratio_width_spin.setValue(preset.ratio.width)
         self.ratio_height_spin.setValue(preset.ratio.height)
         self.background_edit = QLineEdit(preset.background)
-        background_presets, self.background_preset_buttons = make_background_preset_buttons(
-            self._apply_background
+        background_presets, self.background_preset_buttons, self.custom_background_button = (
+            make_background_preset_buttons(self._apply_background, self._pick_background)
         )
         self.scale_spin = QSpinBox()
         self.scale_spin.setRange(10, 100)
@@ -94,7 +95,6 @@ class FramePresetDialog(QDialog):
         form.addRow("Ratio width", self.ratio_width_spin)
         form.addRow("Ratio height", self.ratio_height_spin)
         form.addRow("Background", background_presets)
-        form.addRow("Custom color", self.background_edit)
         form.addRow("Photo Size", self.scale_spin)
         form.addRow("", size_presets)
         form.addRow("X", self.x_spin)
@@ -131,6 +131,12 @@ class FramePresetDialog(QDialog):
         normalized = normalize_hex_color(color)
         if normalized is not None:
             self.background_edit.setText(normalized)
+
+    def _pick_background(self) -> None:
+        current = QColor(self.background_edit.text() or self._preset.background)
+        chosen = QColorDialog.getColor(current, self, "Frame background")
+        if chosen.isValid():
+            self._apply_background(chosen.name())
 
     def _refresh_action_buttons(self) -> None:
         builtin = self._preset.builtin

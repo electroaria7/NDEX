@@ -147,9 +147,10 @@ class ProfileDialogTests(unittest.TestCase):
         dialog = FramePresetDialog(frame)
         self.addCleanup(dialog.close)
         self.assertEqual(
-            [button.text() for button in dialog.background_preset_buttons],
-            ["White", "Bright Gray", "Medium Gray"],
+            [button.accessibleName() for button in dialog.background_preset_buttons],
+            ["White", "Bright Gray", "Medium Gray", "Black"],
         )
+        self.assertEqual(dialog.custom_background_button.text(), "Custom…")
         dialog.background_preset_buttons[1].click()
         self.assertEqual(dialog.background_edit.text(), "#D0D0D0")
         dialog.photo_size_preset_buttons[0].click()
