@@ -12,7 +12,7 @@
 ## 공개 베타
 
 - 현재 버전: **0.9.1**. 패키지: `NDEX_v0.9.1.zip` (포터블), `NDEX_Setup_0.9.1.exe` (설치본).
-- GitHub 태그 `v1.0.0` / `v1.0.1`은 같은 베타 줄에 안정 버전 번호를 붙인 기록입니다. 그 파일은 그대로 받을 수 있고, 이후 빌드는 `0.9.1`입니다.
+- GitHub 태그 `v1.0.0` / `v1.0.1`은 같은 베타 줄에 안정 버전 번호를 붙인 기록입니다. 그 파일은 그대로 받을 수 있고, 현재 릴리스는 **0.9.1**입니다.
 - 이미 `NDEX_Setup_1.0.1.exe`를 설치했다면 `0.9.1`을 설치하기 전에 제거하세요. Windows는 `0.9.1`을 `1.0.1`보다 낮은 버전으로 봅니다.
 - 변경점: [PATCH_NOTES.md](PATCH_NOTES.md).
 
@@ -96,6 +96,7 @@ Frame 데이터: `%LOCALAPPDATA%\NDEX\Frame\`
 ```
 NDEX_v0.9.1\                  설치 위치: C:\Program Files\NDEX\
   NDEX_Launcher.exe           여기서 시작
+  SHA256SUMS.txt
   Apps\
     NDEX_One.exe
     NDEX_Image_Manager.exe
