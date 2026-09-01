@@ -6,6 +6,7 @@ from PySide6.QtCore import QPoint, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QMouseEvent, QPainter, QPixmap
 from PySide6.QtWidgets import QWidget
 
+from ndex_common.theme import PREVIEW_WELL, PREVIEW_WELL_TEXT
 from ndex_frame.core.geometry import ProjectedRenderPlan, build_render_plan, project_render_plan
 from ndex_frame.core.models import RenderPlan
 
@@ -16,6 +17,7 @@ class PreviewWidget(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setMinimumSize(320, 360)
+        self.setObjectName("previewWell")
         self.setCursor(Qt.CursorShape.OpenHandCursor)
         self._pixmap = QPixmap()
         self._plan: RenderPlan | None = None
@@ -51,10 +53,10 @@ class PreviewWidget(QWidget):
 
     def paintEvent(self, event: object) -> None:
         painter = QPainter(self)
-        painter.fillRect(self.rect(), QColor("#202124"))
+        painter.fillRect(self.rect(), QColor(PREVIEW_WELL))
         projected = self.projected_plan()
         if projected is None:
-            painter.setPen(QColor("#AEB4BD"))
+            painter.setPen(QColor(PREVIEW_WELL_TEXT))
             painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "Open files or a folder to preview")
             return
         canvas = QRectF(

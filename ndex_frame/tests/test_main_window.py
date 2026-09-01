@@ -60,6 +60,13 @@ class MainWindowTests(unittest.TestCase):
             ["White", "Bright Gray", "Medium Gray", "Black"],
         )
         self.assertEqual(window.custom_background_button.text(), "Custom…")
+        self.assertGreaterEqual(window.frame_panel.minimumWidth(), 270)
+        self.assertGreaterEqual(window.custom_background_button.minimumWidth(), 72)
+        from ndex_frame.ui.framing_widgets import ColorSwatchButton
+
+        for swatch in window.background_preset_buttons:
+            self.assertEqual(swatch.objectName(), "colorSwatch")
+            self.assertIsInstance(swatch, ColorSwatchButton)
         self.assertIsNone(getattr(window, "background_edit", None))
         self.assertEqual(
             [button.text() for button in window.ratio_preset_buttons],

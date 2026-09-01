@@ -9,7 +9,7 @@ from tkinter import filedialog, messagebox, ttk
 
 from .backup_executor import execute_backup
 from .app_paths import get_user_data_dir
-from .branding import APP_ICON_32, APP_ICON_64, APP_WORDMARK_HEADER, NDEX_ONE_TITLE, get_branding_asset_path
+from .branding import NDEX_ONE_TITLE
 from .config import ConfigManager
 from .file_types import FILE_TYPE_ORDER, RAW_BRANDS, get_file_type_definitions, get_file_type_label, get_visible_file_types
 from .logger import AppLogger
@@ -17,6 +17,7 @@ from .metadata import MetadataExtractor
 from .scanner import analyze_source
 
 from ndex_common.launch import launch_app
+from ndex_common.theme import apply_tk_theme, apply_window_icon, build_app_header, style_text_widget
 
 VERIFY_MODE_LABELS = {
     "size": "Fast check (file size)",
@@ -41,7 +42,8 @@ class DSBApp(tk.Tk):
         self.geometry("1220x820")
         self.minsize(1080, 720)
         self.brand_images: list[tk.PhotoImage] = []
-        self._apply_window_branding()
+        apply_window_icon(self, self.brand_images)
+        apply_tk_theme(self)
 
         self.root_dir = get_user_data_dir()
         self.config_manager = ConfigManager()
@@ -93,47 +95,39 @@ class DSBApp(tk.Tk):
         self.columnconfigure(0, weight=1)
         self.rowconfigure(1, weight=1)
 
-        header = ttk.Frame(self, padding=(16, 14, 16, 8))
+        header = build_app_header(
+            self,
+            title=NDEX_ONE_TITLE,
+            tagline="Analyze camera files, preview the folder tree, then run a safe backup.",
+            holder=self.brand_images,
+        )
         header.grid(row=0, column=0, sticky="ew")
-        header.columnconfigure(1, weight=1)
-        icon_image = self._load_brand_image(APP_ICON_64)
-        if icon_image:
-            ttk.Label(header, image=icon_image).grid(row=0, column=0, rowspan=2, sticky="w", padx=(0, 12))
-        wordmark_image = self._load_brand_image(APP_WORDMARK_HEADER)
-        if wordmark_image:
-            ttk.Label(header, image=wordmark_image).grid(row=0, column=1, sticky="w")
-        else:
-            ttk.Label(header, text=NDEX_ONE_TITLE, font=("Segoe UI", 20, "bold")).grid(row=0, column=1, sticky="w")
-        ttk.Label(
-            header,
-            text="Analyze camera files first, preview the folder tree, then run a safe backup.",
-        ).grid(row=1, column=1, sticky="w", pady=(6, 0))
 
         body = ttk.Panedwindow(self, orient=tk.HORIZONTAL)
         body.grid(row=1, column=0, sticky="nsew", padx=16, pady=(0, 16))
 
-        left = ttk.Frame(body, padding=12)
-        right = ttk.Frame(body, padding=12)
+        left = ttk.Frame(body, padding=16, style="Card.TFrame")
+        right = ttk.Frame(body, padding=16, style="Card.TFrame")
         body.add(left, weight=3)
         body.add(right, weight=4)
 
         for frame in (left, right):
             frame.columnconfigure(1, weight=1)
 
-        ttk.Label(left, text="Source Folder").grid(row=0, column=0, sticky="w")
+        ttk.Label(left, text="Source Folder", style="CardSection.TLabel").grid(row=0, column=0, sticky="w")
         ttk.Entry(left, textvariable=self.source_var).grid(row=1, column=0, columnspan=2, sticky="ew", pady=(4, 8))
         ttk.Button(left, text="Browse", command=self._browse_source).grid(row=1, column=2, padx=(8, 0))
 
-        ttk.Label(left, text="Backup Destination").grid(row=2, column=0, sticky="w")
+        ttk.Label(left, text="Backup Destination", style="CardSection.TLabel").grid(row=2, column=0, sticky="w", pady=(8, 0))
         ttk.Entry(left, textvariable=self.destination_var).grid(
             row=3, column=0, columnspan=2, sticky="ew", pady=(4, 8)
         )
         ttk.Button(left, text="Browse", command=self._browse_destination).grid(row=3, column=2, padx=(8, 0))
 
-        ttk.Label(left, text="File Types").grid(row=4, column=0, sticky="w", pady=(6, 0))
-        types_frame = ttk.Frame(left)
+        ttk.Label(left, text="File Types", style="CardSection.TLabel").grid(row=4, column=0, sticky="w", pady=(6, 0))
+        types_frame = ttk.Frame(left, style="CardInner.TFrame")
         types_frame.grid(row=5, column=0, columnspan=3, sticky="w", pady=(4, 8))
-        self.brand_frame = ttk.Frame(types_frame)
+        self.brand_frame = ttk.Frame(types_frame, style="CardInner.TFrame")
         self.brand_frame.grid(row=0, column=0, sticky="w")
         for column, (brand_key, brand) in enumerate(RAW_BRANDS.items()):
             ttk.Checkbutton(
@@ -141,15 +135,17 @@ class DSBApp(tk.Tk):
                 text=brand["label"],
                 variable=self.brand_vars[brand_key],
                 command=self._refresh_file_type_options,
+                style="Card.TCheckbutton",
             ).grid(row=0, column=column, sticky="w", padx=(0, 12))
 
-        self.types_frame = ttk.Frame(types_frame)
+        self.types_frame = ttk.Frame(types_frame, style="CardInner.TFrame")
         self.types_frame.grid(row=1, column=0, sticky="w", pady=(6, 0))
         for index, file_type in enumerate(FILE_TYPE_ORDER):
             checkbutton = ttk.Checkbutton(
                 self.types_frame,
                 text=get_file_type_label(file_type),
                 variable=self.type_vars[file_type],
+                style="Card.TCheckbutton",
             )
             row = index // 3
             column = index % 3
@@ -157,7 +153,7 @@ class DSBApp(tk.Tk):
             self.type_checkbuttons[file_type] = checkbutton
         self._refresh_file_type_options()
 
-        ttk.Label(left, text="Duplicate Handling").grid(row=6, column=0, sticky="w", pady=(6, 0))
+        ttk.Label(left, text="Duplicate Handling", style="CardSection.TLabel").grid(row=6, column=0, sticky="w", pady=(6, 0))
         duplicate_combo = ttk.Combobox(
             left,
             textvariable=self.duplicate_var,
@@ -166,7 +162,7 @@ class DSBApp(tk.Tk):
         )
         duplicate_combo.grid(row=7, column=0, columnspan=3, sticky="ew", pady=(4, 8))
 
-        ttk.Label(left, text="Copy Verification").grid(row=8, column=0, sticky="w", pady=(6, 0))
+        ttk.Label(left, text="Copy Verification", style="CardSection.TLabel").grid(row=8, column=0, sticky="w", pady=(6, 0))
         verify_combo = ttk.Combobox(
             left,
             textvariable=self.verify_var,
@@ -179,19 +175,26 @@ class DSBApp(tk.Tk):
             left,
             text="Dry Run (preview only, do not copy files)",
             variable=self.dry_run_var,
+            style="Card.TCheckbutton",
         ).grid(row=10, column=0, columnspan=3, sticky="w", pady=(2, 10))
 
-        ttk.Label(left, text="Backup Rule").grid(row=11, column=0, sticky="w")
-        ttk.Label(left, text="YYYY / MM / MMDD / file_type").grid(row=12, column=0, columnspan=3, sticky="w")
-        ttk.Label(left, text="Example: 2026 / 05 / 0503 / cr3").grid(row=13, column=0, columnspan=3, sticky="w")
+        ttk.Label(left, text="Backup Rule", style="CardSection.TLabel").grid(row=11, column=0, sticky="w")
+        ttk.Label(left, text="YYYY / MM / MMDD / file_type", style="CardMuted.TLabel").grid(
+            row=12, column=0, columnspan=3, sticky="w", pady=(2, 0)
+        )
+        ttk.Label(left, text="Example: 2026 / 05 / 0503 / cr3", style="CardMuted.TLabel").grid(
+            row=13, column=0, columnspan=3, sticky="w"
+        )
 
-        buttons = ttk.Frame(left)
+        buttons = ttk.Frame(left, style="CardInner.TFrame")
         buttons.grid(row=14, column=0, columnspan=3, sticky="ew", pady=(16, 8))
         for column in range(3):
             buttons.columnconfigure(column, weight=1)
         self.analyze_button = ttk.Button(buttons, text="Analyze Files", command=self._start_analysis)
         self.preview_button = ttk.Button(buttons, text="Preview Tree", command=self._preview_tree)
-        self.backup_button = ttk.Button(buttons, text="Start Backup", command=self._start_backup)
+        self.backup_button = ttk.Button(
+            buttons, text="Start Backup", style="Accent.TButton", command=self._start_backup
+        )
         self.cancel_button = ttk.Button(buttons, text="Cancel", command=self._cancel_task)
         self.open_button = ttk.Button(buttons, text="Open Backup Folder", command=self._open_backup_folder)
         self.handoff_button = ttk.Button(
@@ -208,59 +211,50 @@ class DSBApp(tk.Tk):
         progress_frame.grid(row=15, column=0, columnspan=3, sticky="ew", pady=(10, 0))
         progress_frame.columnconfigure(0, weight=1)
         ttk.Progressbar(progress_frame, variable=self.progress_var, maximum=100).grid(row=0, column=0, sticky="ew")
-        ttk.Label(progress_frame, textvariable=self.status_var).grid(row=1, column=0, sticky="w", pady=(8, 0))
+        ttk.Label(progress_frame, textvariable=self.status_var, style="CardMuted.TLabel").grid(
+            row=1, column=0, sticky="w", pady=(8, 0)
+        )
 
         right.rowconfigure(3, weight=2)
         right.rowconfigure(5, weight=3)
 
-        ttk.Label(right, text="Summary", font=("Segoe UI", 11, "bold")).grid(row=0, column=0, sticky="w")
-        summary_label = ttk.Label(right, textvariable=self.summary_var, justify="left")
+        ttk.Label(right, text="Summary", style="CardSection.TLabel").grid(row=0, column=0, sticky="w")
+        summary_label = ttk.Label(right, textvariable=self.summary_var, justify="left", style="Card.TLabel")
         summary_label.grid(row=1, column=0, sticky="ew", pady=(4, 12))
 
-        ttk.Label(right, text="Date Preview", font=("Segoe UI", 11, "bold")).grid(row=2, column=0, sticky="w")
+        ttk.Label(right, text="Date Preview", style="CardSection.TLabel").grid(row=2, column=0, sticky="w")
         columns = ("date", "folder", "files", "status")
         self.preview_treeview = ttk.Treeview(right, columns=columns, show="headings", height=10)
-        self.preview_treeview.grid(row=3, column=0, sticky="nsew")
+        self.preview_treeview.grid(row=3, column=0, sticky="nsew", pady=(6, 0))
         for column, width in zip(columns, (110, 220, 220, 100)):
             self.preview_treeview.heading(column, text=column.title())
             self.preview_treeview.column(column, width=width, anchor="w")
         tree_scroll = ttk.Scrollbar(right, orient="vertical", command=self.preview_treeview.yview)
-        tree_scroll.grid(row=3, column=1, sticky="ns")
+        tree_scroll.grid(row=3, column=1, sticky="ns", pady=(6, 0))
         self.preview_treeview.configure(yscrollcommand=tree_scroll.set)
 
-        ttk.Label(right, text="Folder Tree Preview", font=("Segoe UI", 11, "bold")).grid(
+        ttk.Label(right, text="Folder Tree Preview", style="CardSection.TLabel").grid(
             row=4, column=0, sticky="w", pady=(12, 0)
         )
         self.folder_preview = tk.Text(right, height=10, wrap="none")
-        self.folder_preview.grid(row=5, column=0, sticky="nsew")
+        style_text_widget(self.folder_preview)
+        self.folder_preview.grid(row=5, column=0, sticky="nsew", pady=(6, 0))
         folder_scroll = ttk.Scrollbar(right, orient="vertical", command=self.folder_preview.yview)
-        folder_scroll.grid(row=5, column=1, sticky="ns")
+        folder_scroll.grid(row=5, column=1, sticky="ns", pady=(6, 0))
         self.folder_preview.configure(yscrollcommand=folder_scroll.set)
 
-        ttk.Label(right, text="Log", font=("Segoe UI", 11, "bold")).grid(row=6, column=0, sticky="w", pady=(12, 0))
+        ttk.Label(right, text="Log", style="CardSection.TLabel").grid(row=6, column=0, sticky="w", pady=(12, 0))
         self.log_text = tk.Text(right, height=12, wrap="word")
-        self.log_text.grid(row=7, column=0, sticky="nsew")
+        style_text_widget(self.log_text)
+        self.log_text.grid(row=7, column=0, sticky="nsew", pady=(6, 0))
         log_scroll = ttk.Scrollbar(right, orient="vertical", command=self.log_text.yview)
-        log_scroll.grid(row=7, column=1, sticky="ns")
+        log_scroll.grid(row=7, column=1, sticky="ns", pady=(6, 0))
         self.log_text.configure(yscrollcommand=log_scroll.set)
         right.rowconfigure(7, weight=2)
 
     def _bind_events(self) -> None:
         self.source_var.trace_add("write", lambda *_: self._update_button_states())
         self.destination_var.trace_add("write", lambda *_: self._update_button_states())
-
-    def _apply_window_branding(self) -> None:
-        icon_image = self._load_brand_image(APP_ICON_32)
-        if icon_image:
-            self.iconphoto(True, icon_image)
-
-    def _load_brand_image(self, relative_path: Path) -> tk.PhotoImage | None:
-        path = get_branding_asset_path(relative_path)
-        if not path.exists():
-            return None
-        image = tk.PhotoImage(file=str(path))
-        self.brand_images.append(image)
-        return image
 
     def _browse_source(self) -> None:
         selected = filedialog.askdirectory(title="Select source folder")

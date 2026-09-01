@@ -20,6 +20,8 @@ class StepState:
     description: str
     last_folder: str = ""
     launch_args: list[str] = field(default_factory=list)
+    number: str = ""
+    short_title: str = ""
 
     @property
     def has_session(self) -> bool:
@@ -50,25 +52,33 @@ def gather_workflow_state() -> list[StepState]:
         StepState(
             key="ndex_one",
             title="1. Backup - NDEX One",
-            description="Copy camera/SD files into the date-based library",
+            short_title="Backup",
+            number="01",
+            description="Copy camera or SD files into the date-based library.",
             last_folder=backup_destination,
         ),
         StepState(
             key="image_manager",
             title="2. Select & Rate - Image Manager",
-            description="Browse pairs, pick, rate, export XMP",
+            short_title="Select & Rate",
+            number="02",
+            description="Browse pairs, pick, rate, and export XMP sidecars.",
             last_folder=manager_source or backup_destination,
         ),
         StepState(
             key="auto_selector",
             title="3. Extract - Auto Selector",
-            description="Match selected JPGs to CR3 originals + XMP",
+            short_title="Extract",
+            number="03",
+            description="Match selected JPGs to RAW masters and write XMP.",
             last_folder=selector_jpg,
         ),
         StepState(
             key="frame",
             title="4. Frame & Export - NDEX Frame",
-            description="Preview Masters and export framed Instagram images",
+            short_title="Frame & Export",
+            number="04",
+            description="Place masters on a crop-free canvas for Instagram.",
             last_folder=frame_source,
         ),
     ]

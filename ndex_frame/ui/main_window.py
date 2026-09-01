@@ -6,7 +6,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from PySide6.QtCore import QSignalBlocker, Qt, Slot
-from PySide6.QtGui import QCloseEvent, QColor, QImage, QPixmap
+from PySide6.QtGui import QCloseEvent, QColor, QIcon, QImage, QPixmap
 from PySide6.QtWidgets import (
     QColorDialog,
     QComboBox,
@@ -29,7 +29,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ndex_common.branding import NDEX_FRAME_TITLE
+from ndex_common.branding import APP_ICON_ICO, NDEX_FRAME_TITLE, get_branding_asset_path
+from ndex_common.theme import apply_qt_theme
 from ndex_frame.core.framing_choices import normalize_hex_color
 from ndex_frame.core.geometry import resolve_canvas
 from ndex_frame.core.models import AspectRatio, FramePreset, OutputProfile, RenderPlan, SourceItem
@@ -70,6 +71,10 @@ class MainWindow(QMainWindow):
         self._busy = False
         self.setWindowTitle(NDEX_FRAME_TITLE)
         self.resize(1180, 760)
+        apply_qt_theme(self)
+        icon_path = get_branding_asset_path(APP_ICON_ICO)
+        if icon_path.exists():
+            self.setWindowIcon(QIcon(str(icon_path)))
         self._build_toolbar()
         self._build_workspace()
         self._reload_preset_combos()
@@ -126,11 +131,19 @@ class MainWindow(QMainWindow):
     def _build_workspace(self) -> None:
         root = QWidget()
         root_layout = QVBoxLayout(root)
+        root_layout.setContentsMargins(0, 0, 0, 0)
+        root_layout.setSpacing(0)
         splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.setHandleWidth(1)
 
         left = QWidget()
+        left.setObjectName("thumbPanel")
+        left.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         left_layout = QVBoxLayout(left)
+        left_layout.setContentsMargins(14, 16, 12, 16)
+        left_layout.setSpacing(8)
         images_label = QLabel("Images")
+        images_label.setObjectName("sectionLabel")
         self.thumbnail_view = QListWidget()
         images_label.setBuddy(self.thumbnail_view)
         self.thumbnail_view.setAccessibleName("Source Images")
@@ -141,9 +154,18 @@ class MainWindow(QMainWindow):
         self.preview_widget = PreviewWidget()
 
         self.frame_panel = QWidget()
-        self.frame_panel.setMinimumWidth(225)
+        self.frame_panel.setObjectName("sidePanel")
+        self.frame_panel.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.frame_panel.setMinimumWidth(270)
         frame_layout = QFormLayout(self.frame_panel)
-        frame_layout.addRow(QLabel("Frame"))
+        frame_layout.setContentsMargins(16, 16, 16, 16)
+        frame_layout.setHorizontalSpacing(10)
+        frame_layout.setVerticalSpacing(10)
+        frame_layout.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        frame_layout.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
+        frame_heading = QLabel("Frame")
+        frame_heading.setObjectName("sectionLabel")
+        frame_layout.addRow(frame_heading)
         ratio_row = QWidget()
         ratio_layout = QHBoxLayout(ratio_row)
         ratio_layout.setContentsMargins(0, 0, 0, 0)
@@ -165,7 +187,10 @@ class MainWindow(QMainWindow):
             make_background_preset_buttons(self._apply_background, self._pick_background)
         )
         self.background_label = QLabel()
-        frame_layout.addRow("Background", background_presets)
+        self.background_label.setObjectName("mutedLabel")
+        # Keep the label readable and give swatches + Custom a full-width row.
+        frame_layout.addRow("Background", self.background_label)
+        frame_layout.addRow("", background_presets)
         scale_row = QWidget()
         scale_layout = QHBoxLayout(scale_row)
         scale_layout.setContentsMargins(0, 0, 0, 0)
@@ -203,13 +228,20 @@ class MainWindow(QMainWindow):
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
         splitter.setStretchFactor(2, 0)
-        splitter.setSizes([210, 730, 240])
+        splitter.setSizes([210, 690, 280])
         root_layout.addWidget(splitter, 1)
 
-        bottom = QHBoxLayout()
+        footer = QWidget()
+        footer.setObjectName("footerBar")
+        footer.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        bottom = QHBoxLayout(footer)
+        bottom.setContentsMargins(16, 10, 16, 12)
+        bottom.setSpacing(10)
         self.output_folder_button = QPushButton("Output Folder")
         self.output_folder_label = QLabel("Not selected")
+        self.output_folder_label.setObjectName("mutedLabel")
         self.result_summary_label = QLabel()
+        self.result_summary_label.setObjectName("mutedLabel")
         self.export_progress_bar = QProgressBar()
         self.export_progress_bar.setAccessibleName("Export progress")
         self.export_progress_bar.setTextVisible(True)
@@ -217,6 +249,7 @@ class MainWindow(QMainWindow):
         self.export_progress_bar.hide()
         self.export_selected_button = QPushButton("Export Selected")
         self.export_all_button = QPushButton("Export All")
+        self.export_all_button.setObjectName("primaryButton")
         self.cancel_button = QPushButton("Cancel")
         self.cancel_button.hide()
         bottom.addWidget(self.output_folder_button)
@@ -226,7 +259,7 @@ class MainWindow(QMainWindow):
         bottom.addWidget(self.export_selected_button)
         bottom.addWidget(self.export_all_button)
         bottom.addWidget(self.cancel_button)
-        root_layout.addLayout(bottom)
+        root_layout.addWidget(footer)
         self.setCentralWidget(root)
 
     def _connect_signals(self) -> None:

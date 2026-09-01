@@ -7,7 +7,7 @@ from tkinter import filedialog, messagebox, ttk
 
 from PIL import Image, ImageOps, ImageTk
 
-from src.branding import APP_ICON_32, APP_ICON_64, APP_WORDMARK_HEADER, NDEX_IMAGE_MANAGER_TITLE, get_branding_asset_path
+from src.branding import NDEX_IMAGE_MANAGER_TITLE
 
 from ..core.models import ExportOptions, ImageRecord
 from ..services.backup import BackupService
@@ -18,6 +18,17 @@ from ..services.xmp_export import XmpExportService
 
 from ndex_common.launch import launch_app
 from ndex_common.settings import get_section, update_section
+from ndex_common.theme import (
+    APP_BG,
+    CARD_BG,
+    STAR,
+    TEXT_MUTED,
+    TEXT_PRIMARY,
+    apply_tk_theme,
+    apply_window_icon,
+    build_app_header,
+    style_text_widget,
+)
 
 SETTINGS_SECTION = "image_manager"
 
@@ -25,12 +36,6 @@ STAR_FILLED = "\u2605"
 STAR_EMPTY = "\u2606"
 SORT_ASC = "\u2191"
 SORT_DESC = "\u2193"
-APP_BG = "#f5f7fb"
-CARD_BG = "#ffffff"
-PANEL_BG = "#0f172a"
-TEXT_PRIMARY = "#18202f"
-TEXT_MUTED = "#64748b"
-ACCENT = "#2563eb"
 PREVIEW_BACKGROUNDS = {
     "50% Gray": "#808080",
     "Dark Gray": "#1f2933",
@@ -52,7 +57,7 @@ class ImageManagerApp(tk.Tk):
         self.geometry("1320x820")
         self.minsize(1040, 680)
         self.brand_images: list[tk.PhotoImage] = []
-        self._apply_window_branding()
+        apply_window_icon(self, self.brand_images)
 
         self.source_dir: Path | None = None
         self.catalog: Catalog | None = None
@@ -77,7 +82,7 @@ class ImageManagerApp(tk.Tk):
         self.catalog_status = tk.StringVar(value="0 images")
         self.summary_text = tk.StringVar(value="Select an image to see EXIF summary.")
 
-        self._configure_style()
+        apply_tk_theme(self)
         self._build_menu()
         self._build_ui()
         self._bind_shortcuts()
@@ -96,43 +101,6 @@ class ImageManagerApp(tk.Tk):
         self.folder_status.set(source_dir.name)
         self._remember_last_folder()
         self.scan_folder()
-
-    def _configure_style(self) -> None:
-        style = ttk.Style(self)
-        try:
-            style.theme_use("clam")
-        except tk.TclError:
-            pass
-        self.configure(bg=APP_BG)
-        style.configure("TFrame", background=APP_BG)
-        style.configure("Card.TFrame", background=CARD_BG)
-        style.configure("Toolbar.TFrame", background=CARD_BG)
-        style.configure("TLabel", background=APP_BG, foreground=TEXT_PRIMARY, font=("Segoe UI", 9))
-        style.configure("Muted.TLabel", background=APP_BG, foreground=TEXT_MUTED, font=("Segoe UI", 9))
-        style.configure("Card.TLabel", background=CARD_BG, foreground=TEXT_PRIMARY, font=("Segoe UI", 9))
-        style.configure("CardMuted.TLabel", background=CARD_BG, foreground=TEXT_MUTED, font=("Segoe UI", 9))
-        style.configure("Title.TLabel", background=APP_BG, foreground=TEXT_PRIMARY, font=("Segoe UI", 16, "bold"))
-        style.configure("Accent.TButton", padding=(12, 6))
-        style.configure("TButton", padding=(9, 5), font=("Segoe UI", 9))
-        style.configure("TCombobox", padding=(3, 3))
-        style.configure(
-            "Treeview",
-            rowheight=29,
-            background=CARD_BG,
-            fieldbackground=CARD_BG,
-            foreground=TEXT_PRIMARY,
-            borderwidth=0,
-            font=("Segoe UI", 9),
-        )
-        style.configure(
-            "Treeview.Heading",
-            background="#eef2f7",
-            foreground="#334155",
-            borderwidth=0,
-            relief=tk.FLAT,
-            font=("Segoe UI", 9, "bold"),
-        )
-        style.map("Treeview", background=[("selected", "#dbeafe")], foreground=[("selected", TEXT_PRIMARY)])
 
     def _build_menu(self) -> None:
         menu_bar = tk.Menu(self)
@@ -213,36 +181,24 @@ class ImageManagerApp(tk.Tk):
         self.configure(menu=menu_bar)
 
     def _build_ui(self) -> None:
-        header = ttk.Frame(self, padding=(14, 10))
+        header = build_app_header(
+            self,
+            title=NDEX_IMAGE_MANAGER_TITLE,
+            tagline="Browse, rate, select, and export",
+            holder=self.brand_images,
+        )
         header.pack(fill=tk.X)
-        icon_image = self._load_brand_image(APP_ICON_64)
-        if icon_image:
-            ttk.Label(header, image=icon_image).pack(side=tk.LEFT, padx=(0, 12))
-        wordmark_image = self._load_brand_image(APP_WORDMARK_HEADER)
-        if wordmark_image:
-            ttk.Label(header, image=wordmark_image).pack(side=tk.LEFT)
-        else:
-            ttk.Label(
-                header,
-                text=NDEX_IMAGE_MANAGER_TITLE,
-                style="Title.TLabel",
-            ).pack(side=tk.LEFT)
-        ttk.Label(
-            header,
-            text="browse, rate, select, export",
-            style="Muted.TLabel",
-        ).pack(side=tk.LEFT, padx=(12, 0))
-        info = ttk.Frame(header)
+        info = ttk.Frame(header, style="Header.TFrame")
         info.pack(side=tk.RIGHT)
         ttk.Label(info, textvariable=self.folder_status, style="Muted.TLabel").pack(anchor=tk.E)
         ttk.Label(info, textvariable=self.catalog_status, style="Muted.TLabel").pack(anchor=tk.E)
 
-        toolbar_outer = ttk.Frame(self, padding=(10, 0, 10, 8))
+        toolbar_outer = ttk.Frame(self, padding=(16, 0, 16, 10))
         toolbar_outer.pack(fill=tk.X)
         toolbar = ttk.Frame(toolbar_outer, padding=(12, 8), style="Toolbar.TFrame")
         toolbar.pack(fill=tk.X)
 
-        ttk.Label(toolbar, text="Type").pack(side=tk.LEFT)
+        ttk.Label(toolbar, text="Type", style="Toolbar.TLabel").pack(side=tk.LEFT)
         file_filter = ttk.Combobox(
             toolbar,
             textvariable=self.file_filter,
@@ -250,10 +206,10 @@ class ImageManagerApp(tk.Tk):
             width=14,
             state="readonly",
         )
-        file_filter.pack(side=tk.LEFT, padx=(5, 12))
+        file_filter.pack(side=tk.LEFT, padx=(6, 14))
         file_filter.bind("<<ComboboxSelected>>", lambda event: self.refresh_records())
 
-        ttk.Label(toolbar, text="Pick").pack(side=tk.LEFT)
+        ttk.Label(toolbar, text="Pick", style="Toolbar.TLabel").pack(side=tk.LEFT)
         pick_filter = ttk.Combobox(
             toolbar,
             textvariable=self.pick_filter,
@@ -261,7 +217,7 @@ class ImageManagerApp(tk.Tk):
             width=10,
             state="readonly",
         )
-        pick_filter.pack(side=tk.LEFT, padx=(5, 12))
+        pick_filter.pack(side=tk.LEFT, padx=(6, 14))
         pick_filter.bind("<<ComboboxSelected>>", lambda event: self.refresh_records())
 
         ttk.Label(
@@ -271,7 +227,7 @@ class ImageManagerApp(tk.Tk):
         ).pack(side=tk.LEFT, padx=(8, 0))
 
         self.paned = ttk.PanedWindow(self, orient=tk.HORIZONTAL)
-        self.paned.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 8))
+        self.paned.pack(fill=tk.BOTH, expand=True, padx=16, pady=(0, 10))
 
         self.left_pane = ttk.Frame(self.paned, padding=0, style="Card.TFrame")
         self.paned.add(self.left_pane, weight=1)
@@ -379,9 +335,10 @@ class ImageManagerApp(tk.Tk):
             pady=4,
         )
         self.detail_text.pack(fill=tk.X, padx=0, pady=(0, 10))
+        style_text_widget(self.detail_text)
         self.detail_text.configure(state=tk.DISABLED)
 
-        bottom = ttk.Frame(self, padding=(10, 0, 10, 8))
+        bottom = ttk.Frame(self, padding=(16, 0, 16, 12), style="Footer.TFrame")
         bottom.pack(fill=tk.X)
         ttk.Label(bottom, textvariable=self.status, style="Muted.TLabel").pack(side=tk.LEFT)
         ttk.Label(bottom, textvariable=self.selection_status, style="Muted.TLabel").pack(side=tk.LEFT, padx=(18, 0))
@@ -414,19 +371,6 @@ class ImageManagerApp(tk.Tk):
         self.bind("<Control-o>", lambda event: self.choose_folder())
         self.bind("<Control-e>", lambda event: self.open_export_dialog())
         self.bind("<F5>", lambda event: self.rescan())
-
-    def _apply_window_branding(self) -> None:
-        icon_image = self._load_brand_image(APP_ICON_32)
-        if icon_image:
-            self.iconphoto(True, icon_image)
-
-    def _load_brand_image(self, relative_path: Path) -> tk.PhotoImage | None:
-        path = get_branding_asset_path(relative_path)
-        if not path.exists():
-            return None
-        image = tk.PhotoImage(file=str(path))
-        self.brand_images.append(image)
-        return image
 
     def choose_folder(self) -> None:
         selected = filedialog.askdirectory(title="Choose a shooting folder")
@@ -733,12 +677,13 @@ class ImageManagerApp(tk.Tk):
         )
         ttk.Label(body, text=help_text, style="CardMuted.TLabel").grid(row=5, column=0, columnspan=3, sticky=tk.W, pady=(10, 4))
 
-        button_row = ttk.Frame(body, style="Card.TFrame")
+        button_row = ttk.Frame(body, style="CardInner.TFrame")
         button_row.grid(row=6, column=0, columnspan=3, sticky=tk.E, pady=(12, 0))
         ttk.Button(button_row, text="Cancel", command=dialog.destroy).pack(side=tk.RIGHT)
         ttk.Button(
             button_row,
             text="Export",
+            style="Accent.TButton",
             command=lambda: self._run_export(
                 dialog,
                 records,
@@ -1087,7 +1032,7 @@ def _resolution_text(record: ImageRecord) -> str:
 
 def _refresh_star_labels(labels: list[tk.Label], rating: int) -> None:
     for index, star in enumerate(labels, start=1):
-        star.configure(text=STAR_FILLED if index <= rating else STAR_EMPTY, fg="#d49b10" if index <= rating else "#6b7280")
+        star.configure(text=STAR_FILLED if index <= rating else STAR_EMPTY, fg=STAR if index <= rating else "#6b7280")
 
 
 def run_app(initial_source: Path | None = None) -> None:
