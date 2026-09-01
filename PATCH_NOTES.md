@@ -2,6 +2,14 @@
 
 ## 2026-09-01
 
+### Release 1.0.1 — UI consistency
+
+- Shared visual theme across Launcher, NDEX One, Image Manager, Auto Selector, and Frame.
+- Consistent headers, cards, accent actions, and spacing in the Tk apps.
+- NDEX Frame matches the suite chrome (Fusion stylesheet, side panels, primary Export All).
+- Frame background color swatches no longer clip; Custom… stays fully visible.
+- Package artifacts: `NDEX_v1.0.1.zip` / `NDEX_Setup_1.0.1.exe`.
+
 ### Release 1.0.0 and source-only main
 
 - Windows users download `NDEX_v1.0.0.zip` from GitHub Releases and run `NDEX_Launcher.exe`.

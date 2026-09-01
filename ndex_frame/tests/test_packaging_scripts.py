@@ -147,8 +147,9 @@ class PackagingScriptTests(unittest.TestCase):
         korean = (REPO_ROOT / "README.ko.md").read_text(encoding="utf-8")
         self.assertIn("## Quick start", english)
         self.assertIn("## 빠른 시작", korean)
-        self.assertIn("NDEX_Setup_1.0.0.exe", english)
-        self.assertIn("NDEX_Setup_1.0.0.exe", korean)
+        version = _ndex_version()
+        self.assertIn(f"NDEX_Setup_{version}.exe", english)
+        self.assertIn(f"NDEX_Setup_{version}.exe", korean)
         self.assertIn("Apps\\", english)
         self.assertIn("Apps\\", korean)
         self.assertIn("[한국어](README.ko.md)", english)
@@ -171,8 +172,9 @@ class PackagingScriptTests(unittest.TestCase):
         korean = (REPO_ROOT / "README.ko.md").read_text(encoding="utf-8")
         self.assertIn("https://github.com/electroaria7/NDEX/releases", english)
         self.assertIn("https://github.com/electroaria7/NDEX/releases", korean)
-        self.assertIn("NDEX_v1.0.0.zip", english)
-        self.assertIn("NDEX_v1.0.0.zip", korean)
+        version = _ndex_version()
+        self.assertIn(f"NDEX_v{version}.zip", english)
+        self.assertIn(f"NDEX_v{version}.zip", korean)
         self.assertNotIn("distribution branch", english.lower())
         self.assertNotIn("distribution 브랜치", korean)
 
@@ -184,7 +186,7 @@ class PackagingScriptTests(unittest.TestCase):
             "ndex_launcher/build/NDEX_Launcher.spec",
             "ndex_frame/build/NDEX_Frame.spec",
             "ndex_frame/dist/NDEX_Frame.exe",
-            "release/NDEX_v1.0.0/NDEX_Launcher.exe",
+            f"release/NDEX_v{_ndex_version()}/NDEX_Launcher.exe",
         )
         kept = (
             "build/installer.iss",

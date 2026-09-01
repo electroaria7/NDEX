@@ -9,12 +9,12 @@
 
 **Windows 패키지 (권장)**
 
-1. [Releases](https://github.com/electroaria7/NDEX/releases)에서 `NDEX_v1.0.0.zip`을 받습니다.
+1. [Releases](https://github.com/electroaria7/NDEX/releases)에서 `NDEX_v1.0.1.zip`을 받습니다.
 2. 압축을 풉니다. `Apps\` 폴더는 그대로 둡니다.
 3. `NDEX_Launcher.exe`를 더블클릭합니다.
 4. 카드 순서대로 진행합니다: **1. Backup** → **2. Select & Rate** → **3. Extract** → **4. Frame & Export**.
 
-**설치본 (`NDEX_Setup_1.0.0.exe`)**
+**설치본 (`NDEX_Setup_1.0.1.exe`)**
 
 설치 프로그램이 있을 때:
 
@@ -85,7 +85,7 @@ Frame 데이터: `%LOCALAPPDATA%\NDEX\Frame\`
 ## 패키지 구성 (설치본·포터블)
 
 ```
-NDEX_v1.0.0\                  설치 위치: C:\Program Files\NDEX\
+NDEX_v1.0.1\                  설치 위치: C:\Program Files\NDEX\
   NDEX_Launcher.exe           여기서 시작
   Apps\
     NDEX_One.exe
@@ -115,7 +115,7 @@ powershell -ExecutionPolicy Bypass -File .\build_all.ps1
 powershell -ExecutionPolicy Bypass -File .\build_all.ps1 -Installer
 ```
 
-결과: `release\NDEX_v1.0.0\` (포터블)과 `release\NDEX_Setup_1.0.0.exe`.
+결과: `release\NDEX_v1.0.1\` (포터블)과 `release\NDEX_Setup_1.0.1.exe`.
 
 ```powershell
 python -m ndex_launcher.main
