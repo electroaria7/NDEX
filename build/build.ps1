@@ -26,6 +26,8 @@ else {
 }
 
 if ($Installer) {
+    Write-Host "The suite installer ships all five apps from the assembled release folder."
+    Write-Host "Prefer: powershell -ExecutionPolicy Bypass -File .\build_all.ps1 -Installer"
     $Iscc = Get-Command ISCC -ErrorAction SilentlyContinue
     if (-not $Iscc) {
         throw "Inno Setup (ISCC) is not installed. Install it first, then rerun with -Installer."

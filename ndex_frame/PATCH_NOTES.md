@@ -28,6 +28,15 @@
 
 - Covered swatch accessible names, ratio/size shortcut buttons, Apply All, and progress-bar show/update/hide.
 
+### Suite installer and launcher workflow
+
+- NDEX Launcher already exposes the four-step workflow: Backup (NDEX One) → Select (Image Manager) → Extract (Auto Selector) → Frame (NDEX Frame).
+- Replaced the NDEX One-only Inno Setup script with a **NDEX 1.0.0 suite installer**.
+- Installs the assembled portable folder into `{autopf}\NDEX` so all five EXEs stay side by side (required for in-app handoff).
+- Start Menu group **NDEX** lists Launcher plus numbered workflow shortcuts 1–4, including **4. Frame & Export - NDEX Frame**.
+- Desktop icon launches **NDEX Launcher**.
+- Build with `build_all.ps1 -Installer` (requires Inno Setup `ISCC`) to produce `release\NDEX_Setup_1.0.0.exe`.
+
 
 ## 2026-08-30
 

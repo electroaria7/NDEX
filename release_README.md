@@ -3,6 +3,11 @@
 Portable release. No installation needed: keep the five EXE files in one
 folder so the apps can launch each other (workflow handoff).
 
+The Windows installer (`NDEX_Setup_1.0.0.exe`) puts that same folder under
+`C:\Program Files\NDEX` and adds Start Menu shortcuts for the four-step
+workflow. Open **NDEX Launcher** first; it covers Backup, Select, Extract,
+and Frame.
+
 ## Apps
 
 | App | Role |
@@ -40,6 +45,7 @@ Saved presets stay in **Manage Presets**. Frame data lives under `%LOCALAPPDATA%
 - NDEX Frame: ratio and background shortcuts on the main screen (no hex typing).
 - NDEX Frame: photo-size presets 80 / 90 / 95% and **Apply Current Framing to All**.
 - NDEX Frame: export progress bar with filename and current / total.
+- NDEX installer: ships all five apps into `C:\Program Files\NDEX`, with Start Menu shortcuts for the 1–4 workflow and a desktop icon for NDEX Launcher.
 
 ## Settings
 

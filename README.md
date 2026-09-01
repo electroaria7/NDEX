@@ -74,6 +74,14 @@ powershell -ExecutionPolicy Bypass -File .\build_all.ps1
 
 결과: `release\NDEX_v{버전}\` — EXE 5개는 반드시 같은 폴더에 유지 (앱 간 핸드오프가 옆 폴더에서 실행파일을 찾음). 무설치 포터블.
 
+설치본(Inno Setup, ISCC 필요):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\build_all.ps1 -Installer
+```
+
+결과: `release\NDEX_Setup_1.0.0.exe` — `C:\Program Files\NDEX`에 Launcher와 5개 앱을 설치하고, 시작 메뉴에 1–4단계 워크플로 바로가기를 만듭니다. 바탕화면 아이콘은 **NDEX Launcher**입니다.
+
 개발 실행:
 
 ```powershell

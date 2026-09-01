@@ -2,9 +2,11 @@
 # Usage:
 #   powershell -ExecutionPolicy Bypass -File .\build_all.ps1
 #   powershell -ExecutionPolicy Bypass -File .\build_all.ps1 -SkipBuild   # assemble only
+#   powershell -ExecutionPolicy Bypass -File .\build_all.ps1 -Installer   # also compile NDEX_Setup_*.exe
 
 param(
-    [switch]$SkipBuild
+    [switch]$SkipBuild,
+    [switch]$Installer
 )
 
 $ErrorActionPreference = "Stop"
@@ -59,6 +61,10 @@ foreach ($artifact in $artifacts) {
 
 # Bundle docs and third-party license notes
 Copy-Item (Join-Path $repoRoot "release_README.md") (Join-Path $releaseDir "README.md") -Force
+$frameNotes = Join-Path $repoRoot "ndex_frame\PATCH_NOTES.md"
+if (Test-Path $frameNotes) {
+    Copy-Item $frameNotes (Join-Path $releaseDir "FRAME_PATCH_NOTES.md") -Force
+}
 $notices = Join-Path $repoRoot "THIRD_PARTY_NOTICES.md"
 if (Test-Path $notices) {
     Copy-Item $notices (Join-Path $releaseDir "THIRD_PARTY_NOTICES.md") -Force
@@ -76,6 +82,18 @@ if (Test-Path $exiftoolDir) {
 if ($missing.Count -gt 0) {
     Write-Warning "Missing artifacts (build them first): $($missing -join ', ')"
     exit 1
+}
+
+if ($Installer) {
+    $iscc = Get-Command ISCC -ErrorAction SilentlyContinue
+    if (-not $iscc) {
+        throw "Inno Setup (ISCC) is not installed. Install it, then rerun with -Installer."
+    }
+    Write-Host "Compiling suite installer"
+    & $iscc.Source (Join-Path $repoRoot "build\installer.iss")
+    if ($LASTEXITCODE -ne 0) {
+        throw "Inno Setup failed with exit code $LASTEXITCODE"
+    }
 }
 
 Write-Host "Release ready: $releaseDir"
