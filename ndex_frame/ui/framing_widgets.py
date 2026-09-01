@@ -40,9 +40,9 @@ def make_background_swatches(
         button.setFixedSize(28, 28)
         button.setToolTip(name)
         button.setAccessibleName(name)
-        outline = "#888888" if color.upper() in {"#FFFFFF", "#D0D0D0"} else "#222222"
+        outline = "#C3CDDB" if color.upper() in {"#FFFFFF", "#D0D0D0"} else "#1B2433"
         button.setStyleSheet(
-            f"background-color: {color}; border: 1px solid {outline}; border-radius: 4px;"
+            f"background-color: {color}; border: 1px solid {outline}; border-radius: 6px;"
         )
         button.clicked.connect(lambda _checked=False, value=color: on_click(value))
         layout.addWidget(button)

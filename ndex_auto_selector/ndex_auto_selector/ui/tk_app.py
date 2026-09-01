@@ -6,19 +6,15 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
-from src.branding import APP_ICON_32, APP_ICON_64, APP_WORDMARK_HEADER, NDEX_AUTO_SELECTOR_TITLE, get_branding_asset_path
+from src.branding import NDEX_AUTO_SELECTOR_TITLE
 
 from ndex_common.settings import get_section, update_section
+from ndex_common.theme import apply_tk_theme, apply_window_icon, build_app_header, style_text_widget
 
 from ..core.models import AnalysisSummary
 from ..services.selector import AutoSelectorService
 
 SETTINGS_SECTION = "auto_selector"
-
-APP_BG = "#f5f7fb"
-CARD_BG = "#ffffff"
-TEXT_PRIMARY = "#18202f"
-TEXT_MUTED = "#64748b"
 
 
 class AutoSelectorApp(tk.Tk):
@@ -36,7 +32,7 @@ class AutoSelectorApp(tk.Tk):
         self.geometry("1080x720")
         self.minsize(940, 620)
         self.brand_images: list[tk.PhotoImage] = []
-        self._apply_window_branding()
+        apply_window_icon(self, self.brand_images)
 
         self.service = AutoSelectorService()
         self.ui_queue: queue.Queue = queue.Queue()
@@ -55,7 +51,7 @@ class AutoSelectorApp(tk.Tk):
         self.summary_var = tk.StringVar(value="분석 전입니다.")
         self.progress_var = tk.DoubleVar(value=0.0)
 
-        self._configure_style()
+        apply_tk_theme(self)
         self._build_ui()
         self._bind_events()
         self._apply_initial_paths()
@@ -88,42 +84,19 @@ class AutoSelectorApp(tk.Tk):
         if self._initial_selected_jpg and not self._initial_raw_source:
             self.status_var.set("셀렉 JPG 폴더가 연동되었습니다. 원본 CR3 폴더를 선택하세요.")
 
-    def _configure_style(self) -> None:
-        style = ttk.Style(self)
-        try:
-            style.theme_use("clam")
-        except tk.TclError:
-            pass
-        self.configure(bg=APP_BG)
-        style.configure("TFrame", background=APP_BG)
-        style.configure("Card.TFrame", background=CARD_BG)
-        style.configure("TLabel", background=APP_BG, foreground=TEXT_PRIMARY, font=("Segoe UI", 9))
-        style.configure("Muted.TLabel", background=APP_BG, foreground=TEXT_MUTED, font=("Segoe UI", 9))
-        style.configure("Title.TLabel", background=APP_BG, foreground=TEXT_PRIMARY, font=("Segoe UI", 16, "bold"))
-        style.configure("Card.TLabel", background=CARD_BG, foreground=TEXT_PRIMARY, font=("Segoe UI", 9))
-        style.configure("CardMuted.TLabel", background=CARD_BG, foreground=TEXT_MUTED, font=("Segoe UI", 9))
-        style.configure("TButton", padding=(10, 6), font=("Segoe UI", 9))
-        style.configure("Treeview", rowheight=28, background=CARD_BG, fieldbackground=CARD_BG, foreground=TEXT_PRIMARY)
-        style.configure("Treeview.Heading", background="#eef2f7", foreground="#334155", font=("Segoe UI", 9, "bold"))
-        style.map("Treeview", background=[("selected", "#dbeafe")], foreground=[("selected", TEXT_PRIMARY)])
-
     def _build_ui(self) -> None:
-        header = ttk.Frame(self, padding=(14, 10))
+        header = build_app_header(
+            self,
+            title=NDEX_AUTO_SELECTOR_TITLE,
+            tagline="Match selected JPGs to original RAW files",
+            holder=self.brand_images,
+        )
         header.pack(fill=tk.X)
-        icon_image = self._load_brand_image(APP_ICON_64)
-        if icon_image:
-            ttk.Label(header, image=icon_image).pack(side=tk.LEFT, padx=(0, 12))
-        wordmark_image = self._load_brand_image(APP_WORDMARK_HEADER)
-        if wordmark_image:
-            ttk.Label(header, image=wordmark_image).pack(side=tk.LEFT)
-        else:
-            ttk.Label(header, text=NDEX_AUTO_SELECTOR_TITLE, style="Title.TLabel").pack(side=tk.LEFT)
-        ttk.Label(header, text="selected JPG to original CR3 copier", style="Muted.TLabel").pack(side=tk.LEFT, padx=(12, 0))
 
         body = ttk.Panedwindow(self, orient=tk.HORIZONTAL)
-        body.pack(fill=tk.BOTH, expand=True, padx=14, pady=(0, 14))
-        left = ttk.Frame(body, padding=12, style="Card.TFrame")
-        right = ttk.Frame(body, padding=12, style="Card.TFrame")
+        body.pack(fill=tk.BOTH, expand=True, padx=16, pady=(0, 16))
+        left = ttk.Frame(body, padding=16, style="Card.TFrame")
+        right = ttk.Frame(body, padding=16, style="Card.TFrame")
         body.add(left, weight=2)
         body.add(right, weight=3)
 
@@ -132,11 +105,11 @@ class AutoSelectorApp(tk.Tk):
         self._path_row(left, 2, "셀렉 JPG 폴더", self.selected_jpg_var, self._browse_selected_jpg)
         self._path_row(left, 4, "작업용 폴더", self.work_folder_var, self._browse_work_folder)
 
-        ttk.Checkbutton(left, text="하위 폴더까지 검색", variable=self.recursive_var).grid(
-            row=6, column=0, columnspan=3, sticky="w", pady=(8, 10)
-        )
+        ttk.Checkbutton(
+            left, text="하위 폴더까지 검색", variable=self.recursive_var, style="Card.TCheckbutton"
+        ).grid(row=6, column=0, columnspan=3, sticky="w", pady=(8, 10))
 
-        ttk.Label(left, text="중복 파일 처리", style="Card.TLabel").grid(row=7, column=0, sticky="w")
+        ttk.Label(left, text="중복 파일 처리", style="CardSection.TLabel").grid(row=7, column=0, sticky="w")
         ttk.Combobox(
             left,
             textvariable=self.duplicate_var,
@@ -148,9 +121,10 @@ class AutoSelectorApp(tk.Tk):
             left,
             text="Create XMP sidecar for selected CR3",
             variable=self.write_xmp_var,
+            style="Card.TCheckbutton",
         ).grid(row=9, column=0, columnspan=3, sticky="w", pady=(0, 8))
 
-        ttk.Label(left, text="XMP rating", style="Card.TLabel").grid(row=10, column=0, sticky="w")
+        ttk.Label(left, text="XMP rating", style="CardSection.TLabel").grid(row=10, column=0, sticky="w")
         ttk.Combobox(
             left,
             textvariable=self.xmp_rating_var,
@@ -162,14 +136,17 @@ class AutoSelectorApp(tk.Tk):
             left,
             text="셀렉 JPG의 별점을 읽어 CR3 XMP에 복사 (없으면 위 값 사용)",
             variable=self.rating_from_jpg_var,
+            style="Card.TCheckbutton",
         ).grid(row=12, column=0, columnspan=3, sticky="w", pady=(0, 8))
 
-        buttons = ttk.Frame(left, style="Card.TFrame")
+        buttons = ttk.Frame(left, style="CardInner.TFrame")
         buttons.grid(row=13, column=0, columnspan=3, sticky="ew", pady=(8, 8))
         buttons.columnconfigure(0, weight=1)
         buttons.columnconfigure(1, weight=1)
         self.analyze_button = ttk.Button(buttons, text="매칭 분석", command=self.start_analysis)
-        self.copy_button = ttk.Button(buttons, text="CR3 복제 시작", command=self.start_copy)
+        self.copy_button = ttk.Button(
+            buttons, text="CR3 복제 시작", style="Accent.TButton", command=self.start_copy
+        )
         self.analyze_button.grid(row=0, column=0, sticky="ew", padx=(0, 6))
         self.copy_button.grid(row=0, column=1, sticky="ew", padx=(6, 0))
 
@@ -186,7 +163,7 @@ class AutoSelectorApp(tk.Tk):
         right.rowconfigure(1, weight=3)
         right.rowconfigure(3, weight=2)
         right.columnconfigure(0, weight=1)
-        ttk.Label(right, text="매칭 결과", style="Card.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Label(right, text="매칭 결과", style="CardSection.TLabel").grid(row=0, column=0, sticky="w")
         columns = ("jpg", "cr3", "status")
         self.match_tree = ttk.Treeview(right, columns=columns, show="headings", height=14)
         self.match_tree.grid(row=1, column=0, sticky="nsew", pady=(6, 10))
@@ -200,8 +177,9 @@ class AutoSelectorApp(tk.Tk):
         match_scroll.grid(row=1, column=1, sticky="ns", pady=(6, 10))
         self.match_tree.configure(yscrollcommand=match_scroll.set)
 
-        ttk.Label(right, text="로그", style="Card.TLabel").grid(row=2, column=0, sticky="w")
-        self.log_text = tk.Text(right, height=9, wrap="word", bg=CARD_BG, relief=tk.FLAT)
+        ttk.Label(right, text="로그", style="CardSection.TLabel").grid(row=2, column=0, sticky="w")
+        self.log_text = tk.Text(right, height=9, wrap="word")
+        style_text_widget(self.log_text)
         self.log_text.grid(row=3, column=0, sticky="nsew", pady=(6, 0))
         log_scroll = ttk.Scrollbar(right, orient="vertical", command=self.log_text.yview)
         log_scroll.grid(row=3, column=1, sticky="ns", pady=(6, 0))
@@ -215,19 +193,6 @@ class AutoSelectorApp(tk.Tk):
     def _bind_events(self) -> None:
         for variable in (self.raw_source_var, self.selected_jpg_var, self.work_folder_var):
             variable.trace_add("write", lambda *_: self._update_buttons())
-
-    def _apply_window_branding(self) -> None:
-        icon_image = self._load_brand_image(APP_ICON_32)
-        if icon_image:
-            self.iconphoto(True, icon_image)
-
-    def _load_brand_image(self, relative_path: Path) -> tk.PhotoImage | None:
-        path = get_branding_asset_path(relative_path)
-        if not path.exists():
-            return None
-        image = tk.PhotoImage(file=str(path))
-        self.brand_images.append(image)
-        return image
 
     def _browse_raw_source(self) -> None:
         selected = filedialog.askdirectory(title="원본 CR3 폴더 선택")

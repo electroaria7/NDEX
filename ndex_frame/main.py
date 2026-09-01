@@ -13,6 +13,7 @@ from PySide6.QtWidgets import QApplication
 
 from ndex_common import settings
 from ndex_common.branding import NDEX_FRAME_TITLE
+from ndex_common.theme import apply_qt_theme
 from ndex_frame.services.cache import PreviewCache
 from ndex_frame.services.export_job import CancelToken, ExportRequest, ExportResult, plan_export, run_export
 from ndex_frame.services.importer import analyze_source
@@ -139,6 +140,7 @@ def _run_smoke_export(source: Path, output_dir: Path) -> int:
 
 def _run_gui(args: argparse.Namespace) -> int:
     app = QApplication.instance() or QApplication(sys.argv[:1])
+    apply_qt_theme()
     root = _data_root()
     store = PresetStore(root)
     state = WorkspaceState(
