@@ -133,9 +133,10 @@ class RetrySelectionTests(unittest.TestCase):
             service = AutoSelectorService()
             summary = service.analyze(raw_source, selected)
             wanted = [selected / "IMG_0003.JPG", selected / "IMG_0001.JPG"]
-            found = service.matches_for(summary.matches, wanted)
+            found, missing = service.matches_for(summary.matches, wanted)
 
         self.assertEqual([match.jpg_path for match in found], wanted)
+        self.assertEqual(missing, [])
 
     def test_a_jpg_that_is_no_longer_in_the_folder_is_dropped(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -146,11 +147,24 @@ class RetrySelectionTests(unittest.TestCase):
 
             service = AutoSelectorService()
             summary = service.analyze(raw_source, selected)
-            found = service.matches_for(
+            found, missing = service.matches_for(
                 summary.matches, [selected / "IMG_0001.JPG", selected / "IMG_0404.JPG"]
             )
 
         self.assertEqual([match.jpg_path for match in found], [selected / "IMG_0001.JPG"])
+        self.assertEqual(missing, [selected / "IMG_0404.JPG"])
+
+    def test_note_missing_records_in_the_shape_copy_matches_uses(self) -> None:
+        from ndex_auto_selector.ndex_auto_selector.core.models import CopyResult
+
+        result = CopyResult(total=1)
+        AutoSelectorService.note_missing(result, [Path("D:/sel/IMG_0404.JPG")], "not in the selected JPG folder")
+
+        self.assertEqual(result.missing, 1)
+        self.assertEqual(result.total, 2)
+        self.assertEqual(result.items, [
+            {"path": str(Path("D:/sel/IMG_0404.JPG")), "status": "missing", "detail": "not in the selected JPG folder"}
+        ])
 
     def test_a_raw_added_since_the_failed_run_now_matches(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -165,7 +179,7 @@ class RetrySelectionTests(unittest.TestCase):
 
             # The point of a retry: the photographer went and found the RAW.
             (raw_source / "IMG_0001.CR3").write_text("raw", encoding="utf-8")
-            after = service.matches_for(service.analyze(raw_source, selected).matches, [jpg])
+            after, _missing = service.matches_for(service.analyze(raw_source, selected).matches, [jpg])
             result = service.copy_matches(after, root / "work")
 
         self.assertEqual(result.copied, 1)

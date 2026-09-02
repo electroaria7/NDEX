@@ -41,6 +41,7 @@ class DSBApp(tk.Tk):
         initial_source: Path | None = None,
         initial_destination: Path | None = None,
         preload_only: bool = False,
+        retry_manifest: Path | None = None,
     ):
         super().__init__()
         self.title(NDEX_ONE_TITLE)
@@ -63,7 +64,6 @@ class DSBApp(tk.Tk):
         self.is_busy = False
         self.pending_analysis: dict | None = None
         self.pending_backup: dict | None = None
-        self.pending_retry = None
 
         # With preload_only the caller passed the folders to use (NDEX handoff),
         # so remembered folders stay out of the way and "Open Empty" is empty.
@@ -102,6 +102,10 @@ class DSBApp(tk.Tk):
         self._bind_events()
         self._update_button_states()
         self.after(100, self._process_ui_queue)
+        if retry_manifest is not None:
+            # From the Launcher's "Retry in NDEX One...". Open at that job;
+            # the user presses Retry here, where the settings are visible.
+            self.after(150, lambda: self._open_job_results(select=Path(retry_manifest)))
 
     def _build_layout(self) -> None:
         self.columnconfigure(0, weight=1)
@@ -344,11 +348,7 @@ class DSBApp(tk.Tk):
         if not source.is_dir():
             messagebox.showerror("Invalid Source", "Select a valid source folder.")
             return
-        if destination.exists() and not destination.is_dir():
-            messagebox.showerror("Invalid Destination", "Backup destination must be a folder.")
-            return
-        if not destination.exists() and not destination.parent.exists():
-            messagebox.showerror("Invalid Destination", "Select a destination whose parent folder already exists.")
+        if not self._destination_usable(destination):
             return
         selected_types = self._selected_types()
         if not selected_types:
@@ -364,6 +364,16 @@ class DSBApp(tk.Tk):
         }
         self._set_busy(True, "Analyzing files...")
         self._run_worker(self._analyze_worker)
+
+    def _destination_usable(self, destination: Path) -> bool:
+        """A backup root that exists as a folder, or can be created in one."""
+        if destination.exists() and not destination.is_dir():
+            messagebox.showerror("Invalid Destination", "Backup destination must be a folder.")
+            return False
+        if not destination.exists() and not destination.parent.exists():
+            messagebox.showerror("Invalid Destination", "Select a destination whose parent folder already exists.")
+            return False
+        return True
 
     def _analyze_worker(self) -> None:
         summary = analyze_source(
@@ -405,6 +415,7 @@ class DSBApp(tk.Tk):
             "duplicate_policy": self._selected_duplicate_policy(),
             "verify_mode": self._selected_verify_mode(),
             "dry_run": self.dry_run_var.get(),
+            "retry": None,
         }
         self._set_busy(True, "Starting backup...")
         self._run_worker(self._backup_worker)
@@ -438,12 +449,16 @@ class DSBApp(tk.Tk):
                 "Could not find NDEX Image Manager. Build or install it first.",
             )
 
-    def _open_job_results(self) -> None:
+    def _open_job_results(self, select: Path | None = None) -> None:
         """Show what recent backups copied, skipped, or failed on."""
         from ndex_common.report_dialog import open_job_reports
 
         open_job_reports(
-            self, title=NDEX_ONE_TITLE, apps=("ndex_one",), retry=self._retry_backup
+            self,
+            title=NDEX_ONE_TITLE,
+            apps=("ndex_one",),
+            retry=self._retry_backup,
+            select=select,
         )
 
     def _retry_backup(self, plan) -> None:
@@ -463,27 +478,25 @@ class DSBApp(tk.Tk):
             )
             return
         destination = Path(plan.report.destination)
-        if not destination.parent.exists():
-            messagebox.showerror(
-                "Invalid Destination",
-                f"The backup destination of that job is gone: {destination}",
-            )
+        if not self._destination_usable(destination):
             return
 
-        self.pending_retry = plan
         self.pending_backup = {
+            "items": [],
             "source": plan.report.source,
             "destination": plan.report.destination,
             "duplicate_policy": self._selected_duplicate_policy(),
             "verify_mode": self._selected_verify_mode(),
             "dry_run": self.dry_run_var.get(),
+            "retry": plan,
         }
         verb = "Rehearsing" if self.pending_backup["dry_run"] else "Retrying"
         self._set_busy(True, f"{verb} {len(plan.paths)} file(s)...")
         self._run_worker(self._retry_worker)
 
     def _retry_worker(self) -> None:
-        plan = self.pending_retry
+        # Work out where the files belong, then back them up the ordinary way.
+        plan = self.pending_backup["retry"]
         items, _counts = build_scan_items(
             list(plan.paths),
             Path(plan.report.destination),
@@ -491,16 +504,8 @@ class DSBApp(tk.Tk):
             progress_callback=self._queue_progress,
             logger=self.logger,
         )
-        result = execute_backup(
-            items=items,
-            duplicate_policy=self.pending_backup["duplicate_policy"],
-            dry_run=self.pending_backup["dry_run"],
-            verify_mode=self.pending_backup["verify_mode"],
-            progress_callback=self._queue_progress,
-            logger=self.logger,
-            cancel_event=self.cancel_event,
-        )
-        self.ui_queue.put(("backup_done", result))
+        self.pending_backup["items"] = items
+        self._backup_worker()
 
     def _open_backup_folder(self) -> None:
         destination = Path(self.destination_var.get())
@@ -571,8 +576,8 @@ class DSBApp(tk.Tk):
                         f"{result.verification_failed} file(s) failed verification and "
                         f"{result.errors} total error(s) occurred.\n\n"
                         "Failed files were NOT written to the backup destination — "
-                        "existing backups are untouched. Check the log for details, "
-                        "then run the backup again to retry failed files.",
+                        "existing backups are untouched. Open Job Results and use "
+                        "Retry Failed to run just those files again.",
                     )
             elif kind == "error":
                 self._set_busy(False, item[1])
@@ -633,22 +638,15 @@ class DSBApp(tk.Tk):
     def _record_backup_session(self, result) -> None:
         from ndex_common.workflow import record_backup
 
-        plan = self.pending_retry
-        if plan is not None:
-            record_backup(
-                plan.report.source,
-                plan.report.destination,
-                result,
-                context=plan.context(),
-            )
-            return
         # The folders the job actually used. The form can have changed since
         # Analyze, and a manifest with the wrong destination misleads a retry.
-        pending = self.pending_backup or {}
+        job = self.pending_backup
+        plan = job["retry"]
         record_backup(
-            pending.get("source") or self.source_var.get().strip(),
-            pending.get("destination") or self.destination_var.get().strip(),
+            job["source"],
+            job["destination"],
             result,
+            context=plan.context() if plan is not None else None,
         )
 
     def _render_backup_result(self, result) -> None:
@@ -664,10 +662,6 @@ class DSBApp(tk.Tk):
 
     def _set_busy(self, busy: bool, status: str) -> None:
         self.is_busy = busy
-        # A retry belongs to the job that is ending; the next one starts clean
-        # even when this one stopped on an error.
-        if not busy:
-            self.pending_retry = None
         self.status_var.set(status)
         if not busy:
             self.progress_var.set(0.0)
@@ -692,10 +686,12 @@ def run_app(
     initial_source: Path | None = None,
     initial_destination: Path | None = None,
     preload_only: bool = False,
+    retry_manifest: Path | None = None,
 ) -> None:
     app = DSBApp(
         initial_source=initial_source,
         initial_destination=initial_destination,
         preload_only=preload_only,
+        retry_manifest=retry_manifest,
     )
     app.mainloop()

@@ -18,7 +18,7 @@ from pathlib import Path
 from tkinter import messagebox, ttk
 from typing import Callable, Iterable, Sequence
 
-from ndex_common.report import JobReport, recent_reports
+from ndex_common.report import JobReport, including, index_of, recent_reports
 from ndex_common.retry import RetryPlan, plan_retry, retryable, supports_retry
 from ndex_common.theme import (
     BODY_PAD,
@@ -41,14 +41,19 @@ def open_job_reports(
     apps: Sequence[str] | None = None,
     reports: Sequence[JobReport] | None = None,
     retry: Callable[[RetryPlan], None] | None = None,
+    open_in_app: Callable[[JobReport], None] | None = None,
+    select: Path | None = None,
 ) -> tk.Toplevel | None:
     """Open the results window, or explain that there is nothing to show.
 
     ``reports`` is for tests and for callers that already loaded them; normally
     the window reads the manifest folder itself. ``retry`` is what runs a job's
-    failed files again; without it the window has no Retry button.
+    failed files again. ``open_in_app`` is the Launcher's substitute: it cannot
+    run anything, so it hands the job to the app that can. ``select`` picks a
+    job on open, and is read in even when it has aged out of the recent list.
     """
     found = list(reports) if reports is not None else recent_reports(apps=apps, limit=_HISTORY_LIMIT)
+    found = including(found, select, apps=apps)
     if not found:
         messagebox.showinfo(
             title,
@@ -58,7 +63,9 @@ def open_job_reports(
             parent=parent,
         )
         return None
-    return JobReportWindow(parent, title=title, reports=found, retry=retry)
+    return JobReportWindow(
+        parent, title=title, reports=found, retry=retry, open_in_app=open_in_app, select=select
+    )
 
 
 class JobReportWindow(tk.Toplevel):
@@ -71,6 +78,8 @@ class JobReportWindow(tk.Toplevel):
         title: str,
         reports: Sequence[JobReport],
         retry: Callable[[RetryPlan], None] | None = None,
+        open_in_app: Callable[[JobReport], None] | None = None,
+        select: Path | None = None,
     ) -> None:
         super().__init__(parent)
         self.title(f"{title} - Job Results")
@@ -88,6 +97,7 @@ class JobReportWindow(tk.Toplevel):
         self.reports = list(reports)
         self.current: JobReport | None = None
         self.retry = retry
+        self.open_in_app = open_in_app
 
         body = ttk.Frame(self, padding=BODY_PAD)
         body.pack(fill=tk.BOTH, expand=True)
@@ -98,8 +108,10 @@ class JobReportWindow(tk.Toplevel):
         self._build_job_list(body)
         self._build_detail(body)
 
-        self.job_list.selection_set(self.job_list.get_children()[0])
-        self.job_list.focus(self.job_list.get_children()[0])
+        first = str(index_of(self.reports, select))
+        self.job_list.selection_set(first)
+        self.job_list.focus(first)
+        self.job_list.see(first)
         self._show_selected()
 
     def destroy(self) -> None:
@@ -173,6 +185,12 @@ class JobReportWindow(tk.Toplevel):
         if self.retry is not None:
             self.retry_button.pack(side=tk.LEFT, padx=(0, SPACE_SM))
 
+        # The Launcher cannot run a job. Its button opens the app that can,
+        # at this very job, and that app's own Retry button takes it from there.
+        self.open_app_button = ttk.Button(actions, text="Retry in app...", command=self._open_in_app)
+        if self.retry is None and self.open_in_app is not None:
+            self.open_app_button.pack(side=tk.LEFT, padx=(0, SPACE_SM))
+
         self.copy_button = ttk.Button(actions, text="Copy Problem Paths", command=self._copy_problems)
         self.copy_button.pack(side=tk.LEFT)
         self.source_button = ttk.Button(actions, text="Open Source Folder", command=self._open_source)
@@ -213,6 +231,10 @@ class JobReportWindow(tk.Toplevel):
         self.retry_button.state(
             ["!disabled"] if self.retry is not None and retryable(report) else ["disabled"]
         )
+        self.open_app_button.configure(text=f"Retry in {report.app_label}...")
+        self.open_app_button.state(
+            ["!disabled"] if self.open_in_app is not None and retryable(report) else ["disabled"]
+        )
         self.copy_button.state(["!disabled"] if problems else ["disabled"])
         self.source_button.state(["!disabled"] if _is_dir(report.source) else ["disabled"])
         self.destination_button.state(["!disabled"] if _is_dir(report.destination) else ["disabled"])
@@ -234,6 +256,14 @@ class JobReportWindow(tk.Toplevel):
         # is about to be one job out of date.
         self.destroy()
         run(plan)
+
+    def _open_in_app(self) -> None:
+        """Hand this job to the app that ran it; that app offers the retry."""
+        report, run = self.current, self.open_in_app
+        if report is None or run is None or not retryable(report):
+            return
+        self.destroy()
+        run(report)
 
     def _copy_problems(self) -> None:
         if self.current is None:

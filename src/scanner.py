@@ -77,8 +77,10 @@ def build_scan_items(
     uses that: the files came from a finished job, so the type checkboxes
     showing in the window now have no say over them.
     """
+    allowed = set(enabled_types) if enabled_types is not None else None
     items: list[ScanItem] = []
-    counts: dict[str, int] = {file_type: 0 for file_type in enabled_types or ()}
+    # Zero rows for every allowed type, so the summary can show "JPG: 0".
+    counts: dict[str, int] = {file_type: 0 for file_type in allowed or ()}
     if hasattr(metadata_extractor, "get_capture_datetimes"):
         metadata = metadata_extractor.get_capture_datetimes(files, logger=logger)
     else:
@@ -90,7 +92,7 @@ def build_scan_items(
     for index, file_path in enumerate(files, start=1):
         capture_datetime, metadata_source, fallback_used = metadata[file_path]
         file_type = get_file_type_folder(file_path)
-        if enabled_types is not None and file_type not in counts:
+        if allowed is not None and file_type not in allowed:
             continue
 
         destination_dir = build_destination_dir(backup_root, capture_datetime, file_type)

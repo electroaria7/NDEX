@@ -26,7 +26,7 @@ def _report(root: Path, failed: Path) -> JobReport:
 
 
 class RecordBackupSessionTests(unittest.TestCase):
-    """Which folders a finished backup is recorded against."""
+    """A finished backup is recorded against the job it was started as."""
 
     def setUp(self) -> None:
         self.folder = tempfile.TemporaryDirectory()
@@ -36,33 +36,23 @@ class RecordBackupSessionTests(unittest.TestCase):
         self.failed.write_bytes(b"raw")
         self.result = SimpleNamespace(copied=1, skipped=0, errors=0)
 
-    def _window(self, pending_retry, pending_backup=None) -> SimpleNamespace:
-        return SimpleNamespace(
-            pending_retry=pending_retry,
-            pending_backup=pending_backup,
-            source_var=SimpleNamespace(get=lambda: " E:/DCIM "),
-            destination_var=SimpleNamespace(get=lambda: " D:/Library "),
-        )
+    def _window(self, job: dict) -> SimpleNamespace:
+        return SimpleNamespace(pending_backup=job)
 
     def test_an_ordinary_backup_is_recorded_against_the_analysed_folders(self) -> None:
-        pending = {"source": "E:/CARD", "destination": "D:/Analysed"}
+        job = {"source": "E:/CARD", "destination": "D:/Analysed", "retry": None}
         with patch("ndex_common.workflow.record_backup") as record:
-            DSBApp._record_backup_session(self._window(None, pending), self.result)
+            DSBApp._record_backup_session(self._window(job), self.result)
 
         # Not the form: it can have changed since Analyze ran.
-        record.assert_called_once_with("E:/CARD", "D:/Analysed", self.result)
-
-    def test_the_form_is_the_fallback_when_nothing_was_analysed(self) -> None:
-        with patch("ndex_common.workflow.record_backup") as record:
-            DSBApp._record_backup_session(self._window(None), self.result)
-
-        record.assert_called_once_with("E:/DCIM", "D:/Library", self.result)
+        record.assert_called_once_with("E:/CARD", "D:/Analysed", self.result, context=None)
 
     def test_a_retry_is_recorded_against_the_job_it_came_from(self) -> None:
         report = _report(self.root, self.failed)
         plan = plan_retry(report)
+        job = {"source": report.source, "destination": report.destination, "retry": plan}
         with patch("ndex_common.workflow.record_backup") as record:
-            DSBApp._record_backup_session(self._window(plan), self.result)
+            DSBApp._record_backup_session(self._window(job), self.result)
 
         record.assert_called_once()
         source, destination, result = record.call_args.args

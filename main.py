@@ -52,6 +52,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Open the GUI with folder arguments preloaded (used by NDEX handoff)",
     )
+    parser.add_argument(
+        "--retry",
+        type=Path,
+        help="Open Job Results at this backup manifest so its failed files can be retried.",
+    )
     return parser
 
 
@@ -144,11 +149,12 @@ def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
 
-    if args.open:
+    if args.open or args.retry is not None:
         run_app(
             initial_source=args.source,
             initial_destination=args.destination,
             preload_only=True,
+            retry_manifest=args.retry,
         )
         return 0
 

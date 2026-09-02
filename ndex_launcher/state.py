@@ -87,7 +87,7 @@ def gather_workflow_state() -> list[StepState]:
         ),
     ]
 
-    results = _latest_result_by_app([step.key for step in steps])
+    results = latest_reports_by_app(step.key for step in steps)
 
     for step in steps:
         document = documents[step.key]
@@ -99,7 +99,3 @@ def gather_workflow_state() -> list[StepState]:
         step.launch_args = workflow_session.launch_args(document)
     return steps
 
-
-def _latest_result_by_app(apps: list[str]) -> dict[str, JobReport]:
-    """Newest finished job per app. Missing manifests are simply absent."""
-    return latest_reports_by_app(apps)

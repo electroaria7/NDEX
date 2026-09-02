@@ -7,10 +7,13 @@ status. Nothing here touches photographs or rewrites a manifest.
 
 from __future__ import annotations
 
+import os
+import re
 from dataclasses import dataclass, field
+from functools import cached_property
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable, Iterator, Mapping
+from typing import Any, Iterable, Iterator, Mapping, Sequence
 
 from ndex_common.manifest import TYPES, load_manifest, manifests_dir
 
@@ -27,6 +30,18 @@ APP_LABELS = {
     "auto_selector": "Auto Selector",
     "frame": "NDEX Frame",
 }
+
+# The job types each app writes, so "latest per app" can read the
+# latest-{app}-{type}.json pointers instead of listing the whole folder.
+APP_TYPES = {
+    "ndex_one": ("backup",),
+    "image_manager": ("select_handoff",),
+    "auto_selector": ("extract",),
+    "frame": ("export",),
+}
+
+# Manifest names carry their own UTC stamp: {type}-{stamp}[-n].json.
+_STAMP = re.compile(r"-(" + chr(92) + "d{8}T" + chr(92) + "d{6}Z)(?:-(" + chr(92) + "d+))?" + chr(92) + ".json$")
 
 # Counts worth showing, in the order a reader cares about them.
 COUNT_ORDER = ("copied", "exported", "selected", "overwritten", "skipped", "ambiguous", "missing", "failed")
@@ -60,6 +75,7 @@ class JobReport:
     counts: Mapping[str, int] = field(default_factory=dict)
     items: tuple[JobItem, ...] = ()
     context: Mapping[str, Any] = field(default_factory=dict)
+    folders: Mapping[str, str] = field(default_factory=dict)
 
     @property
     def type_label(self) -> str:
@@ -73,8 +89,10 @@ class JobReport:
     def cancelled(self) -> bool:
         return bool(self.context.get("cancelled"))
 
-    @property
+    @cached_property
     def problems(self) -> tuple[JobItem, ...]:
+        # Cached: a results window asks several times per selection, and a
+        # backup manifest can carry thousands of items.
         return tuple(item for item in self.items if item.is_problem)
 
     @property
@@ -151,9 +169,11 @@ def iter_reports(
 ) -> Iterator[JobReport]:
     """Timestamped manifests, newest first, parsed one at a time.
 
-    Manifests are written once and never edited, so file time is write time
-    and ordering by it costs one directory listing instead of a parse of
-    every file. Callers that want a few stop early.
+    The order comes from the stamp in each file name, which the writer
+    chose from the job's own clock. File times would do until the folder
+    is restored from a backup, when they say when the copy happened.
+    Ordering by name costs one directory listing and no stat, and callers
+    that want a few stop early.
     """
     wanted_apps = set(apps) if apps is not None else None
     wanted_types = set(types) if types is not None else None
@@ -165,9 +185,9 @@ def iter_reports(
             # latest-* files duplicate a timestamped manifest; skip them here.
             if not path.name.startswith("latest-")
         ]
-        candidates.sort(key=lambda path: (path.stat().st_mtime_ns, path.name), reverse=True)
     except OSError:
         return
+    candidates.sort(key=_name_order, reverse=True)
     for candidate in candidates:
         report = read_report(candidate)
         if report is None:
@@ -192,19 +212,79 @@ def recent_reports(
         reports.append(report)
         if limit > 0 and len(reports) >= limit:
             break
-    # File time decided which to read; the recorded time decides the order.
-    reports.sort(key=lambda report: (report.created_at, report.manifest_path.name), reverse=True)
+    # The name stamp decided which to read; the recorded time decides the
+    # order, with the name stamp breaking ties the same way.
+    reports.sort(key=lambda report: (report.created_at, _name_order(report.manifest_path)), reverse=True)
     return reports
 
 
+def _name_order(path: Path) -> tuple[str, int, str]:
+    """Sort key from the stamp in a manifest name; unstamped names sort last."""
+    match = _STAMP.search(path.name)
+    if match is None:
+        return ("", 0, path.name)
+    return (match.group(1), int(match.group(2) or 0), path.name)
+
+
+def path_key(path: Path | str) -> str:
+    """One spelling of a path for set membership and equality.
+
+    Case-folded on Windows, otherwise as given. It does not resolve
+    symlinks or short names: a retry compares what a manifest recorded with
+    what the app has open, and both came from the same file dialogs.
+    """
+    return os.path.normcase(str(path))
+
+
+def same_path(left: Path | str, right: Path | str) -> bool:
+    return path_key(left) == path_key(right)
+
+
+def index_of(reports: Sequence[JobReport], manifest: Path | None) -> int:
+    """Row of the report for ``manifest``, or 0 when it is not listed."""
+    if manifest is None:
+        return 0
+    for index, report in enumerate(reports):
+        if same_path(report.manifest_path, manifest):
+            return index
+    return 0
+
+
+def including(
+    reports: list[JobReport], manifest: Path | None, *, apps: Iterable[str] | None = None
+) -> list[JobReport]:
+    """``reports`` with the job for ``manifest`` read in when it is not listed.
+
+    A --retry can name a job that has aged out of the recent list. Reading
+    it in keeps the hop landing on the job it was about. ``apps`` is the
+    same filter the list was built with: a window whose Retry button runs
+    backups must not be handed an extract job to run.
+    """
+    if manifest is None:
+        return reports
+    if any(same_path(report.manifest_path, manifest) for report in reports):
+        return reports
+    selected = read_report(manifest)
+    if selected is None or (apps is not None and selected.app not in set(apps)):
+        return reports
+    return [selected, *reports]
+
+
 def latest_reports_by_app(apps: Iterable[str], *, root: Path | None = None) -> dict[str, JobReport]:
-    """The newest finished job of each app, reading no more manifests than needed."""
-    wanted = set(apps)
+    """The newest finished job of each app, from the latest-* pointer files.
+
+    Every write refreshes ``latest-{app}-{type}.json``, so this reads at
+    most a few small files per app and never lists the folder. An app that
+    has never run a job is simply absent.
+    """
     latest: dict[str, JobReport] = {}
-    for report in iter_reports(root=root, apps=wanted):
-        latest.setdefault(report.app, report)
-        if len(latest) == len(wanted):
-            break
+    for app in apps:
+        for type in APP_TYPES.get(app, ()):
+            report = latest_report(app, type, root=root)
+            if report is None:
+                continue
+            if app not in latest or report.created_at > latest[app].created_at:
+                latest[app] = report
     return latest
 
 
@@ -213,6 +293,8 @@ def _from_payload(path: Path, payload: Mapping[str, Any]) -> JobReport:
     counts = {str(key): _as_int(value) for key, value in counts.items()} if isinstance(counts, dict) else {}
     context = payload.get("context")
     context = dict(context) if isinstance(context, dict) else {}
+    folders = payload.get("folders")
+    folders = {str(key): str(value) for key, value in folders.items()} if isinstance(folders, dict) else {}
     return JobReport(
         manifest_path=path,
         type=str(payload.get("type") or ""),
@@ -223,6 +305,7 @@ def _from_payload(path: Path, payload: Mapping[str, Any]) -> JobReport:
         counts=counts,
         items=tuple(_read_items(payload.get("items"))),
         context=context,
+        folders=folders,
     )
 
 

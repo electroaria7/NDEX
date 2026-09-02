@@ -1,5 +1,28 @@
 # NDEX Patch Notes
 
+## 2026-09-02 — Phase 5 retry from the Launcher (unreleased)
+
+Not a version bump. `NDEX_VERSION` stays `0.9.1`.
+
+Phase 4 put **Retry Failed** in the three apps that run jobs. The Launcher shows every app's jobs but runs none of them, so from there a failed job was a dead end. Now it is a hop.
+
+- The Launcher's Job Results shows **Retry in NDEX One...** (or Auto Selector, or Frame) for a job with failed files. It opens that app at that job; the app's own Retry button takes it from there, with that app's settings in view. The Launcher never runs files itself.
+- NDEX One, Auto Selector, and Frame accept `--retry <manifest>`, which opens Job Results at that job. A manifest that has aged out of the recent list is read in on its own.
+- Image Manager has no retryable jobs, so it gets neither.
+- `--retry` only accepts a manifest from the app it was given to. A backup window handed an extract job would otherwise have run it as a backup.
+
+### Review fixes folded in
+
+- Manifests are ordered by the stamp in their own file name, not by file time, so a manifests folder restored from a backup still lists jobs in the order they ran. Listing no longer stats each file, so one unreadable file cannot blank the whole list.
+- The Launcher reads each app's `latest-*` pointer files instead of listing the folder.
+- Manifests now record every folder a job used under `folders`, so a retry reads the RAW source from the record instead of a key tucked into `context`.
+- Per-file records for files that went fine are capped at 500 per status, with one closing record saying how many more there were. Problem records are always kept in full.
+- Auto Selector records a job against the folders and options it started with, not the form as it stands when the job ends, matching NDEX One.
+- Frame: a retry whose import fails, or whose export ends without a result, is dropped and the output folder is put back. A preview failing no longer counts as the retry's import failing. Opening a batch with one unreadable file now opens the rest and names the bad one.
+- Frame's Job Results explains an empty retry plan in place instead of closing first.
+- Retry planning stats each missing folder once instead of every file in it.
+- The post-backup warning now points at Job Results and Retry Failed.
+
 ## 2026-09-02 — Phase 4 retry failed items (unreleased)
 
 Not a version bump. `NDEX_VERSION` stays `0.9.1`.

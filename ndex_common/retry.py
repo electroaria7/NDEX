@@ -11,12 +11,11 @@ NDEX One re-backs up, Auto Selector re-extracts, Frame re-exports.
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from ndex_common.report import JobReport
+from ndex_common.report import JobReport, path_key, same_path
 
 # The job type each app can run again. A Select handoff is a pointer, not
 # work, so there is nothing to retry.
@@ -112,19 +111,30 @@ def plan_retry(report: JobReport) -> RetryPlan:
     paths: list[Path] = []
     missing: list[Path] = []
     seen: set[str] = set()
+    # A folder that is gone takes all its files with it. One stat answers
+    # for every file in it, which matters when the folder was a card since
+    # unplugged or a share since disconnected: each stat there can hang.
+    folder_present: dict[str, bool] = {}
     for raw in report.problem_paths():
         path = Path(raw)
-        key = os.path.normcase(str(path))
+        key = path_key(path)
         if key in seen:
             continue
         seen.add(key)
-        (paths if path.is_file() else missing).append(path)
+        folder = path_key(path.parent)
+        if folder not in folder_present:
+            folder_present[folder] = path.parent.is_dir()
+        present = folder_present[folder] and path.is_file()
+        (paths if present else missing).append(path)
     return RetryPlan(report, tuple(paths), tuple(missing))
 
 
-def is_retry(report: JobReport) -> bool:
-    """True when this job was itself a retry of an earlier one."""
-    return bool(report.context.get("retry_of"))
-
-
-__all__ = ["RETRYABLE", "RetryPlan", "is_retry", "plan_retry", "retryable", "supports_retry"]
+__all__ = [
+    "RETRYABLE",
+    "RetryPlan",
+    "path_key",
+    "plan_retry",
+    "retryable",
+    "same_path",
+    "supports_retry",
+]

@@ -227,28 +227,62 @@ class RecentReportTests(unittest.TestCase):
                 report.latest_report("frame", "nope", root=Path(tmp))
 
 class LatestByAppTests(unittest.TestCase):
-    def test_newest_job_per_app_without_reading_older_ones(self) -> None:
+    def test_newest_job_per_app_comes_from_the_pointer_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            _write(root, "backup-20260901T090000Z.json", _manifest(created_at="2026-09-01T09:00:00Z"))
-            _write(root, "backup-20260902T101500Z.json", _manifest(created_at="2026-09-02T10:15:00Z"))
-            _write(
-                root,
-                "export-20260902T110000Z.json",
-                _manifest(type="export", app="frame", created_at="2026-09-02T11:00:00Z"),
-            )
+            # History that must not be listed or parsed.
+            for hour in range(20):
+                _write(root, f"backup-202609010{hour:02d}0000Z.json", _manifest(created_at=f"2026-09-01T{hour:02d}:00:00Z"))
+            _write(root, "latest-ndex_one-backup.json", _manifest(created_at="2026-09-02T10:15:00Z"))
+            _write(root, "latest-frame-export.json", _manifest(type="export", app="frame", created_at="2026-09-02T11:00:00Z"))
             with patch.object(report, "read_report", wraps=report.read_report) as read:
-                latest = report.latest_reports_by_app(("ndex_one", "frame"), root=root)
+                latest = report.latest_reports_by_app(("ndex_one", "frame", "auto_selector"), root=root)
 
         self.assertEqual(latest["ndex_one"].created_at, "2026-09-02T10:15:00Z")
         self.assertEqual(latest["frame"].app, "frame")
-        # Stopped once both apps were seen: the oldest backup was never parsed.
-        self.assertEqual(read.call_count, 2)
+        self.assertNotIn("auto_selector", latest)
+        # One read per (app, type) pointer, none for the history.
+        self.assertEqual(read.call_count, 3)
 
     def test_apps_with_no_jobs_are_simply_absent(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             latest = report.latest_reports_by_app(("ndex_one",), root=Path(tmp))
         self.assertEqual(latest, {})
+
+    def test_order_comes_from_the_stamp_in_the_name_not_the_file_time(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            # Written newest-first, as a restore from a backup might do.
+            newest = _write(root, "backup-20260902T101500Z.json", _manifest(created_at="2026-09-02T10:15:00Z"))
+            older = _write(root, "backup-20260901T090000Z.json", _manifest(created_at="2026-09-01T09:00:00Z"))
+            # Make the file times disagree with the stamps.
+            import os
+            os.utime(newest, (1_000_000, 1_000_000))
+            os.utime(older, (2_000_000, 2_000_000))
+            found = report.recent_reports(root=root, limit=1)
+
+        self.assertEqual([item.created_at for item in found], ["2026-09-02T10:15:00Z"])
+
+    def test_same_second_suffixes_order_after_the_plain_name(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write(root, "backup-20260902T101500Z.json", _manifest())
+            _write(root, "backup-20260902T101500Z-2.json", _manifest())
+            found = report.recent_reports(root=root)
+        self.assertEqual([item.manifest_path.name for item in found][0], "backup-20260902T101500Z-2.json")
+
+    def test_including_refuses_a_job_from_another_app(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            extract = _write(root, "extract-20260902T101500Z.json", _manifest(type="extract", app="auto_selector"))
+            listed = [report.read_report(_write(root, "backup-20260902T100000Z.json", _manifest()))]
+
+            same_app = report.including(list(listed), extract, apps=("ndex_one",))
+            any_app = report.including(list(listed), extract)
+
+        self.assertEqual(len(same_app), 1)
+        self.assertEqual(len(any_app), 2)
+        self.assertEqual(any_app[0].app, "auto_selector")
 
     def test_recent_reports_stops_reading_at_the_limit(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

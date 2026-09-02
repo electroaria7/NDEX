@@ -22,13 +22,14 @@ from PySide6.QtWidgets import (
     QLabel,
     QListWidget,
     QListWidgetItem,
+    QMessageBox,
     QPlainTextEdit,
     QPushButton,
     QVBoxLayout,
     QWidget,
 )
 
-from ndex_common.report import JobReport, recent_reports
+from ndex_common.report import JobReport, including, index_of, recent_reports
 from ndex_common.retry import RetryPlan, plan_retry, retryable
 
 HISTORY_LIMIT = 30
@@ -42,6 +43,7 @@ class FrameJobReportDialog(QDialog):
         reports: Sequence[JobReport],
         parent: QWidget | None = None,
         retry: Callable[[RetryPlan], None] | None = None,
+        select: Path | None = None,
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("NDEX Frame - Job Results")
@@ -91,7 +93,7 @@ class FrameJobReportDialog(QDialog):
         layout.addWidget(buttons)
 
         if self.reports:
-            self.job_list.setCurrentRow(0)
+            self.job_list.setCurrentRow(index_of(self.reports, select))
 
     def _show_row(self, row: int) -> None:
         if row < 0 or row >= len(self.reports):
@@ -116,15 +118,15 @@ class FrameJobReportDialog(QDialog):
         self.output_button.setEnabled(_is_dir(report.destination))
 
     def _retry_failed(self) -> None:
-        """Hand the job back to the main window, which checks the files.
-
-        The window owns the message boxes, so a plan with nothing left on
-        disk goes there too and is explained there.
-        """
+        """Hand the still-present failed files back to the main window."""
         report, run = self.current, self.retry
         if report is None or run is None or not retryable(report):
             return
         plan = plan_retry(report)
+        if not plan.ready:
+            # Say so here, where the user is looking, and stay open.
+            QMessageBox.information(self, self.windowTitle(), plan.summary)
+            return
         # Close first: the window takes over from here, and this list is
         # about to be one job out of date.
         self.accept()
@@ -149,8 +151,9 @@ class FrameJobReportDialog(QDialog):
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.current.manifest_path.parent)))
 
 
-def frame_reports(limit: int = HISTORY_LIMIT) -> list[JobReport]:
-    return recent_reports(apps=("frame",), limit=limit)
+def frame_reports(limit: int = HISTORY_LIMIT, select: Path | None = None) -> list[JobReport]:
+    """Recent Frame jobs. ``select`` is read in even when it has aged out."""
+    return including(recent_reports(apps=("frame",), limit=limit), select, apps=("frame",))
 
 
 def item_listing(report: JobReport) -> str:
