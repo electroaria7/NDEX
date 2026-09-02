@@ -31,6 +31,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--open", action="store_true", help="Open the GUI (Launcher compatibility).")
     parser.add_argument("--source", type=Path, help="Master image folder to import after startup.")
     parser.add_argument(
+        "--handoff",
+        type=Path,
+        help="Select-handoff manifest from Image Manager (JPG/PNG/TIFF list).",
+    )
+    parser.add_argument("--output", type=Path, help="Export output folder to preload.")
+    parser.add_argument(
         "--smoke-export",
         nargs=2,
         type=Path,
@@ -150,9 +156,50 @@ def _run_gui(args: argparse.Namespace) -> int:
     )
     controller = WorkspaceController(state, preview_cache=PreviewCache(root / "cache"))
     window = MainWindow(controller, preset_store=store)
+
+    def remember_frame_session() -> None:
+        folders: dict[str, str] = {}
+        if controller.state.sources:
+            folders["source"] = str(controller.state.sources[0].path.parent)
+        if controller.state.output_directory is not None:
+            folders["output"] = str(controller.state.output_directory)
+        context = {"handoff": str(window.handoff_path) if window.handoff_path is not None else ""}
+        if not folders and window.handoff_path is None:
+            return
+        from ndex_common.session import remember
+
+        try:
+            remember("frame", folders=folders, context=context)
+        except OSError:
+            pass
+
+    def record_frame_export(result: ExportResult) -> None:
+        from ndex_common.workflow import record_export
+
+        source = ""
+        if controller.state.sources:
+            source = str(controller.state.sources[0].path.parent)
+        destination = controller.state.output_directory or ""
+        record_export(
+            source,
+            destination,
+            result,
+            frame_preset=controller.state.working_frame.id,
+            output_profile=controller.state.output_profile.id,
+        )
+
+    controller.sourcesChanged.connect(remember_frame_session)
+    controller.exportFinished.connect(record_frame_export)
+    if args.output is not None and args.output.is_dir():
+        controller.state.output_directory = args.output
     window.show()
-    if args.source is not None:
-        QTimer.singleShot(0, lambda: window.queue_source(args.source))
+    window.sync_output_folder_label()
+    handoff = args.handoff
+    source = args.source
+    if handoff is not None:
+        QTimer.singleShot(0, lambda: window.queue_handoff(handoff))
+    elif source is not None:
+        QTimer.singleShot(0, lambda: window.queue_source(source))
     return app.exec()
 
 

@@ -76,6 +76,25 @@ def main() -> int:
                 f"copied={backup.copied}, skipped={backup.skipped}, "
                 f"overwritten={backup.overwritten}, errors={backup.errors}"
             )
+            from ndex_common.workflow import record_job
+
+            record_job(
+                app="image_manager",
+                type="backup",
+                source=str(args.source),
+                destination=str(args.backup_destination),
+                counts={
+                    "copied": backup.copied,
+                    "skipped": backup.skipped,
+                    "failed": backup.errors,
+                    "overwritten": backup.overwritten,
+                },
+                items=[
+                    {"path": "", "status": "message", "detail": message}
+                    for message in backup.messages[:50]
+                ],
+                folders={"source": str(args.source)},
+            )
 
         if args.export_xmp:
             xmp_summary = XmpExportService().export(result.records)

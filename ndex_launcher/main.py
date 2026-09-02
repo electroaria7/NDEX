@@ -140,14 +140,14 @@ class LauncherApp(tk.Tk):
             anchor="w", pady=(0, 16)
         )
 
-        continue_label = "Continue" if step.has_session and step.key != "ndex_one" else "Open"
+        continue_label = "Continue" if step.has_session else "Open"
         ttk.Button(
             card,
             text=continue_label,
             style="Accent.TButton",
             command=lambda s=step: self._launch(s.key, s.launch_args),
         ).pack(anchor="w", fill=tk.X)
-        if step.key != "ndex_one" and step.has_session:
+        if step.has_session:
             ttk.Button(
                 card,
                 text="Open Empty",

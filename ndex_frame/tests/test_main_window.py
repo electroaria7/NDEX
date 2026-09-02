@@ -213,6 +213,13 @@ class MainWindowTests(unittest.TestCase):
         self.assertTrue(args.open)
         self.assertEqual(args.source, Path("masters"))
 
+    def test_parser_accepts_handoff_and_output(self) -> None:
+        args = build_parser().parse_args(
+            ["--open", "--handoff", "select.json", "--output", "framed"]
+        )
+        self.assertEqual(args.handoff, Path("select.json"))
+        self.assertEqual(args.output, Path("framed"))
+
 
 if __name__ == "__main__":
     unittest.main()

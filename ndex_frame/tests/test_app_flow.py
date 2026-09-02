@@ -14,6 +14,7 @@ from unittest.mock import patch
 from PIL import Image
 from PySide6.QtWidgets import QApplication
 
+from ndex_common import manifest
 from ndex_common import settings as shared_settings
 from ndex_frame.core.models import SourceItem
 from ndex_frame.services.cache import PreviewCache
@@ -199,6 +200,24 @@ class AppFlowTests(unittest.TestCase):
         self.window.cancel_button.show()
         self.window.request_cancel()
         self.assertEqual(self.window.cancel_button.text(), "Cancelling…")
+
+    def test_queue_handoff_imports_manifest_files(self) -> None:
+        source_dir = self.root / "handoff-masters"
+        source_dir.mkdir()
+        Image.new("RGB", (32, 32), (10, 20, 30)).save(source_dir / "pick.jpg")
+        Image.new("RGB", (32, 32), (40, 50, 60)).save(source_dir / "skip-raw-not-used.jpg")
+        handoff = manifest.write_manifest(
+            type="select_handoff",
+            app="image_manager",
+            source=str(source_dir),
+            items=[{"path": str(source_dir / "pick.jpg"), "status": "selected"}],
+            root=self.root,
+        )
+        self.window.queue_handoff(handoff)
+        self._wait_until(lambda: len(self.controller.state.sources) == 1)
+        self._wait_idle()
+        self.assertEqual(self.window.handoff_path, handoff)
+        self.assertEqual(self.controller.state.sources[0].path.name, "pick.jpg")
 
     def test_successful_folder_import_writes_frame_last_source(self) -> None:
         source_dir = self.root / "remember-masters"

@@ -254,6 +254,16 @@ class AutoSelectorApp(tk.Tk):
                     "duplicate_policy": self.duplicate_var.get(),
                 },
             )
+            from ndex_common.session import remember
+
+            remember(
+                "auto_selector",
+                folders={
+                    "selected_jpg": self.selected_jpg_var.get().strip(),
+                    "raw_source": self.raw_source_var.get().strip(),
+                    "work": self.work_folder_var.get().strip(),
+                },
+            )
         except OSError:
             pass
 
@@ -335,6 +345,14 @@ class AutoSelectorApp(tk.Tk):
             self._log(message)
         if len(result.messages) > 80:
             self._log(f"... 추가 메시지 {len(result.messages) - 80}개 생략")
+        from ndex_common.workflow import record_extract
+
+        record_extract(
+            self.selected_jpg_var.get().strip(),
+            self.raw_source_var.get().strip(),
+            self.work_folder_var.get().strip(),
+            result,
+        )
         self._set_busy(False)
 
     def _handle_error(self, message: str) -> None:
