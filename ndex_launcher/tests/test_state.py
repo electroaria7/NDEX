@@ -1,11 +1,43 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from ndex_common.report import JobReport
 from ndex_launcher import state as launcher_state
+
+
+def _write_handoff(folder: Path) -> Path:
+    """A select-handoff manifest whose listed file still exists."""
+    picked = folder / "pick.jpg"
+    picked.write_bytes(b"jpg")
+    handoff = folder / "select-handoff.json"
+    handoff.write_text(
+        json.dumps(
+            {
+                "kind": "ndex.manifest",
+                "schema_version": 1,
+                "type": "select_handoff",
+                "app": "image_manager",
+                "items": [{"path": str(picked), "status": "selected"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    return handoff
+
+
+def _report(app: str, type: str, created_at: str, counts: dict) -> JobReport:
+    return JobReport(
+        manifest_path=Path(f"{type}-{created_at}.json"),
+        type=type,
+        app=app,
+        created_at=created_at,
+        counts=counts,
+    )
 
 
 class LauncherStateTests(unittest.TestCase):
@@ -57,8 +89,7 @@ class LauncherStateTests(unittest.TestCase):
 
     def test_frame_continue_prefers_handoff_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            handoff = Path(tmp) / "select-handoff.json"
-            handoff.write_text("{}", encoding="utf-8")
+            handoff = _write_handoff(Path(tmp))
             data = {
                 "shared": {
                     "sessions": {
@@ -77,6 +108,30 @@ class LauncherStateTests(unittest.TestCase):
 
         self.assertTrue(steps[3].has_session)
         self.assertEqual(steps[3].launch_args[:3], ["--open", "--handoff", str(handoff)])
+        self.assertEqual(steps[3].status_text, f"Last handoff: {handoff}")
+
+    def test_frame_status_reports_missing_folder_when_handoff_is_stale(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            handoff = Path(tmp) / "select-handoff.json"
+            handoff.write_text("{}", encoding="utf-8")
+            data = {
+                "shared": {
+                    "sessions": {
+                        "frame": {
+                            "kind": "ndex.session",
+                            "app": "frame",
+                            "folders": {"source": "Z:/gone"},
+                            "context": {"handoff": str(handoff)},
+                        }
+                    }
+                }
+            }
+            with patch.object(launcher_state, "load_all", return_value=data):
+                steps = launcher_state.gather_workflow_state()
+
+        self.assertFalse(steps[3].has_session)
+        self.assertEqual(steps[3].launch_args, ["--open"])
+        self.assertIn("missing", steps[3].status_text)
 
     def test_frame_launch_skips_missing_source_folder(self) -> None:
         data = {"frame": {"last_source": "Z:/definitely/not/here"}}
@@ -87,6 +142,24 @@ class LauncherStateTests(unittest.TestCase):
         self.assertFalse(steps[3].has_session)
         self.assertEqual(steps[3].launch_args, ["--open"])
         self.assertIn("missing", steps[3].status_text)
+
+    def test_cards_show_the_latest_job_per_app(self) -> None:
+        backup = _report("ndex_one", "backup", "2026-09-01T09:00:00Z", {"copied": 10})
+        newer_backup = _report("ndex_one", "backup", "2026-09-02T10:15:00Z", {"copied": 42, "failed": 1})
+        export = _report("frame", "export", "2026-09-02T11:00:00Z", {"copied": 5})
+
+        with (
+            patch.object(launcher_state, "load_all", return_value={}),
+            patch.object(
+                launcher_state, "recent_reports", return_value=[export, newer_backup, backup]
+            ),
+        ):
+            steps = launcher_state.gather_workflow_state()
+
+        self.assertEqual(steps[0].last_result, newer_backup)
+        self.assertIn("42 copied, 1 failed", steps[0].result_text)
+        self.assertIn("5 copied", steps[3].result_text)
+        self.assertEqual(steps[1].result_text, "No job results yet")
 
     def test_frame_app_command_is_registered(self) -> None:
         from ndex_common.launch import APP_COMMANDS, _DIST_SUBDIRS

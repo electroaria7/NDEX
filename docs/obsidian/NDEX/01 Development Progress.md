@@ -1,11 +1,42 @@
 # Development Progress
 
-updated: 2026-05-25
+updated: 2026-09-02
 type: progress-note
 
 ## Summary
 
-NDEX는 기존 DSB 백업 도구에서 출발해 사진 백업/선별/원본 추출 workflow를 분리한 프로그램 시리즈로 확장되고 있다. 현재 개발은 3개 앱이 각자 독립 실행 가능한 구조를 갖는 방향으로 진행 중이다.
+NDEX는 기존 DSB 백업 도구에서 출발해 사진 백업/선별/원본 추출/내보내기 workflow를 분리한 프로그램 시리즈다. 각 앱은 독립 실행이 가능하고, [[Programs/NDEX Launcher]]가 4단계 순서를 묶는다.
+
+2026-09-01 이후 개발은 phase 단위로 진행된다. 각 phase는 브랜치와 PR 하나에 대응한다.
+
+## Phase Status
+
+| Phase | Branch | PR | Theme | State |
+| --- | --- | --- | --- | --- |
+| 0 | `fix/phase-0-correctness` | #6 | 백업/사이드카/RAW 매칭 정확성 | merged |
+| 1 | `fix/phase-1-foundation` | #7 | 설정 잠금, CI, 크래시 로그, 0.9.1 재태깅 | merged |
+| 2 | `feat/phase-2-sessions` | #9 | 세션 문서, job manifest, 앱 간 handoff | merged + 후속 수정 |
+| 3 | `feat/phase-3-job-results` | - | job 결과를 UI에서 읽기 | 작업 중 |
+
+### Phase 3 (2026-09-02)
+
+Phase 2가 남긴 manifest를 읽어 UI에 보여준다. 자세한 내용은 [[Roadmap]]에 있다.
+
+- `ndex_common/report.py`가 manifest를 찾아 요약하고 상태별로 묶는다.
+- **Job Results** 창에서 최근 job과 파일별 처리 결과를 본다. 문제 파일이 먼저 나온다.
+- Launcher 카드마다 마지막 job 결과 한 줄이 붙는다.
+- 실패 항목 재실행은 이번 phase에 넣지 않았다. 문제 경로 복사까지만 제공한다.
+
+### Phase 2 후속 수정 (2026-09-02)
+
+Phase 2는 PR #9로 병합되었으나, 이후 코드 리뷰에서 6건의 결함을 찾아 수정했다.
+
+- Frame에서 파일/폴더를 새로 열면 이전 handoff를 지운다. 지우지 않으면 Launcher Continue가 오래된 select handoff를 다시 불러왔다.
+- Continue는 handoff 파일의 존재만 보지 않고, manifest가 실제로 읽히고 나열된 파일이 남아 있는지까지 확인한다. 아니면 `--source` 폴더로 되돌아간다.
+- Launcher 상태 문구가 유효한 handoff가 있는데도 "Last folder missing"을 보여주지 않는다.
+- NDEX One의 **Open Empty**가 실제로 빈 상태로 열린다. 이전에는 `--open`만 받아도 settings의 마지막 폴더를 채웠다.
+- Image Manager **Send Picks to Frame…**은 handoff 기록에 실패하면 오류를 보여주고 Frame을 열지 않는다.
+- Manifest 파일명이 같은 초에 끝난 두 job끼리 서로 덮어쓰지 않는다.
 
 ## Completed
 
@@ -15,49 +46,55 @@ NDEX는 기존 DSB 백업 도구에서 출발해 사진 백업/선별/원본 추
   - 촬영 날짜 기반 백업 폴더 생성.
   - 중복 처리 정책 지원: rename, skip, overwrite.
   - 복제 검증 지원: size, sha256, none.
-  - GUI/CLI 제공.
-  - PyInstaller one-file EXE 빌드.
+  - 임시 파일에 쓰고 교체하는 atomic copy.
+  - GUI/CLI 제공, PyInstaller one-file EXE 빌드.
 
 - NDEX Image Manager
-  - 두 번째 NDEX 프로그램으로 독립 폴더 구성.
   - JPG/RAW 파일 스캔 및 페어 매칭.
   - 미리보기, 썸네일, EXIF 요약, pick/rating 상태 관리.
   - `.dsb_cache/catalog.sqlite` 기반 카탈로그.
-  - Pick 파일 백업 기능.
+  - Pick 파일 백업, XMP export (RAW는 `stem.xmp`, JPG는 `file.JPG.xmp`).
+  - 폴더 스캔을 백그라운드 큐에서 처리해 UI가 멈추지 않음.
+  - **Send Picks to Frame…**으로 select handoff 작성.
   - GUI/CLI 및 EXE 빌드 구성.
 
 - NDEX Auto Selector
-  - 세 번째 NDEX 프로그램으로 독립 폴더 구성.
   - 셀렉 JPG 폴더와 원본 CR3 폴더를 매칭.
   - 매칭된 CR3를 작업용 폴더에 복제.
   - `IMG_0000` 패턴을 파일명 일부에서 추출해 매칭.
-  - 셀렉 원본 표시용 `.xmp` 사이드카 생성.
-  - XMP에 `xmp:Rating`, `xmp:Label`, `NDEX Selected` 키워드 기록.
+  - 모호한 RAW 매칭은 임의로 고르지 않고 보고.
+  - 셀렉 원본 표시용 `.xmp` 사이드카 생성 (`xmp:Rating`, `xmp:Label`, `NDEX Selected`).
   - GUI/CLI 및 one-file EXE 빌드 완료.
+
+- NDEX Frame
+  - 크롭 없이 Instagram 비율 캔버스에 원본을 배치.
+  - 비율/배경색/사진 크기 preset.
+  - export 결과를 manifest로 기록.
+  - `--handoff`로 Image Manager pick 목록을 가져오고 `--output`으로 내보내기 폴더를 미리 지정.
+
+- NDEX Launcher
+  - 4단계 workflow 카드 UI.
+  - 마지막 작업 폴더와 handoff를 읽어 Continue / Open Empty 제공.
+  - `Apps\` 폴더와 소스 실행 양쪽에서 앱을 찾음.
+
+- 공통 기반
+  - `settings.json` 갱신은 잠금 후 reload/merge/atomic write (`schema_version`).
+  - 패키징된 앱은 `%LOCALAPPDATA%\NDEX\logs\`에 크래시 로그 기록.
+  - Windows CI가 Python 3.10과 3.12에서 단위 테스트 실행.
+  - 릴리스 폴더에 `SHA256SUMS.txt` 포함, 태그와 `NDEX_VERSION` 불일치 시 빌드 실패.
 
 ## Verified Test Coverage
 
-```text
-tests/test_backup_executor.py
-tests/test_folder_manager.py
-tests/test_scanner.py
-dsb_image_manager/tests/test_image_manager_services.py
-ndex_auto_selector/tests/test_auto_selector.py
-```
-
-## Recent Auto Selector Changes
-
-- 파일명이 정확히 `IMG_0000.JPG`가 아니어도 매칭 가능.
-- 예: `wedding_select_IMG_0345_final.JPG` -> `IMG_0345.CR3`.
-- 복제 시 선택 표시용 XMP 생성 가능.
-- GUI에서 XMP 생성 옵션과 별점 선택 제공.
-- CLI 옵션 추가:
-
 ```powershell
---write-xmp --xmp-rating 5 --xmp-label "NDEX Selected"
+python -m unittest discover -s tests                      # 79
+python -m unittest discover -s dsb_image_manager\tests    # 11
+python -m unittest discover -s ndex_auto_selector\tests   # 15
+python -m unittest discover -s ndex_launcher\tests        # 12
+python -m unittest discover -s ndex_frame\tests           # 135
 ```
+
+2026-09-02 기준 252개 전부 통과.
 
 ## Current Direction
 
-NDEX 시리즈는 기능별 단독 프로그램으로 유지하되, 공통 브랜딩/빌드/파일 타입 규칙은 재사용하는 구조가 적합하다. 이후에는 프로그램 간 데이터 흐름과 설정 공유를 더 정리할 수 있다.
-
+각 프로그램은 단독 실행 가능한 상태로 유지하되, 공통 브랜딩/빌드/설정/세션 규칙은 `ndex_common`에서 재사용한다. Phase 2로 앱 간 데이터 흐름(session + manifest)이 생겼으므로, 다음 단계는 이 흐름을 사용자가 실제로 신뢰할 수 있게 만드는 쪽이다. [[Roadmap]] 참고.

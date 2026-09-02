@@ -2,7 +2,8 @@
 
 Reads explicit session documents (and legacy last-folder keys) to show where
 the user left off, and builds Continue handoff arguments. Missing folders
-fall back to Open Empty (``--open`` only).
+fall back to Open Empty (``--open`` only). Each step also carries the most
+recent finished job for that app, read back from its manifest.
 """
 
 from __future__ import annotations
@@ -11,6 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ndex_common import session as workflow_session
+from ndex_common.report import JobReport, recent_reports
 from ndex_common.settings import load_all
 
 
@@ -24,6 +26,15 @@ class StepState:
     number: str = ""
     short_title: str = ""
     last_manifest: str = ""
+    handoff_ready: bool = False
+    last_result: JobReport | None = None
+
+    @property
+    def result_text(self) -> str:
+        """What the app's most recent finished job did, for the card."""
+        if self.last_result is None:
+            return "No job results yet"
+        return self.last_result.headline
 
     @property
     def has_session(self) -> bool:
@@ -31,11 +42,12 @@ class StepState:
 
     @property
     def status_text(self) -> str:
-        if self.last_manifest and Path(self.last_manifest).is_file() and not self.last_folder:
+        folder_ready = bool(self.last_folder) and Path(self.last_folder).is_dir()
+        if self.handoff_ready and not folder_ready:
             return f"Last handoff: {self.last_manifest}"
         if not self.last_folder:
             return "No previous session"
-        if not Path(self.last_folder).is_dir():
+        if not folder_ready:
             return f"Last folder missing: {self.last_folder}"
         return f"Last: {self.last_folder}"
 
@@ -75,11 +87,22 @@ def gather_workflow_state() -> list[StepState]:
         ),
     ]
 
+    results = _latest_result_by_app()
+
     for step in steps:
         document = documents[step.key]
+        step.last_result = results.get(step.key)
         step.last_folder = workflow_session.preferred_folder(document)
-        step.last_manifest = str(document.get("last_manifest") or "")
-        if not step.last_manifest:
-            step.last_manifest = str((document.get("context") or {}).get("handoff") or "")
+        handoff = workflow_session.usable_handoff(document)
+        step.handoff_ready = bool(handoff)
+        step.last_manifest = handoff or str(document.get("last_manifest") or "")
         step.launch_args = workflow_session.launch_args(document)
     return steps
+
+
+def _latest_result_by_app() -> dict[str, JobReport]:
+    """Newest finished job per app. Missing manifests are simply absent."""
+    latest: dict[str, JobReport] = {}
+    for report in recent_reports(limit=0):
+        latest.setdefault(report.app, report)
+    return latest

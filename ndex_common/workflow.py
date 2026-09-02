@@ -29,6 +29,12 @@ def record_job(
             items=items,
             context=context,
         )
+    except OSError:
+        return None
+
+    # The manifest is the record of the job. Updating the session is a
+    # convenience on top of it, so a failure there still returns the manifest.
+    try:
         extra = dict(context or {})
         extra.pop("files", None)
         extra["counts"] = dict(counts or {})
@@ -47,9 +53,9 @@ def record_job(
                 last_manifest=str(path),
                 context={"handoff": str(path)},
             )
-        return path
     except OSError:
-        return None
+        pass
+    return path
 
 
 def record_extract(

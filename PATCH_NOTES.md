@@ -1,5 +1,28 @@
 # NDEX Patch Notes
 
+## 2026-09-02 — Phase 3 job results (unreleased)
+
+Not a version bump. `NDEX_VERSION` stays `0.9.1`.
+
+Phase 2 recorded every finished job to a manifest, but nothing read those files back. Phase 3 is the read side.
+
+- **Job Results** opens a read-only window listing recent jobs, newest first, with what each one copied, skipped, left ambiguous, or failed on. Problem files are listed first, with the reason recorded for each.
+- Reachable from the Launcher footer (all apps), NDEX One's button row, Image Manager's **File** menu, Auto Selector's button row, and the NDEX Frame toolbar.
+- Each Launcher workflow card shows its app's most recent job outcome under the folder status.
+- The window can copy the problem paths to the clipboard and open the source, destination, or manifest folder. It never edits a manifest or a photograph.
+- Frame gets a Qt version of the same view; the four Tk apps share one window.
+
+### Phase 2 follow-up fixes
+
+Six defects found reviewing the merged phase 2 code:
+
+- Opening files or a folder in Frame now clears the previous select-handoff. Leaving it set made the Launcher's **Continue** re-import a stale pick list instead of the folder the user just opened.
+- **Continue** now checks that a recorded handoff still parses and that its files still exist, instead of only that the file is present. When it does not, Frame reopens the last source folder.
+- The Launcher no longer reports "Last folder missing" for a Frame session that has a stale folder but a working handoff.
+- NDEX One's **Open Empty** now opens empty. It previously refilled the folders from the last saved session.
+- Image Manager's **Send Picks to Frame…** reports an error when the handoff cannot be written, instead of opening Frame with nothing sent.
+- Two jobs of the same type finishing in the same second get separate manifest files instead of one overwriting the other.
+
 ## 2026-09-02 — Phase 2 sessions and manifests (unreleased)
 
 Not a version bump. `NDEX_VERSION` stays `0.9.1`. This is workflow state, not a GitHub release.

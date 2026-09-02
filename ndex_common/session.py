@@ -137,12 +137,29 @@ def remember(
     return document
 
 
+def usable_handoff(document: dict[str, Any]) -> str:
+    """Handoff path Frame can actually import, or "" when it cannot.
+
+    A recorded handoff goes stale once the manifest is deleted or the files it
+    lists are moved, so Continue checks the same conditions Frame does before
+    it offers the handoff instead of a folder.
+    """
+    handoff = str((document.get("context") or {}).get("handoff") or "")
+    if not handoff or not Path(handoff).is_file():
+        return ""
+
+    from ndex_common.manifest import handoff_files, load_manifest
+
+    payload = load_manifest(Path(handoff))
+    if payload is None or not handoff_files(payload):
+        return ""
+    return handoff
+
+
 def usable(document: dict[str, Any]) -> bool:
     """True when Continue can reopen last work (folder or Frame handoff file)."""
-    if document.get("app") == "frame":
-        handoff = str((document.get("context") or {}).get("handoff") or "")
-        if handoff and Path(handoff).is_file():
-            return True
+    if document.get("app") == "frame" and usable_handoff(document):
+        return True
     return any(Path(path).is_dir() for path in document.get("folders", {}).values() if path)
 
 
@@ -179,8 +196,8 @@ def launch_args(document: dict[str, Any]) -> list[str]:
         _add_existing_dir(args, "--work-folder", folders.get("work"))
         return args
     if app == "frame":
-        handoff = str((document.get("context") or {}).get("handoff") or "")
-        if handoff and Path(handoff).is_file():
+        handoff = usable_handoff(document)
+        if handoff:
             args.extend(["--handoff", handoff])
         else:
             _add_existing_dir(args, "--source", folders.get("source"))

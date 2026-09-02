@@ -63,6 +63,7 @@ class MainWindow(QMainWindow):
         self.controller = controller
         self.preset_store = preset_store
         self._interactive_dialogs = True
+        self._last_report_dialog: QDialog | None = None
         self.last_export_result: ExportResult | None = None
         self._last_completion_dialog: ExportCompletionDialog | None = None
         self._source_export_status: dict[Path, str] = {}
@@ -128,6 +129,8 @@ class MainWindow(QMainWindow):
         toolbar.addWidget(self.output_profile_combo)
         self.manage_presets_button = QPushButton("Manage Presets")
         toolbar.addWidget(self.manage_presets_button)
+        self.job_results_button = QPushButton("Job Results")
+        toolbar.addWidget(self.job_results_button)
 
     def _build_workspace(self) -> None:
         root = QWidget()
@@ -268,6 +271,7 @@ class MainWindow(QMainWindow):
         self.open_folder_button.clicked.connect(self._choose_folder)
         self.output_folder_button.clicked.connect(self._choose_output_folder)
         self.manage_presets_button.clicked.connect(self._manage_presets)
+        self.job_results_button.clicked.connect(self._open_job_results)
         self.save_frame_button.clicked.connect(self._save_frame_preset)
         self.frame_preset_combo.currentIndexChanged.connect(self._frame_preset_chosen)
         self.output_profile_combo.currentIndexChanged.connect(self._output_profile_chosen)
@@ -407,15 +411,32 @@ class MainWindow(QMainWindow):
         self._request_selected_preview()
 
     @Slot()
+    def _open_job_results(self) -> QDialog | None:
+        """Show what recent Frame exports wrote, skipped, or failed on."""
+        from ndex_frame.ui.report_dialog import FrameJobReportDialog, frame_reports
+
+        reports = frame_reports()
+        if not reports:
+            self.show_nonfatal_error("No export results recorded yet.")
+            return None
+        dialog = FrameJobReportDialog(reports, self)
+        self._last_report_dialog = dialog
+        if self._interactive_dialogs:
+            dialog.exec()
+        return dialog
+
+    @Slot()
     def _choose_files(self) -> None:
         names, _ = QFileDialog.getOpenFileNames(self, "Open Master Images", "", "Images (*.jpg *.jpeg *.png *.tif *.tiff)")
         if names:
+            self.handoff_path = None
             self.controller.import_paths([Path(name) for name in names])
 
     @Slot()
     def _choose_folder(self) -> None:
         name = QFileDialog.getExistingDirectory(self, "Open Master Folder")
         if name:
+            self.handoff_path = None
             self.controller.import_paths([Path(name)])
 
     @Slot()

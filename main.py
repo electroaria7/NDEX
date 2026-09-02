@@ -145,7 +145,11 @@ def main() -> int:
     args = parser.parse_args()
 
     if args.open:
-        run_app(initial_source=args.source, initial_destination=args.destination)
+        run_app(
+            initial_source=args.source,
+            initial_destination=args.destination,
+            preload_only=True,
+        )
         return 0
 
     cli_mode = any(

@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+from PyInstaller.utils.hooks import collect_submodules
+
 
 project_root = Path(SPECPATH).parent
 datas = [
@@ -27,7 +29,7 @@ a = Analysis(
     pathex=[str(project_root)],
     binaries=[],
     datas=datas,
-    hiddenimports=[],
+    hiddenimports=collect_submodules("ndex_common"),
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

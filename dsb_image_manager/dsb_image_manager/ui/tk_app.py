@@ -121,6 +121,8 @@ class ImageManagerApp(tk.Tk):
         file_menu.add_command(label="Send to Auto Selector...", command=self.send_to_auto_selector)
         file_menu.add_command(label="Send Picks to Frame...", command=self.send_picks_to_frame)
         file_menu.add_separator()
+        file_menu.add_command(label="Job Results...", command=self.open_job_results)
+        file_menu.add_separator()
         file_menu.add_command(label="Exit", command=self.destroy)
         menu_bar.add_cascade(label="File", menu=file_menu)
 
@@ -685,15 +687,25 @@ class ImageManagerApp(tk.Tk):
             )
             return
         handoff = record_select_handoff(self.source_dir or files[0].parent, files)
-        args = ["--open"]
-        if handoff is not None:
-            args.extend(["--handoff", str(handoff)])
-        launched = launch_app("frame", args)
+        if handoff is None:
+            messagebox.showerror(
+                NDEX_IMAGE_MANAGER_TITLE,
+                "Could not write the handoff file, so the picks were not sent. "
+                "Check that %LOCALAPPDATA%\\NDEX is writable.",
+            )
+            return
+        launched = launch_app("frame", ["--open", "--handoff", str(handoff)])
         if not launched:
             messagebox.showerror(
                 NDEX_IMAGE_MANAGER_TITLE,
                 "Could not find NDEX Frame. Build or install it first.",
             )
+
+    def open_job_results(self) -> None:
+        """Show what recent picks sent to Frame and backups actually did."""
+        from ndex_common.report_dialog import open_job_reports
+
+        open_job_reports(self, title=NDEX_IMAGE_MANAGER_TITLE, apps=("image_manager",))
 
     def open_export_dialog(self) -> None:
         records = self.selected_records()

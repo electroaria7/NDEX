@@ -149,6 +149,9 @@ class AutoSelectorApp(tk.Tk):
         )
         self.analyze_button.grid(row=0, column=0, sticky="ew", padx=(0, 6))
         self.copy_button.grid(row=0, column=1, sticky="ew", padx=(6, 0))
+        ttk.Button(buttons, text="작업 결과...", command=self.open_job_results).grid(
+            row=1, column=0, columnspan=2, sticky="ew", pady=(6, 0)
+        )
 
         ttk.Progressbar(left, variable=self.progress_var, maximum=100).grid(
             row=14, column=0, columnspan=3, sticky="ew", pady=(14, 6)
@@ -208,6 +211,12 @@ class AutoSelectorApp(tk.Tk):
         selected = filedialog.askdirectory(title="작업용 폴더 선택")
         if selected:
             self.work_folder_var.set(selected)
+
+    def open_job_results(self) -> None:
+        """추출 job이 실제로 복제/건너뜀/실패한 내역을 보여준다."""
+        from ndex_common.report_dialog import open_job_reports
+
+        open_job_reports(self, title=NDEX_AUTO_SELECTOR_TITLE, apps=("auto_selector",))
 
     def start_analysis(self) -> None:
         if self.worker_thread and self.worker_thread.is_alive():
