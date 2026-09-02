@@ -414,16 +414,20 @@ class MainWindow(QMainWindow):
         self._sync_controls()
         self._request_selected_preview()
 
+    def queue_job_results(self, manifest: Path) -> None:
+        """Open Job Results at one job. The Launcher's --retry lands here."""
+        self._open_job_results(select=Path(manifest))
+
     @Slot()
-    def _open_job_results(self) -> QDialog | None:
+    def _open_job_results(self, select: Path | None = None) -> QDialog | None:
         """Show what recent Frame exports wrote, skipped, or failed on."""
         from ndex_frame.ui.report_dialog import FrameJobReportDialog, frame_reports
 
-        reports = frame_reports()
+        reports = frame_reports(select=select)
         if not reports:
             self.show_nonfatal_error("No export results recorded yet.")
             return None
-        dialog = FrameJobReportDialog(reports, self, retry=self._retry_export)
+        dialog = FrameJobReportDialog(reports, self, retry=self._retry_export, select=select)
         self._last_report_dialog = dialog
         if self._interactive_dialogs:
             dialog.exec()

@@ -37,6 +37,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--output", type=Path, help="Export output folder to preload.")
     parser.add_argument(
+        "--retry",
+        type=Path,
+        help="Open Job Results at this export manifest so its failed files can be retried.",
+    )
+    parser.add_argument(
         "--smoke-export",
         nargs=2,
         type=Path,
@@ -203,6 +208,9 @@ def _run_gui(args: argparse.Namespace) -> int:
         QTimer.singleShot(0, lambda: window.queue_handoff(handoff))
     elif source is not None:
         QTimer.singleShot(0, lambda: window.queue_source(source))
+    if args.retry is not None:
+        retry = args.retry
+        QTimer.singleShot(0, lambda: window.queue_job_results(retry))
     return app.exec()
 
 

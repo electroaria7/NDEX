@@ -17,7 +17,16 @@ NDEX는 기존 DSB 백업 도구에서 출발해 사진 백업/선별/원본 추
 | 1 | `fix/phase-1-foundation` | #7 | 설정 잠금, CI, 크래시 로그, 0.9.1 재태깅 | merged |
 | 2 | `feat/phase-2-sessions` | #9 | 세션 문서, job manifest, 앱 간 handoff | merged + 후속 수정 |
 | 3 | `feat/phase-3-job-results` | #10 | job 결과를 UI에서 읽기 | merged |
-| 4 | `feat/phase-4-retry-failed` | - | 실패 항목 재실행 | 작업 중 |
+| 4 | `feat/phase-4-retry-failed` | #11 | 실패 항목 재실행 | merged |
+| 5 | `feat/phase-5-launcher-retry` | - | Launcher에서 앱으로 넘기는 재실행 | 작업 중 |
+
+### Phase 5 (2026-09-02)
+
+Launcher는 실행기가 없으니 재실행을 그 앱에 넘긴다.
+
+- Launcher Job Results의 **Retry in {앱}...** 이 `--open --retry <manifest>`로 그 앱을 띄운다.
+- NDEX One / Auto Selector / Frame이 `--retry`를 받아 Job Results를 그 job에서 연다. 밀려난 manifest도 읽어 온다.
+- 재실행은 여전히 그 앱의 Retry Failed로만 시작된다.
 
 ### Phase 4 (2026-09-02)
 
@@ -29,7 +38,7 @@ Phase 3이 보여준 실패 목록을 실제로 다시 돌린다. 자세한 내�
 - 재실행 결과는 새 manifest로 남고 `context.retry_of`로 원래 job을 가리킨다.
 - NDEX One이 백업의 파일별 결과를 기록하기 시작했다. 그전까지 백업 manifest에는 로그 메시지만 있어서 실패 경로를 목록에 낼 수도, 복사할 수도 없었다.
 - extract manifest에 원본 RAW 폴더가 들어간다. 재실행이 다시 매칭하려면 필요하다.
-- Launcher의 Job Results는 여전히 아무것도 실행하지 않는다. 대신 어느 앱을 열어야 하는지 알려준다.
+- Launcher의 Job Results는 아무것도 실행하지 않는다. (Phase 5에서 앱으로 넘기게 했다.)
 
 ### Phase 3 (2026-09-02)
 
@@ -99,14 +108,14 @@ Phase 2는 PR #9로 병합되었으나, 이후 코드 리뷰에서 6건의 결�
 ## Verified Test Coverage
 
 ```powershell
-python -m unittest discover -s tests                      # 123
+python -m unittest discover -s tests                      # 134
 python -m unittest discover -s dsb_image_manager\tests    # 11
 python -m unittest discover -s ndex_auto_selector\tests   # 18
-python -m unittest discover -s ndex_launcher\tests        # 12
-python -m unittest discover -s ndex_frame\tests           # 147
+python -m unittest discover -s ndex_launcher\tests        # 13
+python -m unittest discover -s ndex_frame\tests           # 150
 ```
 
-2026-09-02 기준 311개 전부 통과.
+2026-09-02 기준 326개 전부 통과.
 
 ## Current Direction
 

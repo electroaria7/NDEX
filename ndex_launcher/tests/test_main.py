@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import unittest
+from pathlib import Path
+from unittest.mock import patch
 
+from ndex_common.report import JobItem, JobReport
 from ndex_launcher.main import COMPACT_LAYOUT_WIDTH, LauncherApp, uses_compact_card_layout
 
 
@@ -46,6 +49,22 @@ class LauncherLayoutTests(unittest.TestCase):
         ]
         self.assertEqual(positions, [(0, 0), (0, 1), (1, 0), (1, 1)])
         self.assertEqual(app._arrows, [])
+
+class RetryInAppTests(unittest.TestCase):
+    def test_the_launcher_opens_the_owning_app_at_that_job(self) -> None:
+        app = LauncherApp()
+        self.addCleanup(app.destroy)
+        report = JobReport(
+            manifest_path=Path("C:/m/backup-1.json"),
+            type="backup",
+            app="ndex_one",
+            created_at="2026-09-02T10:15:00Z",
+            items=(JobItem(path="E:/DCIM/a.CR3", status="failed"),),
+        )
+        with patch("ndex_launcher.main.launch_app", return_value=True) as launch:
+            app.retry_in_app(report)
+        launch.assert_called_once_with("ndex_one", ["--open", "--retry", str(Path("C:/m/backup-1.json"))])
+
 
 
 if __name__ == "__main__":

@@ -299,6 +299,53 @@ class FrameRetryTests(unittest.TestCase):
         self.assertIn("Retry stopped", window.statusBar().currentMessage())
 
 
+class SelectOnOpenTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.app = QApplication.instance() or QApplication([])
+
+    def test_the_named_job_is_selected(self) -> None:
+        newer = _report(manifest_path=Path("C:/m/export-2.json"), created_at="2026-09-02T12:00:00Z")
+        older = _report(manifest_path=Path("C:/m/export-1.json"))
+        dialog = FrameJobReportDialog([newer, older], select=Path("c:/M/export-1.json"))
+        self.addCleanup(dialog.close)
+        self.assertEqual(dialog.job_list.currentRow(), 1)
+        self.assertIs(dialog.current, older)
+
+    def test_frame_reports_reads_in_a_job_that_aged_out(self) -> None:
+        from ndex_frame.ui import report_dialog
+
+        aged = _report(manifest_path=Path("C:/m/export-0.json"), created_at="2026-08-01T00:00:00Z")
+        with (
+            patch.object(report_dialog, "recent_reports", return_value=[_report()]),
+            patch.object(report_dialog, "read_report", return_value=aged),
+        ):
+            reports = report_dialog.frame_reports(select=Path("C:/m/export-0.json"))
+        self.assertIs(reports[0], aged)
+
+    def test_queue_job_results_opens_the_dialog_at_that_job(self) -> None:
+        frame = FramePreset("frame", "White 3:4", 1, AspectRatio(3, 4), "#FFFFFF", 1.0, 0.0, 0.0)
+        output = OutputProfile(
+            "output", "Instagram Feed HQ", 1, OutputSizing("fixed_width", width=1080),
+            "jpeg", 95, "4:4:4", "sRGB", True, MetadataPolicy()
+        )
+        controller = WorkspaceController(
+            WorkspaceState(working_frame=frame, output_profile=output),
+            settings_writer=lambda _section, _values: None,
+        )
+        window = MainWindow(controller=controller)
+        self.addCleanup(window.close)
+        window.set_interactive_dialogs(False)
+        wanted = _report(manifest_path=Path("C:/m/export-1.json"))
+        with patch("ndex_frame.ui.report_dialog.frame_reports", return_value=[_report(), wanted]) as reports:
+            window.queue_job_results(Path("C:/m/export-1.json"))
+        reports.assert_called_once_with(select=Path("C:/m/export-1.json"))
+        dialog = window._last_report_dialog
+        assert dialog is not None
+        self.addCleanup(dialog.close)
+        self.assertIs(dialog.current, wanted)
+
+
 
 if __name__ == "__main__":
     unittest.main()

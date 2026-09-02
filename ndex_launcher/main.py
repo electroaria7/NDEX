@@ -167,7 +167,16 @@ class LauncherApp(tk.Tk):
 
     def open_job_results(self) -> None:
         """Show what every app's recent jobs copied, skipped, or failed on."""
-        open_job_reports(self, title=NDEX_LAUNCHER_TITLE)
+        open_job_reports(self, title=NDEX_LAUNCHER_TITLE, open_in_app=self.retry_in_app)
+
+    def retry_in_app(self, report) -> None:
+        """Open the app that ran this job, at this job, so it can retry.
+
+        The Launcher owns no executor, so it never runs the files itself:
+        the app opens its own Job Results and the user presses Retry there,
+        with that app's settings in view.
+        """
+        self._launch(report.app, ["--open", "--retry", str(report.manifest_path)])
 
     def _launch(self, app_key: str, args: list[str]) -> None:
         try:

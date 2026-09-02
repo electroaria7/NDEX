@@ -41,6 +41,7 @@ class DSBApp(tk.Tk):
         initial_source: Path | None = None,
         initial_destination: Path | None = None,
         preload_only: bool = False,
+        retry_manifest: Path | None = None,
     ):
         super().__init__()
         self.title(NDEX_ONE_TITLE)
@@ -102,6 +103,10 @@ class DSBApp(tk.Tk):
         self._bind_events()
         self._update_button_states()
         self.after(100, self._process_ui_queue)
+        if retry_manifest is not None:
+            # From the Launcher's "Retry in NDEX One...". Open at that job;
+            # the user presses Retry here, where the settings are visible.
+            self.after(150, lambda: self._open_job_results(select=Path(retry_manifest)))
 
     def _build_layout(self) -> None:
         self.columnconfigure(0, weight=1)
@@ -438,12 +443,16 @@ class DSBApp(tk.Tk):
                 "Could not find NDEX Image Manager. Build or install it first.",
             )
 
-    def _open_job_results(self) -> None:
+    def _open_job_results(self, select: Path | None = None) -> None:
         """Show what recent backups copied, skipped, or failed on."""
         from ndex_common.report_dialog import open_job_reports
 
         open_job_reports(
-            self, title=NDEX_ONE_TITLE, apps=("ndex_one",), retry=self._retry_backup
+            self,
+            title=NDEX_ONE_TITLE,
+            apps=("ndex_one",),
+            retry=self._retry_backup,
+            select=select,
         )
 
     def _retry_backup(self, plan) -> None:
@@ -692,10 +701,12 @@ def run_app(
     initial_source: Path | None = None,
     initial_destination: Path | None = None,
     preload_only: bool = False,
+    retry_manifest: Path | None = None,
 ) -> None:
     app = DSBApp(
         initial_source=initial_source,
         initial_destination=initial_destination,
         preload_only=preload_only,
+        retry_manifest=retry_manifest,
     )
     app.mainloop()

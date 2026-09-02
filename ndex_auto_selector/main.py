@@ -46,6 +46,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Open the GUI with folder arguments preloaded (used by NDEX handoff)",
     )
+    parser.add_argument(
+        "--retry",
+        type=Path,
+        help="Open Job Results at this extract manifest so its failed files can be retried.",
+    )
     return parser
 
 
@@ -53,11 +58,12 @@ def main() -> int:
     install_crash_logging("NDEX Auto Selector")
     args = build_parser().parse_args()
 
-    if args.open:
+    if args.open or args.retry is not None:
         run_app(
             initial_raw_source=args.raw_source,
             initial_selected_jpg=args.selected_jpg,
             initial_work_folder=args.work_folder,
+            retry_manifest=args.retry,
         )
         return 0
 

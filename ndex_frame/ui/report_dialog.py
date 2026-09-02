@@ -9,6 +9,7 @@ handing the failed files back to the window that ran the export.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Callable, Sequence
 
@@ -28,7 +29,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ndex_common.report import JobReport, recent_reports
+from ndex_common.report import JobReport, read_report, recent_reports
 from ndex_common.retry import RetryPlan, plan_retry, retryable
 
 HISTORY_LIMIT = 30
@@ -42,6 +43,7 @@ class FrameJobReportDialog(QDialog):
         reports: Sequence[JobReport],
         parent: QWidget | None = None,
         retry: Callable[[RetryPlan], None] | None = None,
+        select: Path | None = None,
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("NDEX Frame - Job Results")
@@ -91,7 +93,7 @@ class FrameJobReportDialog(QDialog):
         layout.addWidget(buttons)
 
         if self.reports:
-            self.job_list.setCurrentRow(0)
+            self.job_list.setCurrentRow(_row_for(self.reports, select))
 
     def _show_row(self, row: int) -> None:
         if row < 0 or row >= len(self.reports):
@@ -149,8 +151,27 @@ class FrameJobReportDialog(QDialog):
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.current.manifest_path.parent)))
 
 
-def frame_reports(limit: int = HISTORY_LIMIT) -> list[JobReport]:
-    return recent_reports(apps=("frame",), limit=limit)
+def frame_reports(limit: int = HISTORY_LIMIT, select: Path | None = None) -> list[JobReport]:
+    """Recent Frame jobs. ``select`` is read in even when it has aged out."""
+    reports = recent_reports(apps=("frame",), limit=limit)
+    if select is not None and not any(_same_file(item.manifest_path, select) for item in reports):
+        selected = read_report(select)
+        if selected is not None:
+            reports.insert(0, selected)
+    return reports
+
+
+def _row_for(reports: Sequence[JobReport], select: Path | None) -> int:
+    if select is None:
+        return 0
+    for index, report in enumerate(reports):
+        if _same_file(report.manifest_path, select):
+            return index
+    return 0
+
+
+def _same_file(left: Path, right: Path) -> bool:
+    return os.path.normcase(str(left)) == os.path.normcase(str(right))
 
 
 def item_listing(report: JobReport) -> str:

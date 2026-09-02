@@ -266,6 +266,112 @@ class RetryHintTests(unittest.TestCase):
         self.assertIn("Re-run the job", report_dialog._where_to_retry(handoff, here=True))
 
 
+class LauncherHandoffTests(unittest.TestCase):
+    """The Launcher cannot retry; it opens the app that can, at that job."""
+
+    def setUp(self) -> None:
+        self.root = tk.Tk()
+        self.root.withdraw()
+        self.addCleanup(self._close_root)
+
+    def _close_root(self) -> None:
+        # Release the interpreter on this thread. Left to the garbage
+        # collector it can be finalized from a worker thread in a later
+        # test, and Tcl aborts the process.
+        self.root.destroy()
+        del self.root
+        gc.collect()
+
+    def _failed(self, **overrides):
+        fields = {"items": (JobItem(path="E:/DCIM/a.CR3", status="failed"),)}
+        fields.update(overrides)
+        return _report(**fields)
+
+    def test_without_a_retry_handler_the_app_button_takes_its_place(self) -> None:
+        window = report_dialog.JobReportWindow(
+            self.root, title="Launcher", reports=[self._failed()], open_in_app=lambda _r: None
+        )
+        self.addCleanup(window.destroy)
+        self.assertEqual(window.retry_button.winfo_manager(), "")
+        self.assertEqual(window.open_app_button.winfo_manager(), "pack")
+        self.assertEqual(window.open_app_button.cget("text"), "Retry in NDEX One...")
+        self.assertNotIn("disabled", window.open_app_button.state())
+
+    def test_the_app_button_is_disabled_for_a_job_nothing_can_retry(self) -> None:
+        handoff = _report(app="image_manager", type="select_handoff")
+        window = report_dialog.JobReportWindow(
+            self.root, title="Launcher", reports=[handoff], open_in_app=lambda _r: None
+        )
+        self.addCleanup(window.destroy)
+        self.assertIn("disabled", window.open_app_button.state())
+
+    def test_the_app_button_hands_the_report_over_and_closes(self) -> None:
+        handed = []
+        report = self._failed()
+        window = report_dialog.JobReportWindow(
+            self.root, title="Launcher", reports=[report], open_in_app=handed.append
+        )
+        window._open_in_app()
+        self.assertEqual(handed, [report])
+        self.assertFalse(window.winfo_exists())
+
+    def test_an_app_with_its_own_retry_does_not_show_the_app_button(self) -> None:
+        window = report_dialog.JobReportWindow(
+            self.root,
+            title="NDEX One",
+            reports=[self._failed()],
+            retry=lambda _p: None,
+            open_in_app=lambda _r: None,
+        )
+        self.addCleanup(window.destroy)
+        self.assertEqual(window.open_app_button.winfo_manager(), "")
+
+
+class SelectOnOpenTests(unittest.TestCase):
+    """--retry lands on the job it names, even one that aged out of the list."""
+
+    def setUp(self) -> None:
+        self.root = tk.Tk()
+        self.root.withdraw()
+        self.addCleanup(self._close_root)
+
+    def _close_root(self) -> None:
+        self.root.destroy()
+        del self.root
+        gc.collect()
+
+    def test_the_named_job_is_selected(self) -> None:
+        newer = _report(manifest_path=Path("C:/m/backup-2.json"), created_at="2026-09-02T12:00:00Z")
+        older = _report(manifest_path=Path("C:/m/backup-1.json"))
+        window = report_dialog.JobReportWindow(
+            self.root, title="NDEX One", reports=[newer, older], select=Path("c:/M/backup-1.json")
+        )
+        self.addCleanup(window.destroy)
+        self.assertEqual(window.job_list.selection(), ("1",))
+        self.assertIs(window.current, older)
+
+    def test_an_unknown_selection_falls_back_to_the_newest(self) -> None:
+        window = report_dialog.JobReportWindow(
+            self.root, title="NDEX One", reports=[_report()], select=Path("C:/m/nope.json")
+        )
+        self.addCleanup(window.destroy)
+        self.assertEqual(window.job_list.selection(), ("0",))
+
+    def test_open_job_reports_reads_in_a_job_that_aged_out(self) -> None:
+        aged = _report(manifest_path=Path("C:/m/backup-0.json"), created_at="2026-08-01T00:00:00Z")
+        with (
+            patch.object(report_dialog, "recent_reports", return_value=[_report()]),
+            patch.object(report_dialog, "read_report", return_value=aged) as read,
+        ):
+            window = report_dialog.open_job_reports(
+                self.root, title="NDEX One", apps=("ndex_one",), select=Path("C:/m/backup-0.json")
+            )
+        assert window is not None
+        self.addCleanup(window.destroy)
+        read.assert_called_once_with(Path("C:/m/backup-0.json"))
+        self.assertIs(window.current, aged)
+
+
 
 if __name__ == "__main__":
     unittest.main()

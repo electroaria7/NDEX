@@ -121,7 +121,20 @@ Frame의 재실행은 파일을 먼저 열고(비동기) 그 다음 내보낸다
 
 ### Launcher
 
-Launcher의 Job Results에는 Retry 버튼이 없다. 네 앱의 job을 다 보여주지만 실행기는 하나도 갖고 있지 않기 때문이다. 대신 문제 경로를 복사할 때 어느 앱을 열어야 하는지 알려준다.
+Launcher의 Job Results에는 Retry Failed가 없다. 네 앱의 job을 다 보여주지만 실행기는 하나도 갖고 있지 않기 때문이다. 그 자리에 **Retry in {앱}...** 이 있다.
+
+```text
+Launcher: Retry in NDEX One...
+  -> launch_app("ndex_one", ["--open", "--retry", manifest])
+NDEX One: 창을 띄운 뒤 Job Results를 그 job에서 연다
+  -> 사용자가 거기서 Retry Failed를 누른다
+```
+
+앱은 열기만 한다. 다른 프로세스가 띄운 앱이 확인도 없이 파일을 쓰기 시작하면 안 되고, 재실행이 쓰는 설정은 그 앱 창에 있으니 확인도 거기서 하는 게 맞다.
+
+`--retry`가 가리키는 manifest가 최근 30개에서 밀려났으면 따로 읽어 목록 맨 앞에 넣는다. 파일이 없거나 manifest가 아니면 그냥 최신 job에서 연다.
+
+Image Manager는 재실행할 job 종류가 없어서 `--retry`도 버튼도 없다.
 
 ## 백업의 파일별 기록
 

@@ -24,6 +24,7 @@ class AutoSelectorApp(tk.Tk):
         initial_raw_source=None,
         initial_selected_jpg=None,
         initial_work_folder=None,
+        retry_manifest: Path | None = None,
     ):
         super().__init__()
         self._initial_raw_source = initial_raw_source
@@ -58,6 +59,10 @@ class AutoSelectorApp(tk.Tk):
         self._apply_initial_paths()
         self._update_buttons()
         self.after(100, self._process_queue)
+        if retry_manifest is not None:
+            # Launcher에서 넘어온 job. 여기서 열고, 재실행은 설정이 보이는
+            # 이 창에서 사용자가 직접 누른다.
+            self.after(150, lambda: self.open_job_results(select=Path(retry_manifest)))
 
     def _apply_initial_paths(self) -> None:
         stored = get_section(SETTINGS_SECTION)
@@ -213,7 +218,7 @@ class AutoSelectorApp(tk.Tk):
         if selected:
             self.work_folder_var.set(selected)
 
-    def open_job_results(self) -> None:
+    def open_job_results(self, select: Path | None = None) -> None:
         """추출 job이 실제로 복제/건너뜀/실패한 내역을 보여준다."""
         from ndex_common.report_dialog import open_job_reports
 
@@ -222,6 +227,7 @@ class AutoSelectorApp(tk.Tk):
             title=NDEX_AUTO_SELECTOR_TITLE,
             apps=("auto_selector",),
             retry=self._retry_extract,
+            select=select,
         )
 
     def _retry_extract(self, plan) -> None:
@@ -520,10 +526,12 @@ def run_app(
     initial_raw_source=None,
     initial_selected_jpg=None,
     initial_work_folder=None,
+    retry_manifest: Path | None = None,
 ) -> None:
     app = AutoSelectorApp(
         initial_raw_source=initial_raw_source,
         initial_selected_jpg=initial_selected_jpg,
         initial_work_folder=initial_work_folder,
+        retry_manifest=retry_manifest,
     )
     app.mainloop()

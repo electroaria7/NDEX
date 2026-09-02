@@ -1,5 +1,15 @@
 # NDEX Patch Notes
 
+## 2026-09-02 — Phase 5 retry from the Launcher (unreleased)
+
+Not a version bump. `NDEX_VERSION` stays `0.9.1`.
+
+Phase 4 put **Retry Failed** in the three apps that run jobs. The Launcher shows every app's jobs but runs none of them, so from there a failed job was a dead end. Now it is a hop.
+
+- The Launcher's Job Results shows **Retry in NDEX One...** (or Auto Selector, or Frame) for a job with failed files. It opens that app at that job; the app's own Retry button takes it from there, with that app's settings in view. The Launcher never runs files itself.
+- NDEX One, Auto Selector, and Frame accept `--retry <manifest>`, which opens Job Results at that job. A manifest that has aged out of the recent list is read in on its own.
+- Image Manager has no retryable jobs, so it gets neither.
+
 ## 2026-09-02 — Phase 4 retry failed items (unreleased)
 
 Not a version bump. `NDEX_VERSION` stays `0.9.1`.
