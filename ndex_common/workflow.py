@@ -63,6 +63,8 @@ def record_extract(
     raw_source: Path | str,
     work_folder: Path | str,
     result: Any,
+    *,
+    context: Mapping[str, Any] | None = None,
 ) -> Path | None:
     counts = {
         "copied": int(getattr(result, "copied", 0)),
@@ -83,6 +85,7 @@ def record_extract(
             "raw_source": str(raw_source),
             "work": str(work_folder),
         },
+        context={"raw_source": str(raw_source), **dict(context or {})},
     )
 
 
@@ -93,6 +96,7 @@ def record_export(
     *,
     frame_preset: str = "",
     output_profile: str = "",
+    context: Mapping[str, Any] | None = None,
 ) -> Path | None:
     items = [
         {
@@ -120,6 +124,7 @@ def record_export(
             "frame_preset": frame_preset,
             "output_profile": output_profile,
             "cancelled": bool(getattr(result, "cancelled", False)),
+            **dict(context or {}),
         },
     )
 
@@ -141,7 +146,13 @@ def record_select_handoff(
     )
 
 
-def record_backup(source: Path | str, destination: Path | str, result: Any) -> Path | None:
+def record_backup(
+    source: Path | str,
+    destination: Path | str,
+    result: Any,
+    *,
+    context: Mapping[str, Any] | None = None,
+) -> Path | None:
     counts = {
         "copied": int(getattr(result, "copied", 0)),
         "skipped": int(getattr(result, "skipped", 0)),
@@ -162,5 +173,8 @@ def record_backup(source: Path | str, destination: Path | str, result: Any) -> P
         counts=counts,
         items=items,
         folders={"source": str(source), "destination": str(destination)},
-        context={"cancelled": bool(getattr(result, "cancelled", False))},
+        context={
+            "cancelled": bool(getattr(result, "cancelled", False)),
+            **dict(context or {}),
+        },
     )

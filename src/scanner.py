@@ -35,37 +35,14 @@ def analyze_source(
         logger.info(f"Destination: {backup_root}")
         logger.info(f"Found {len(files)} supported files")
 
-    items: list[ScanItem] = []
-    counts = {file_type: 0 for file_type in enabled_types}
-    if hasattr(metadata_extractor, "get_capture_datetimes"):
-        metadata = metadata_extractor.get_capture_datetimes(files, logger=logger)
-    else:
-        metadata = {
-            file_path: metadata_extractor.get_capture_datetime(file_path, logger=logger)
-            for file_path in files
-        }
-
-    for index, file_path in enumerate(files, start=1):
-        capture_datetime, metadata_source, fallback_used = metadata[file_path]
-        file_type = get_file_type_folder(file_path)
-        if file_type not in counts:
-            continue
-
-        destination_dir = build_destination_dir(backup_root, capture_datetime, file_type)
-        items.append(
-            ScanItem(
-                source_path=file_path,
-                file_type=file_type,
-                capture_datetime=capture_datetime,
-                metadata_source=metadata_source,
-                destination_dir=destination_dir,
-                fallback_used=fallback_used,
-            )
-        )
-        counts[file_type] += 1
-
-        if progress_callback:
-            progress_callback("analyze", index, len(files), file_path.name)
+    items, counts = build_scan_items(
+        files,
+        backup_root,
+        metadata_extractor,
+        enabled_types=enabled_types,
+        progress_callback=progress_callback,
+        logger=logger,
+    )
 
     preview_rows, folder_tree_lines = build_preview(items, backup_root)
 
@@ -84,3 +61,52 @@ def analyze_source(
         preview_rows=preview_rows,
         folder_tree_lines=folder_tree_lines,
     )
+
+
+def build_scan_items(
+    files: list[Path],
+    backup_root: Path,
+    metadata_extractor,
+    enabled_types: list[str] | None = None,
+    progress_callback=None,
+    logger=None,
+) -> tuple[list[ScanItem], dict[str, int]]:
+    """Work out where each file belongs in the backup tree.
+
+    ``enabled_types`` of None keeps every file the caller passed in. A retry
+    uses that: the files came from a finished job, so the type checkboxes
+    showing in the window now have no say over them.
+    """
+    items: list[ScanItem] = []
+    counts: dict[str, int] = {file_type: 0 for file_type in enabled_types or ()}
+    if hasattr(metadata_extractor, "get_capture_datetimes"):
+        metadata = metadata_extractor.get_capture_datetimes(files, logger=logger)
+    else:
+        metadata = {
+            file_path: metadata_extractor.get_capture_datetime(file_path, logger=logger)
+            for file_path in files
+        }
+
+    for index, file_path in enumerate(files, start=1):
+        capture_datetime, metadata_source, fallback_used = metadata[file_path]
+        file_type = get_file_type_folder(file_path)
+        if enabled_types is not None and file_type not in counts:
+            continue
+
+        destination_dir = build_destination_dir(backup_root, capture_datetime, file_type)
+        items.append(
+            ScanItem(
+                source_path=file_path,
+                file_type=file_type,
+                capture_datetime=capture_datetime,
+                metadata_source=metadata_source,
+                destination_dir=destination_dir,
+                fallback_used=fallback_used,
+            )
+        )
+        counts[file_type] = counts.get(file_type, 0) + 1
+
+        if progress_callback:
+            progress_callback("analyze", index, len(files), file_path.name)
+
+    return items, counts

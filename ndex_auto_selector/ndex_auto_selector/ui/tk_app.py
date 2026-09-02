@@ -38,6 +38,8 @@ class AutoSelectorApp(tk.Tk):
         self.ui_queue: queue.Queue = queue.Queue()
         self.worker_thread: threading.Thread | None = None
         self.summary: AnalysisSummary | None = None
+        self.pending_retry = None
+        self.pending_retry_folders: tuple[str, str, str] = ("", "", "")
 
         self.raw_source_var = tk.StringVar()
         self.selected_jpg_var = tk.StringVar()
@@ -216,7 +218,86 @@ class AutoSelectorApp(tk.Tk):
         """추출 job이 실제로 복제/건너뜀/실패한 내역을 보여준다."""
         from ndex_common.report_dialog import open_job_reports
 
-        open_job_reports(self, title=NDEX_AUTO_SELECTOR_TITLE, apps=("auto_selector",))
+        open_job_reports(
+            self,
+            title=NDEX_AUTO_SELECTOR_TITLE,
+            apps=("auto_selector",),
+            retry=self._retry_extract,
+        )
+
+    def _retry_extract(self, plan) -> None:
+        """실패/누락/중복이었던 JPG만 다시 추출한다.
+
+        폴더는 그 작업의 manifest에서 가져온다. 지금 창에 떠 있는 폴더가
+        그때와 다를 수 있기 때문이다.
+        """
+        if self.worker_thread and self.worker_thread.is_alive():
+            messagebox.showinfo(NDEX_AUTO_SELECTOR_TITLE, "실행 중인 작업이 끝난 뒤 다시 시도하세요.")
+            return
+
+        selected_jpg = plan.report.source
+        work_folder = plan.report.destination
+        # 오래된 manifest에는 원본 폴더가 없다. 그때는 창에 있는 값을 쓴다.
+        raw_source = str(plan.report.context.get("raw_source") or "").strip()
+        raw_source = raw_source or self.raw_source_var.get().strip()
+
+        for label, folder in (("원본 CR3", raw_source), ("셀렉 JPG", selected_jpg)):
+            if not folder or not Path(folder).is_dir():
+                messagebox.showerror("폴더 없음", f"그 작업의 {label} 폴더를 찾을 수 없습니다: {folder}")
+                return
+        if not work_folder:
+            messagebox.showerror("폴더 없음", "그 작업의 작업용 폴더가 기록되어 있지 않습니다.")
+            return
+
+        self.pending_retry = plan
+        self.pending_retry_folders = (selected_jpg, raw_source, work_folder)
+        options = {
+            "duplicate_policy": self.duplicate_var.get(),
+            "recursive": self.recursive_var.get(),
+            "write_xmp": self.write_xmp_var.get(),
+            "xmp_rating": int(self.xmp_rating_var.get()),
+            "rating_from_jpg": self.rating_from_jpg_var.get(),
+        }
+        self._set_busy(True)
+        self.progress_var.set(0)
+        self.status_var.set(f"실패 {len(plan.paths)}개 다시 복제 중...")
+        self._log(f"재실행 시작: {len(plan.paths)}개")
+        self.worker_thread = threading.Thread(
+            target=self._retry_worker,
+            args=(Path(raw_source), Path(selected_jpg), Path(work_folder), list(plan.paths), options),
+            daemon=True,
+        )
+        self.worker_thread.start()
+
+    def _retry_worker(
+        self,
+        raw_source: Path,
+        selected_jpg: Path,
+        work_folder: Path,
+        jpg_paths: list,
+        options: dict,
+    ) -> None:
+        try:
+            # 다시 분석해야 한다. 사용자가 그 사이 빠진 CR3를 넣었거나
+            # 중복을 정리했을 수 있고, 그것이 재실행의 이유다.
+            summary = self.service.analyze(
+                raw_source, selected_jpg, recursive=options["recursive"]
+            )
+            matches = self.service.matches_for(summary.matches, jpg_paths)
+            result = self.service.copy_matches(
+                matches,
+                work_folder,
+                options["duplicate_policy"],
+                write_xmp=options["write_xmp"],
+                xmp_rating=options["xmp_rating"],
+                rating_from_jpg=options["rating_from_jpg"],
+                progress_callback=lambda current, total, name: self.ui_queue.put(
+                    ("progress", current, total, name)
+                ),
+            )
+            self.ui_queue.put(("copy_done", result))
+        except Exception as exc:
+            self.ui_queue.put(("error", str(exc)))
 
     def start_analysis(self) -> None:
         if self.worker_thread and self.worker_thread.is_alive():
@@ -356,15 +437,22 @@ class AutoSelectorApp(tk.Tk):
             self._log(f"... 추가 메시지 {len(result.messages) - 80}개 생략")
         from ndex_common.workflow import record_extract
 
-        record_extract(
-            self.selected_jpg_var.get().strip(),
-            self.raw_source_var.get().strip(),
-            self.work_folder_var.get().strip(),
-            result,
-        )
+        plan = self.pending_retry
+        if plan is not None:
+            selected_jpg, raw_source, work_folder = self.pending_retry_folders
+            record_extract(selected_jpg, raw_source, work_folder, result, context=plan.context())
+        else:
+            record_extract(
+                self.selected_jpg_var.get().strip(),
+                self.raw_source_var.get().strip(),
+                self.work_folder_var.get().strip(),
+                result,
+            )
+        self.pending_retry = None
         self._set_busy(False)
 
     def _handle_error(self, message: str) -> None:
+        self.pending_retry = None
         self.status_var.set("작업 실패")
         self._log(f"오류: {message}")
         self._set_busy(False)

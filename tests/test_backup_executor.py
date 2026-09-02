@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import tempfile
+import threading
 import unittest
 from datetime import datetime
 from pathlib import Path
@@ -199,6 +200,93 @@ class BackupExecutorTests(unittest.TestCase):
             self.assertEqual(result.copied, 0)
             self.assertEqual(result.skipped, 1)
             self.assertEqual(len(list(destination_dir.iterdir())), 2)
+
+class BackupItemRecordTests(unittest.TestCase):
+    """The manifest, and therefore a retry, needs a per-file record."""
+
+    def test_copied_files_are_recorded_by_source_path(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            source_file = root / "source.CR3"
+            source_file.write_text("camera-file", encoding="utf-8")
+            destination_dir = root / "backup" / "cr3"
+
+            result = execute_backup([_make_item(source_file, destination_dir)], dry_run=False)
+
+        self.assertEqual(len(result.items), 1)
+        entry = result.items[0]
+        self.assertEqual(entry["path"], str(source_file))
+        self.assertEqual(entry["status"], "copied")
+        self.assertEqual(entry["destination"], str(destination_dir / "source.CR3"))
+
+    def test_skipped_files_say_why(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            source_file = root / "source.CR3"
+            source_file.write_text("camera-file", encoding="utf-8")
+            destination_dir = root / "backup" / "cr3"
+            destination_dir.mkdir(parents=True)
+            (destination_dir / "source.CR3").write_text("existing", encoding="utf-8")
+
+            result = execute_backup(
+                [_make_item(source_file, destination_dir)],
+                duplicate_policy="skip",
+                dry_run=False,
+            )
+
+        self.assertEqual([entry["status"] for entry in result.items], ["skipped"])
+        self.assertEqual(result.items[0]["detail"], "already exists")
+
+    def test_a_failed_copy_is_recorded_so_it_can_be_retried(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            source_file = root / "source.CR3"
+            source_file.write_text("camera-file", encoding="utf-8")
+            destination_dir = root / "backup" / "cr3"
+
+            with patch("src.backup_executor.shutil.copy2", side_effect=OSError("disk full")):
+                result = execute_backup([_make_item(source_file, destination_dir)], dry_run=False)
+
+        self.assertEqual(result.errors, 1)
+        self.assertEqual(result.items[0]["path"], str(source_file))
+        self.assertEqual(result.items[0]["status"], "failed")
+        self.assertIn("disk full", result.items[0]["detail"])
+
+    def test_verification_failure_is_recorded_as_failed(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            source_file = root / "source.CR3"
+            source_file.write_text("camera-file", encoding="utf-8")
+            destination_dir = root / "backup" / "cr3"
+
+            with patch("src.backup_executor._verify_copy", return_value=False):
+                result = execute_backup(
+                    [_make_item(source_file, destination_dir)],
+                    verify_mode="sha256",
+                    dry_run=False,
+                )
+
+        self.assertEqual(result.verification_failed, 1)
+        self.assertEqual(result.items[0]["status"], "failed")
+        self.assertIn("verification failed", result.items[0]["detail"])
+
+    def test_cancelled_files_are_not_recorded_as_having_happened(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            destination_dir = root / "backup" / "cr3"
+            items = []
+            for index in range(3):
+                source_file = root / f"source{index}.CR3"
+                source_file.write_text("camera-file", encoding="utf-8")
+                items.append(_make_item(source_file, destination_dir))
+
+            cancel = threading.Event()
+            cancel.set()
+            result = execute_backup(items, dry_run=False, cancel_event=cancel)
+
+        self.assertTrue(result.cancelled)
+        self.assertEqual(result.items, [])
+
 
 
 if __name__ == "__main__":

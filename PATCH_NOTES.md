@@ -1,5 +1,21 @@
 # NDEX Patch Notes
 
+## 2026-09-02 — Phase 4 retry failed items (unreleased)
+
+Not a version bump. `NDEX_VERSION` stays `0.9.1`.
+
+Phase 3 showed which files a job failed on but could only copy their paths to the clipboard. Phase 4 runs them again.
+
+- **Retry Failed** in the Job Results window re-runs the files a job failed on, left ambiguous, or could not find. It appears in NDEX One, Auto Selector, and NDEX Frame — the three apps that run jobs.
+- Files that have been moved or deleted since the job are counted and left out; the confirmation says how many, and refuses when none of them are still there.
+- The folders come from the job's own manifest, not from whatever the window is showing now. Settings (duplicate policy, verification, frame and output presets) come from the app as it stands.
+- A retry writes its own manifest, marked with the job it came from.
+- NDEX One now records a per-file result for every backup. Backup manifests previously carried only log messages, so Job Results could not list or copy the failed paths at all.
+- Extract manifests now record the RAW source folder, which a retry needs in order to match again.
+- Auto Selector re-analyzes both folders before retrying, so a RAW that was missing and has since been put back is found.
+- Frame reopens exactly the failed files, restores that job's output folder, and exports them again.
+- The Launcher's Job Results still runs nothing itself; for a retryable job it now names the app to open.
+
 ## 2026-09-02 — Phase 3 job results (unreleased)
 
 Not a version bump. `NDEX_VERSION` stays `0.9.1`.

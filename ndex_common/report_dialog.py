@@ -4,8 +4,9 @@ NDEX One, Image Manager, Auto Selector, and the Launcher all open this same
 window; they differ only in which apps they ask for. NDEX Frame is Qt and has
 its own dialog.
 
-The window is read-only. It opens folders and copies path lists; it never
-edits a manifest or a photograph.
+The window reads manifests; it never edits one. It can start a retry, but
+only by handing the failed files back to the app that ran the job — the
+window itself copies nothing.
 """
 
 from __future__ import annotations
@@ -15,9 +16,10 @@ import sys
 import tkinter as tk
 from pathlib import Path
 from tkinter import messagebox, ttk
-from typing import Iterable, Sequence
+from typing import Callable, Iterable, Sequence
 
 from ndex_common.report import JobReport, recent_reports
+from ndex_common.retry import RetryPlan, plan_retry, supports_retry
 from ndex_common.theme import (
     BODY_PAD,
     DANGER,
@@ -38,11 +40,13 @@ def open_job_reports(
     title: str,
     apps: Sequence[str] | None = None,
     reports: Sequence[JobReport] | None = None,
+    retry: Callable[[RetryPlan], None] | None = None,
 ) -> tk.Toplevel | None:
     """Open the results window, or explain that there is nothing to show.
 
     ``reports`` is for tests and for callers that already loaded them; normally
-    the window reads the manifest folder itself.
+    the window reads the manifest folder itself. ``retry`` is what runs a job's
+    failed files again; without it the window has no Retry button.
     """
     found = list(reports) if reports is not None else recent_reports(apps=apps, limit=_HISTORY_LIMIT)
     if not found:
@@ -54,13 +58,20 @@ def open_job_reports(
             parent=parent,
         )
         return None
-    return JobReportWindow(parent, title=title, reports=found)
+    return JobReportWindow(parent, title=title, reports=found, retry=retry)
 
 
 class JobReportWindow(tk.Toplevel):
     """A job list on the left, the selected job's items on the right."""
 
-    def __init__(self, parent: tk.Misc, *, title: str, reports: Sequence[JobReport]) -> None:
+    def __init__(
+        self,
+        parent: tk.Misc,
+        *,
+        title: str,
+        reports: Sequence[JobReport],
+        retry: Callable[[RetryPlan], None] | None = None,
+    ) -> None:
         super().__init__(parent)
         self.title(f"{title} - Job Results")
         self.geometry("980x600")
@@ -76,6 +87,8 @@ class JobReportWindow(tk.Toplevel):
 
         self.reports = list(reports)
         self.current: JobReport | None = None
+        self.retry = retry
+        self.retry_plan: RetryPlan | None = None
 
         body = ttk.Frame(self, padding=BODY_PAD)
         body.pack(fill=tk.BOTH, expand=True)
@@ -155,6 +168,12 @@ class JobReportWindow(tk.Toplevel):
         actions = ttk.Frame(card, style="CardInner.TFrame")
         actions.grid(row=4, column=0, columnspan=2, sticky="w", pady=(SPACE_MD, 0))
 
+        self.retry_button = ttk.Button(
+            actions, text="Retry Failed", style="Accent.TButton", command=self._retry_failed
+        )
+        if self.retry is not None:
+            self.retry_button.pack(side=tk.LEFT, padx=(0, SPACE_SM))
+
         self.copy_button = ttk.Button(actions, text="Copy Problem Paths", command=self._copy_problems)
         self.copy_button.pack(side=tk.LEFT)
         self.source_button = ttk.Button(actions, text="Open Source Folder", command=self._open_source)
@@ -190,11 +209,27 @@ class JobReportWindow(tk.Toplevel):
         self.item_text.configure(state=tk.DISABLED)
 
         problems = report.problem_paths()
+        self.retry_plan = plan_retry(report) if self.retry is not None else None
+        self.retry_button.state(
+            ["!disabled"] if self.retry_plan is not None and self.retry_plan.ready else ["disabled"]
+        )
         self.copy_button.state(["!disabled"] if problems else ["disabled"])
         self.source_button.state(["!disabled"] if _is_dir(report.source) else ["disabled"])
         self.destination_button.state(["!disabled"] if _is_dir(report.destination) else ["disabled"])
 
     # ---------------------------------------------------------------- actions
+
+    def _retry_failed(self) -> None:
+        """Hand the still-present failed files back to the app that ran them."""
+        plan, run = self.retry_plan, self.retry
+        if plan is None or run is None or not plan.ready:
+            return
+        if not messagebox.askyesno(self.title(), _retry_question(plan), parent=self):
+            return
+        # Close first: the app takes over the screen from here, and this list
+        # is about to be one job out of date.
+        self.destroy()
+        run(plan)
 
     def _copy_problems(self) -> None:
         if self.current is None:
@@ -207,7 +242,7 @@ class JobReportWindow(tk.Toplevel):
         messagebox.showinfo(
             self.title(),
             f"Copied {len(paths)} path(s) to the clipboard.\n\n"
-            "Re-run the job with the same folders to retry them.",
+            + _where_to_retry(self.current, self.retry is not None),
             parent=self,
         )
 
@@ -241,6 +276,32 @@ def reveal_folder(folder: Path) -> bool:
     else:
         subprocess.Popen(["xdg-open", str(folder)], close_fds=True)
     return True
+
+
+def _where_to_retry(report: JobReport, here: bool) -> str:
+    """Point at whoever can run these files again.
+
+    The Launcher shows every app's jobs but runs none of them, so from there
+    the answer is always another window.
+    """
+    if not supports_retry(report):
+        return "Re-run the job with the same folders to retry them."
+    if here:
+        return "Retry Failed runs the ones that are still on disk."
+    return f"Open {report.app_label} and use Job Results there to retry them."
+
+
+def _retry_question(plan: RetryPlan) -> str:
+    lines = [plan.summary, ""]
+    if plan.report.source:
+        lines.append(f"Source: {plan.report.source}")
+    if plan.report.destination:
+        lines.append(f"Destination: {plan.report.destination}")
+    lines.append("")
+    lines.append("They run again with the settings showing in the main window.")
+    lines.append("")
+    lines.append("Continue?")
+    return "\n".join(lines)
 
 
 def _folder_lines(report: JobReport) -> str:

@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import replace
 from pathlib import Path
 
-from PySide6.QtCore import QSignalBlocker, Qt, Slot
+from PySide6.QtCore import QSignalBlocker, Qt, QTimer, Slot
 from PySide6.QtGui import QCloseEvent, QColor, QIcon, QImage, QPixmap
 from PySide6.QtWidgets import (
     QColorDialog,
@@ -19,6 +20,7 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QMainWindow,
+    QMessageBox,
     QProgressBar,
     QPushButton,
     QSlider,
@@ -64,6 +66,8 @@ class MainWindow(QMainWindow):
         self.preset_store = preset_store
         self._interactive_dialogs = True
         self._last_report_dialog: QDialog | None = None
+        self.pending_retry = None
+        self._retry_paths: list[Path] | None = None
         self.last_export_result: ExportResult | None = None
         self._last_completion_dialog: ExportCompletionDialog | None = None
         self._source_export_status: dict[Path, str] = {}
@@ -419,11 +423,59 @@ class MainWindow(QMainWindow):
         if not reports:
             self.show_nonfatal_error("No export results recorded yet.")
             return None
-        dialog = FrameJobReportDialog(reports, self)
+        dialog = FrameJobReportDialog(reports, self, retry=self._retry_export)
         self._last_report_dialog = dialog
         if self._interactive_dialogs:
             dialog.exec()
         return dialog
+
+    def _retry_export(self, plan) -> None:
+        """Export again the files an earlier job failed on.
+
+        The output folder comes from that job, not from the one showing now:
+        a retry belongs with the pictures it was meant to sit beside.
+        """
+        paths = list(plan.paths)
+        destination = Path(plan.report.destination) if plan.report.destination else None
+        if destination is None or not destination.is_dir():
+            self.show_nonfatal_error(
+                f"That job's output folder is gone: {plan.report.destination}"
+            )
+            return
+        if self._interactive_dialogs:
+            answer = QMessageBox.question(
+                self,
+                "Retry Failed",
+                f"{plan.summary}{os.linesep}{os.linesep}"
+                f"Output: {destination}{os.linesep}{os.linesep}"
+                "Frame opens just these files and exports them with the "
+                f"frame and output settings showing now.{os.linesep}{os.linesep}"
+                "Continue?",
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+
+        self.controller.state.output_directory = destination
+        self.sync_output_folder_label()
+        self.pending_retry = plan
+
+        loaded = {
+            os.path.normcase(str(source.path)): source
+            for source in self.controller.state.sources
+        }
+        already_open = [
+            loaded[key]
+            for key in (os.path.normcase(str(path)) for path in paths)
+            if key in loaded
+        ]
+        if len(already_open) == len(paths):
+            self.confirm_export(already_open, "rename")
+            return
+
+        # Some are not open. Load exactly those files; _sources_changed picks
+        # the export up once the import lands.
+        self._retry_paths = paths
+        self.controller.import_paths(paths)
 
     @Slot()
     def _choose_files(self) -> None:
@@ -453,6 +505,15 @@ class MainWindow(QMainWindow):
             self._source_export_status.clear()
             self._known_source_paths = current
         self._refresh_sources()
+        if self._retry_paths is not None:
+            self._retry_paths = None
+            # Let the import finish emitting before the export claims the UI.
+            QTimer.singleShot(0, self._start_pending_retry)
+
+    def _start_pending_retry(self) -> None:
+        sources = list(self.controller.state.sources)
+        if sources:
+            self.confirm_export(sources, "rename")
 
     def _status_for(self, path: Path) -> str:
         export_status = self._source_export_status.get(path)

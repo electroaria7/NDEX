@@ -77,6 +77,12 @@ python -m ndex_auto_selector.main --raw-source "E:\DCIM" --selected-jpg "D:\Sele
 python -m ndex_auto_selector.main --raw-source "E:\DCIM" --selected-jpg "D:\Selects" --work-folder "D:\Work" --copy --write-xmp --xmp-rating 5
 ```
 
+## Job Results
+
+버튼 행의 **작업 결과...**가 최근 추출 job의 파일별 내역을 보여준다. 매칭이 없었거나(`missing`) 여러 개였거나(`ambiguous`) 실패한 JPG는 같은 창의 **Retry Failed**로 다시 돌릴 수 있다.
+
+재실행은 두 폴더를 **다시 분석**한 뒤 해당 JPG만 복제한다. 그 사이 빠졌던 CR3를 찾아 넣었거나 중복을 정리했다면 이번에는 매칭된다. 원본 RAW 폴더는 그 job의 manifest에 기록되어 있다. [[Architecture/Job Results]] 참고.
+
 ## Build
 
 ```powershell

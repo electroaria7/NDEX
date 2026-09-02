@@ -37,7 +37,9 @@ Last handoff: ...\manifests\select_handoff-20260902T101500Z.json
 
 ## Job Results
 
-푸터의 **Job Results...** 버튼은 4개 앱의 최근 job 결과를 한 창에 모아 보여준다. 카드마다도 해당 앱의 마지막 job 한 줄이 상태 문구 아래에 붙는다. [[Architecture/Job Results]] 참고.
+푸터의 **Job Results...** 버튼은 4개 앱의 최근 job 결과를 한 창에 모아 보여준다. 카드마다도 해당 앱의 마지막 job 한 줄이 상태 문구 아래에 붙는다.
+
+여기에는 **Retry Failed**가 없다. Launcher는 네 앱의 job을 다 보여주지만 실행기는 하나도 갖고 있지 않다. 문제 경로를 복사하면 어느 앱을 열어야 하는지 알려준다. [[Architecture/Job Results]] 참고.
 
 ## App Lookup
 

@@ -112,7 +112,66 @@ class AutoSelectorServiceTests(unittest.TestCase):
             self.assertEqual(result.copied, 0)
             self.assertFalse(list((root / "work").glob("*.CR3")))
 
+class RetrySelectionTests(unittest.TestCase):
+    """A retry narrows a fresh analysis down to the JPGs that went wrong."""
+
+    def _folders(self, root: Path) -> tuple[Path, Path]:
+        raw_source = root / "raw"
+        selected = root / "selected"
+        raw_source.mkdir()
+        selected.mkdir()
+        return raw_source, selected
+
+    def test_matches_for_keeps_only_the_named_jpgs_in_that_order(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            raw_source, selected = self._folders(root)
+            for index in (1, 2, 3):
+                (raw_source / f"IMG_000{index}.CR3").write_text("raw", encoding="utf-8")
+                (selected / f"IMG_000{index}.JPG").write_text("jpg", encoding="utf-8")
+
+            service = AutoSelectorService()
+            summary = service.analyze(raw_source, selected)
+            wanted = [selected / "IMG_0003.JPG", selected / "IMG_0001.JPG"]
+            found = service.matches_for(summary.matches, wanted)
+
+        self.assertEqual([match.jpg_path for match in found], wanted)
+
+    def test_a_jpg_that_is_no_longer_in_the_folder_is_dropped(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            raw_source, selected = self._folders(root)
+            (raw_source / "IMG_0001.CR3").write_text("raw", encoding="utf-8")
+            (selected / "IMG_0001.JPG").write_text("jpg", encoding="utf-8")
+
+            service = AutoSelectorService()
+            summary = service.analyze(raw_source, selected)
+            found = service.matches_for(
+                summary.matches, [selected / "IMG_0001.JPG", selected / "IMG_0404.JPG"]
+            )
+
+        self.assertEqual([match.jpg_path for match in found], [selected / "IMG_0001.JPG"])
+
+    def test_a_raw_added_since_the_failed_run_now_matches(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            raw_source, selected = self._folders(root)
+            jpg = selected / "IMG_0001.JPG"
+            jpg.write_text("jpg", encoding="utf-8")
+
+            service = AutoSelectorService()
+            before = service.analyze(raw_source, selected)
+            self.assertEqual(before.matches[0].status, "missing")
+
+            # The point of a retry: the photographer went and found the RAW.
+            (raw_source / "IMG_0001.CR3").write_text("raw", encoding="utf-8")
+            after = service.matches_for(service.analyze(raw_source, selected).matches, [jpg])
+            result = service.copy_matches(after, root / "work")
+
+        self.assertEqual(result.copied, 1)
+        self.assertEqual(result.missing, 0)
+
+
 
 if __name__ == "__main__":
     unittest.main()
-

@@ -5,7 +5,7 @@ import unittest
 from datetime import datetime
 from pathlib import Path
 
-from src.scanner import analyze_source
+from src.scanner import analyze_source, build_scan_items
 
 
 class FakeMetadataExtractor:
@@ -54,6 +54,52 @@ class ScannerTests(unittest.TestCase):
             self.assertEqual(len(summary.items), 5)
             self.assertEqual(len(summary.preview_rows), 1)
             self.assertTrue(extractor.batch_used)
+
+class BuildScanItemsTests(unittest.TestCase):
+    """A retry hands in a file list instead of scanning a folder."""
+
+    def test_without_enabled_types_every_file_given_is_kept(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            raw = root / "IMG_0001.CR3"
+            jpg = root / "IMG_0002.JPG"
+            raw.write_text("cr3", encoding="utf-8")
+            jpg.write_text("jpg", encoding="utf-8")
+
+            items, counts = build_scan_items(
+                [raw, jpg], root / "backup", FakeMetadataExtractor()
+            )
+
+        self.assertEqual([item.source_path for item in items], [raw, jpg])
+        self.assertEqual(counts, {"cr3": 1, "jpg": 1})
+
+    def test_enabled_types_still_filter_when_given(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            raw = root / "IMG_0001.CR3"
+            jpg = root / "IMG_0002.JPG"
+            raw.write_text("cr3", encoding="utf-8")
+            jpg.write_text("jpg", encoding="utf-8")
+
+            items, _counts = build_scan_items(
+                [raw, jpg], root / "backup", FakeMetadataExtractor(), enabled_types=["cr3"]
+            )
+
+        self.assertEqual([item.source_path for item in items], [raw])
+
+    def test_items_land_in_the_dated_folder_of_the_given_backup_root(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            raw = root / "IMG_0001.CR3"
+            raw.write_text("cr3", encoding="utf-8")
+            backup = root / "backup"
+
+            items, _counts = build_scan_items([raw], backup, FakeMetadataExtractor())
+
+        self.assertEqual(
+            items[0].destination_dir, backup / "2026" / "05" / "0503" / "cr3"
+        )
+
 
 
 if __name__ == "__main__":
