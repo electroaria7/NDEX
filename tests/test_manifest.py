@@ -3,6 +3,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from ndex_common import manifest
 
@@ -58,6 +59,21 @@ class ManifestTests(unittest.TestCase):
             }
             files = manifest.handoff_files(payload)
             self.assertEqual(files, [one, two])
+
+    def test_same_second_jobs_do_not_overwrite_each_other(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            stamp = "20260902T101500Z"
+            with patch.object(manifest, "datetime") as clock:
+                clock.now.return_value.strftime.side_effect = lambda fmt: (
+                    stamp if "%Y%m%dT" in fmt else "2026-09-02T10:15:00Z"
+                )
+                first = manifest.write_manifest(type="backup", app="ndex_one", source="A", root=root)
+                second = manifest.write_manifest(type="backup", app="ndex_one", source="B", root=root)
+
+            self.assertNotEqual(first, second)
+            self.assertEqual(manifest.load_manifest(first)["source"], "A")
+            self.assertEqual(manifest.load_manifest(second)["source"], "B")
 
     def test_rejects_unknown_type(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

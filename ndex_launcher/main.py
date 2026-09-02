@@ -6,6 +6,7 @@ from tkinter import messagebox, ttk
 from ndex_common.branding import NDEX_LAUNCHER_TITLE
 from ndex_common.crashlog import install_crash_logging
 from ndex_common.launch import launch_app
+from ndex_common.report_dialog import open_job_reports
 from ndex_common.settings import settings_path
 from ndex_common.theme import (
     apply_tk_theme,
@@ -62,6 +63,9 @@ class LauncherApp(tk.Tk):
         footer = ttk.Frame(self, padding=(20, 0, 20, 16), style="Footer.TFrame")
         footer.pack(fill=tk.X)
         ttk.Button(footer, text="Refresh Status", command=self.refresh_status).pack(side=tk.LEFT)
+        ttk.Button(footer, text="Job Results...", command=self.open_job_results).pack(
+            side=tk.LEFT, padx=(8, 0)
+        )
         ttk.Label(
             footer,
             text=f"Shared settings: {settings_path()}",
@@ -137,8 +141,15 @@ class LauncherApp(tk.Tk):
             anchor="w", pady=(10, 12)
         )
         ttk.Label(card, text=step.status_text, style="CardMuted.TLabel", wraplength=240, justify="left").pack(
-            anchor="w", pady=(0, 16)
+            anchor="w", pady=(0, 4)
         )
+        ttk.Label(
+            card,
+            text=step.result_text,
+            style="CardFaint.TLabel",
+            wraplength=240,
+            justify="left",
+        ).pack(anchor="w", pady=(0, 16))
 
         continue_label = "Continue" if step.has_session else "Open"
         ttk.Button(
@@ -153,6 +164,10 @@ class LauncherApp(tk.Tk):
                 text="Open Empty",
                 command=lambda s=step: self._launch(s.key, ["--open"]),
             ).pack(anchor="w", fill=tk.X, pady=(8, 0))
+
+    def open_job_results(self) -> None:
+        """Show what every app's recent jobs copied, skipped, or failed on."""
+        open_job_reports(self, title=NDEX_LAUNCHER_TITLE)
 
     def _launch(self, app_key: str, args: list[str]) -> None:
         try:

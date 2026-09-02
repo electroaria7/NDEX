@@ -81,6 +81,22 @@ class WorkflowRecordTests(unittest.TestCase):
             self.assertEqual(backup_doc["counts"]["skipped"], 1)
             self.assertEqual(export_doc["counts"]["failed"], 1)
             self.assertEqual(export_doc["context"]["frame_preset"], "builtin.white-3x4")
+    def test_manifest_survives_a_failed_session_write(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            photos = root / "photos"
+            photos.mkdir()
+            pick = photos / "pick.jpg"
+            pick.write_bytes(b"jpg")
+            patches = self._patch_roots(root)
+            with patches[0], patches[1], patches[2], patches[3], patches[4]:
+                with patch("ndex_common.session.remember", side_effect=OSError("locked")):
+                    path = record_select_handoff(photos, [pick])
+
+            self.assertIsNotNone(path)
+            assert path is not None
+            self.assertTrue(path.is_file())
+            self.assertEqual(manifest.load_manifest(path)["items"][0]["path"], str(pick))
 
 
 if __name__ == "__main__":

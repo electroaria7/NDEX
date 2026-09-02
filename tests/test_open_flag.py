@@ -31,6 +31,21 @@ class OpenFlagTests(unittest.TestCase):
         self.assertEqual(kwargs["initial_source"], Path("E:/DCIM"))
         self.assertEqual(kwargs["initial_destination"], Path("D:/Lib"))
 
+    def test_ndex_one_open_empty_does_not_reuse_remembered_folders(self) -> None:
+        with (
+            patch.object(ndex_one_main, "run_app") as run_app,
+            patch.object(ndex_one_main, "run_cli") as run_cli,
+            patch.object(ndex_one_main, "install_crash_logging"),
+            patch("sys.argv", ["NDEX_One", "--open"]),
+        ):
+            code = ndex_one_main.main()
+        self.assertEqual(code, 0)
+        run_cli.assert_not_called()
+        kwargs = run_app.call_args.kwargs
+        self.assertTrue(kwargs["preload_only"])
+        self.assertIsNone(kwargs["initial_source"])
+        self.assertIsNone(kwargs["initial_destination"])
+
     def test_image_manager_open_skips_cli_scan(self) -> None:
         args = image_manager_main.build_parser().parse_args(["--open", "--source", "D:/Lib"])
         self.assertTrue(args.open)

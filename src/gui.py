@@ -36,7 +36,12 @@ DUPLICATE_LABEL_TO_POLICY = {label: policy for policy, label in DUPLICATE_POLICY
 
 
 class DSBApp(tk.Tk):
-    def __init__(self, initial_source: Path | None = None, initial_destination: Path | None = None):
+    def __init__(
+        self,
+        initial_source: Path | None = None,
+        initial_destination: Path | None = None,
+        preload_only: bool = False,
+    ):
         super().__init__()
         self.title(NDEX_ONE_TITLE)
         self.geometry("1220x820")
@@ -59,12 +64,14 @@ class DSBApp(tk.Tk):
         self.pending_analysis: dict | None = None
         self.pending_backup: dict | None = None
 
-        self.source_var = tk.StringVar(value=self.settings.get("last_source", ""))
-        self.destination_var = tk.StringVar(value=self.settings.get("last_destination", ""))
-        if initial_source:
-            self.source_var.set(str(initial_source))
-        if initial_destination:
-            self.destination_var.set(str(initial_destination))
+        # With preload_only the caller passed the folders to use (NDEX handoff),
+        # so remembered folders stay out of the way and "Open Empty" is empty.
+        remembered_source = "" if preload_only else self.settings.get("last_source", "")
+        remembered_destination = "" if preload_only else self.settings.get("last_destination", "")
+        self.source_var = tk.StringVar(value=str(initial_source) if initial_source else remembered_source)
+        self.destination_var = tk.StringVar(
+            value=str(initial_destination) if initial_destination else remembered_destination
+        )
         self.duplicate_var = tk.StringVar(
             value=DUPLICATE_POLICY_LABELS.get(
                 self.settings.get("duplicate_policy", "rename"), DUPLICATE_POLICY_LABELS["rename"]
@@ -210,6 +217,9 @@ class DSBApp(tk.Tk):
         self.cancel_button.grid(row=1, column=0, sticky="ew", padx=(0, 6), pady=(6, 0))
         self.open_button.grid(row=1, column=1, sticky="ew", padx=6, pady=(6, 0))
         self.handoff_button.grid(row=1, column=2, sticky="ew", padx=(6, 0), pady=(6, 0))
+        ttk.Button(buttons, text="Job Results...", command=self._open_job_results).grid(
+            row=2, column=0, sticky="ew", padx=(0, 6), pady=(6, 0)
+        )
 
         progress_frame = ttk.LabelFrame(left, text="Progress", padding=12)
         progress_frame.grid(row=15, column=0, columnspan=3, sticky="ew", pady=(10, 0))
@@ -425,6 +435,12 @@ class DSBApp(tk.Tk):
                 "Could not find NDEX Image Manager. Build or install it first.",
             )
 
+    def _open_job_results(self) -> None:
+        """Show what recent backups copied, skipped, or failed on."""
+        from ndex_common.report_dialog import open_job_reports
+
+        open_job_reports(self, title=NDEX_ONE_TITLE, apps=("ndex_one",))
+
     def _open_backup_folder(self) -> None:
         destination = Path(self.destination_var.get())
         if destination.exists():
@@ -591,6 +607,14 @@ class DSBApp(tk.Tk):
         self.handoff_button.config(state=destination_ready)
 
 
-def run_app(initial_source: Path | None = None, initial_destination: Path | None = None) -> None:
-    app = DSBApp(initial_source=initial_source, initial_destination=initial_destination)
+def run_app(
+    initial_source: Path | None = None,
+    initial_destination: Path | None = None,
+    preload_only: bool = False,
+) -> None:
+    app = DSBApp(
+        initial_source=initial_source,
+        initial_destination=initial_destination,
+        preload_only=preload_only,
+    )
     app.mainloop()

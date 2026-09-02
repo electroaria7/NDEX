@@ -39,8 +39,7 @@ def write_manifest(
 ) -> Path:
     if type not in TYPES:
         raise ValueError(f"Unknown manifest type: {type}")
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    path = manifests_dir(root) / f"{type}-{stamp}.json"
+    path = _unused_path(manifests_dir(root), type)
     payload = {
         "kind": KIND,
         "schema_version": SCHEMA_VERSION,
@@ -57,6 +56,17 @@ def write_manifest(
     latest = manifests_dir(root) / f"latest-{app}-{type}.json"
     write_json_atomic(latest, payload)
     return path
+
+
+def _unused_path(folder: Path, type: str) -> Path:
+    """Timestamped manifest name, suffixed so same-second jobs never collide."""
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    candidate = folder / f"{type}-{stamp}.json"
+    index = 2
+    while candidate.exists():
+        candidate = folder / f"{type}-{stamp}-{index}.json"
+        index += 1
+    return candidate
 
 
 def load_manifest(path: Path) -> dict[str, Any] | None:

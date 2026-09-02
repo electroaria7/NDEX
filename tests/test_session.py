@@ -10,6 +10,27 @@ from ndex_common import session
 from ndex_common.settings import migrate
 
 
+def _write_handoff(folder: Path, *, missing_files: bool) -> Path:
+    """Write a select-handoff manifest, optionally listing files that are gone."""
+    picked = folder / "pick.jpg"
+    if not missing_files:
+        picked.write_bytes(b"jpg")
+    handoff = folder / "select-to-frame.json"
+    handoff.write_text(
+        json.dumps(
+            {
+                "kind": "ndex.manifest",
+                "schema_version": 1,
+                "type": "select_handoff",
+                "app": "image_manager",
+                "items": [{"path": str(picked), "status": "selected"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    return handoff
+
+
 class SessionDocumentTests(unittest.TestCase):
     def test_remember_writes_file_and_shared_snapshot(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -66,13 +87,42 @@ class SessionDocumentTests(unittest.TestCase):
 
     def test_frame_continue_prefers_handoff_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            handoff = Path(tmp) / "select-to-frame.json"
-            handoff.write_text("{}", encoding="utf-8")
+            handoff = _write_handoff(Path(tmp), missing_files=False)
             document = session.empty_session("frame")
             document["context"] = {"handoff": str(handoff)}
             document["folders"] = {"source": "Z:/also-missing"}
             args = session.launch_args(document)
         self.assertEqual(args[:3], ["--open", "--handoff", str(handoff)])
+
+    def test_unreadable_handoff_falls_back_to_source_folder(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            masters = Path(tmp) / "masters"
+            masters.mkdir()
+            handoff = Path(tmp) / "not-a-manifest.json"
+            handoff.write_text("{}", encoding="utf-8")
+            document = session.empty_session("frame")
+            document["context"] = {"handoff": str(handoff)}
+            document["folders"] = {"source": str(masters)}
+
+            self.assertEqual(session.usable_handoff(document), "")
+            self.assertEqual(
+                session.launch_args(document), ["--open", "--source", str(masters)]
+            )
+
+    def test_handoff_with_vanished_files_falls_back_to_source_folder(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            masters = Path(tmp) / "masters"
+            masters.mkdir()
+            handoff = _write_handoff(Path(tmp), missing_files=True)
+            document = session.empty_session("frame")
+            document["context"] = {"handoff": str(handoff)}
+            document["folders"] = {"source": str(masters)}
+
+            self.assertEqual(session.usable_handoff(document), "")
+            self.assertEqual(
+                session.launch_args(document), ["--open", "--source", str(masters)]
+            )
+            self.assertTrue(session.usable(document))
 
     def test_missing_context_falls_back_to_open(self) -> None:
         document = session.session_from_settings({"last_destination": "Z:/gone"}, "ndex_one")

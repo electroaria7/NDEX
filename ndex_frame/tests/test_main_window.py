@@ -153,6 +153,26 @@ class MainWindowTests(unittest.TestCase):
             self.assertTrue(window.export_all_button.isEnabled())
             self.assertTrue(window.export_selected_button.isEnabled())
 
+    def test_opening_files_clears_a_previous_handoff(self) -> None:
+        window = MainWindow(controller=self.controller)
+        self.addCleanup(window.close)
+        window.handoff_path = Path("select-handoff.json")
+        with tempfile.TemporaryDirectory() as directory:
+            master = Path(directory) / "master.jpg"
+            master.write_bytes(b"jpg")
+            with patch.object(QFileDialog, "getOpenFileNames", return_value=([str(master)], "")):
+                window._choose_files()
+        self.assertIsNone(window.handoff_path)
+
+    def test_opening_a_folder_clears_a_previous_handoff(self) -> None:
+        window = MainWindow(controller=self.controller)
+        self.addCleanup(window.close)
+        window.handoff_path = Path("select-handoff.json")
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.object(QFileDialog, "getExistingDirectory", return_value=directory):
+                window._choose_folder()
+        self.assertIsNone(window.handoff_path)
+
     def test_preview_projects_exact_export_plan(self) -> None:
         widget = PreviewWidget()
         widget.resize(540, 720)

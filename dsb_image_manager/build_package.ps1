@@ -18,6 +18,7 @@ python -m PyInstaller `
   --paths $appRoot `
   --paths $repoRoot `
   --collect-submodules dsb_image_manager.dsb_image_manager `
+  --collect-submodules ndex_common `
   --hidden-import dsb_image_manager.dsb_image_manager.core.file_types `
   --hidden-import dsb_image_manager.dsb_image_manager.core.models `
   --hidden-import dsb_image_manager.dsb_image_manager.services.backup `

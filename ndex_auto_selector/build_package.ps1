@@ -18,6 +18,7 @@ python -m PyInstaller `
   --paths $appRoot `
   --paths $repoRoot `
   --collect-submodules ndex_auto_selector.ndex_auto_selector `
+  --collect-submodules ndex_common `
   --hidden-import ndex_auto_selector.ndex_auto_selector.core.models `
   --hidden-import ndex_auto_selector.ndex_auto_selector.services.selector `
   --hidden-import ndex_auto_selector.ndex_auto_selector.ui.tk_app `
