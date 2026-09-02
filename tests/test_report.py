@@ -4,6 +4,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from ndex_common import report
 
@@ -224,6 +225,46 @@ class RecentReportTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             with self.assertRaises(ValueError):
                 report.latest_report("frame", "nope", root=Path(tmp))
+
+class LatestByAppTests(unittest.TestCase):
+    def test_newest_job_per_app_without_reading_older_ones(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write(root, "backup-20260901T090000Z.json", _manifest(created_at="2026-09-01T09:00:00Z"))
+            _write(root, "backup-20260902T101500Z.json", _manifest(created_at="2026-09-02T10:15:00Z"))
+            _write(
+                root,
+                "export-20260902T110000Z.json",
+                _manifest(type="export", app="frame", created_at="2026-09-02T11:00:00Z"),
+            )
+            with patch.object(report, "read_report", wraps=report.read_report) as read:
+                latest = report.latest_reports_by_app(("ndex_one", "frame"), root=root)
+
+        self.assertEqual(latest["ndex_one"].created_at, "2026-09-02T10:15:00Z")
+        self.assertEqual(latest["frame"].app, "frame")
+        # Stopped once both apps were seen: the oldest backup was never parsed.
+        self.assertEqual(read.call_count, 2)
+
+    def test_apps_with_no_jobs_are_simply_absent(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            latest = report.latest_reports_by_app(("ndex_one",), root=Path(tmp))
+        self.assertEqual(latest, {})
+
+    def test_recent_reports_stops_reading_at_the_limit(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for hour in range(5):
+                _write(
+                    root,
+                    f"backup-20260902T0{hour}0000Z.json",
+                    _manifest(created_at=f"2026-09-02T0{hour}:00:00Z"),
+                )
+            with patch.object(report, "read_report", wraps=report.read_report) as read:
+                found = report.recent_reports(root=root, limit=2)
+
+        self.assertEqual([item.created_at for item in found], ["2026-09-02T04:00:00Z", "2026-09-02T03:00:00Z"])
+        self.assertEqual(read.call_count, 2)
+
 
 
 if __name__ == "__main__":

@@ -29,7 +29,7 @@ from PySide6.QtWidgets import (
 )
 
 from ndex_common.report import JobReport, recent_reports
-from ndex_common.retry import RetryPlan, plan_retry
+from ndex_common.retry import RetryPlan, plan_retry, retryable
 
 HISTORY_LIMIT = 30
 
@@ -49,7 +49,6 @@ class FrameJobReportDialog(QDialog):
         self.reports = list(reports)
         self.current: JobReport | None = None
         self.retry = retry
-        self.retry_plan: RetryPlan | None = None
 
         layout = QVBoxLayout(self)
 
@@ -110,16 +109,22 @@ class FrameJobReportDialog(QDialog):
         self.summary_label.setText(summary)
         self.item_view.setPlainText(item_listing(report))
 
-        self.retry_plan = plan_retry(report) if self.retry is not None else None
-        self.retry_button.setEnabled(self.retry_plan is not None and self.retry_plan.ready)
+        # Whether those files are still on disk is checked when the button is
+        # pressed, not here: a manifest can point at a card since unplugged.
+        self.retry_button.setEnabled(self.retry is not None and retryable(report))
         self.copy_button.setEnabled(bool(report.problem_paths()))
         self.output_button.setEnabled(_is_dir(report.destination))
 
     def _retry_failed(self) -> None:
-        """Hand the still-present failed files back to the main window."""
-        plan, run = self.retry_plan, self.retry
-        if plan is None or run is None or not plan.ready:
+        """Hand the job back to the main window, which checks the files.
+
+        The window owns the message boxes, so a plan with nothing left on
+        disk goes there too and is explained there.
+        """
+        report, run = self.current, self.retry
+        if report is None or run is None or not retryable(report):
             return
+        plan = plan_retry(report)
         # Close first: the window takes over from here, and this list is
         # about to be one job out of date.
         self.accept()

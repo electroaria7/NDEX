@@ -229,6 +229,7 @@ class FrameRetryTests(unittest.TestCase):
     def test_the_queued_export_starts_once_the_import_lands(self) -> None:
         window = self._window()
         window.confirm_export = Mock()
+        window.pending_retry = plan_retry(self._failed_report())
         window._retry_paths = [self.failed]
         self.state.replace_sources([_source(self.failed)])
 
@@ -237,6 +238,65 @@ class FrameRetryTests(unittest.TestCase):
 
         self.assertIsNone(window._retry_paths)
         window.confirm_export.assert_called_once()
+
+    def test_an_unrelated_import_drops_the_retry_instead_of_exporting(self) -> None:
+        window = self._window()
+        window.confirm_export = Mock()
+        window.pending_retry = plan_retry(self._failed_report())
+        window._retry_paths = [self.failed]
+        other = self.root / "other.jpg"
+        other.write_bytes(b"jpg")
+        self.state.replace_sources([_source(other)])
+
+        window._sources_changed()
+        window._start_pending_retry()
+
+        window.confirm_export.assert_not_called()
+        self.assertIsNone(window.pending_retry)
+        self.assertIn("different files", window.statusBar().currentMessage())
+
+    def test_a_failed_import_drops_the_retry(self) -> None:
+        window = self._window()
+        window.pending_retry = plan_retry(self._failed_report())
+        window._retry_paths = [self.failed]
+
+        # What the controller emits when an import job raises.
+        window._busy_changed(False)
+
+        self.assertIsNone(window._retry_paths)
+        self.assertIsNone(window.pending_retry)
+        self.assertIn("could not be opened", window.statusBar().currentMessage())
+
+    def test_retry_waits_for_a_running_job(self) -> None:
+        window = self._window()
+        window.confirm_export = Mock()
+        window._busy = True
+
+        window._retry_export(plan_retry(self._failed_report()))
+
+        window.confirm_export.assert_not_called()
+        self.assertIsNone(window.pending_retry)
+        self.assertIn("running job", window.statusBar().currentMessage())
+
+    def test_a_plan_with_nothing_left_on_disk_is_explained(self) -> None:
+        window = self._window()
+        window.confirm_export = Mock()
+        gone = self._failed_report(items=(JobItem(path="Z:/gone/bad.jpg", status="failed"),))
+
+        window._retry_export(plan_retry(gone))
+
+        window.confirm_export.assert_not_called()
+        self.assertIn("nothing to retry", window.statusBar().currentMessage())
+
+    def test_an_export_that_cannot_start_drops_the_retry(self) -> None:
+        window = self._window()
+        window.confirm_export = Mock(side_effect=RuntimeError("An export job is already running."))
+        self.state.replace_sources([_source(self.failed)])
+
+        window._retry_export(plan_retry(self._failed_report()))
+
+        self.assertIsNone(window.pending_retry)
+        self.assertIn("Retry stopped", window.statusBar().currentMessage())
 
 
 

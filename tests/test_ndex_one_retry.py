@@ -36,14 +36,23 @@ class RecordBackupSessionTests(unittest.TestCase):
         self.failed.write_bytes(b"raw")
         self.result = SimpleNamespace(copied=1, skipped=0, errors=0)
 
-    def _window(self, pending_retry) -> SimpleNamespace:
+    def _window(self, pending_retry, pending_backup=None) -> SimpleNamespace:
         return SimpleNamespace(
             pending_retry=pending_retry,
+            pending_backup=pending_backup,
             source_var=SimpleNamespace(get=lambda: " E:/DCIM "),
             destination_var=SimpleNamespace(get=lambda: " D:/Library "),
         )
 
-    def test_an_ordinary_backup_is_recorded_against_the_form(self) -> None:
+    def test_an_ordinary_backup_is_recorded_against_the_analysed_folders(self) -> None:
+        pending = {"source": "E:/CARD", "destination": "D:/Analysed"}
+        with patch("ndex_common.workflow.record_backup") as record:
+            DSBApp._record_backup_session(self._window(None, pending), self.result)
+
+        # Not the form: it can have changed since Analyze ran.
+        record.assert_called_once_with("E:/CARD", "D:/Analysed", self.result)
+
+    def test_the_form_is_the_fallback_when_nothing_was_analysed(self) -> None:
         with patch("ndex_common.workflow.record_backup") as record:
             DSBApp._record_backup_session(self._window(None), self.result)
 

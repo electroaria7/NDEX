@@ -141,6 +141,45 @@ class RetryContextTests(unittest.TestCase):
         self.assertFalse(retry.is_retry(_report()))
         self.assertTrue(retry.is_retry(_report(context={"retry_of": "backup-1.json"})))
 
+class RetryQuestionTests(unittest.TestCase):
+    def _plan(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "a.CR3"
+            path.write_bytes(b"raw")
+            return retry.plan_retry(
+                _report(
+                    source="E:/DCIM",
+                    destination="D:/Lib",
+                    items=(JobItem(path=str(path), status="failed"),),
+                )
+            )
+
+    def test_question_names_both_folders_and_the_settings_rule(self) -> None:
+        question = self._plan().question()
+        self.assertIn("Retry 1 file(s).", question)
+        self.assertIn("Source: E:/DCIM", question)
+        self.assertIn("Destination: D:/Lib", question)
+        self.assertIn("settings showing in the main window", question)
+        self.assertTrue(question.endswith("Continue?"))
+
+    def test_apps_can_relabel_the_destination_and_add_a_note(self) -> None:
+        question = self._plan().question(destination_label="Output", note="Frame opens just these files.")
+        self.assertIn("Output: D:/Lib", question)
+        self.assertNotIn("Destination:", question)
+        self.assertIn("Frame opens just these files.", question)
+
+
+class RetryableTests(unittest.TestCase):
+    def test_retryable_reads_only_the_manifest(self) -> None:
+        # A gone file is still "retryable" here; plan_retry is what checks the disk.
+        gone = _report(items=(JobItem(path="Z:/gone/a.CR3", status="failed"),))
+        self.assertTrue(retry.retryable(gone))
+        self.assertFalse(retry.plan_retry(gone).ready)
+
+    def test_a_clean_job_is_not_retryable(self) -> None:
+        self.assertFalse(retry.retryable(_report(items=(JobItem(path="a.CR3", status="copied"),))))
+
+
 
 if __name__ == "__main__":
     unittest.main()

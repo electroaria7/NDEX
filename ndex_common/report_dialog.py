@@ -19,7 +19,7 @@ from tkinter import messagebox, ttk
 from typing import Callable, Iterable, Sequence
 
 from ndex_common.report import JobReport, recent_reports
-from ndex_common.retry import RetryPlan, plan_retry, supports_retry
+from ndex_common.retry import RetryPlan, plan_retry, retryable, supports_retry
 from ndex_common.theme import (
     BODY_PAD,
     DANGER,
@@ -88,7 +88,6 @@ class JobReportWindow(tk.Toplevel):
         self.reports = list(reports)
         self.current: JobReport | None = None
         self.retry = retry
-        self.retry_plan: RetryPlan | None = None
 
         body = ttk.Frame(self, padding=BODY_PAD)
         body.pack(fill=tk.BOTH, expand=True)
@@ -209,9 +208,10 @@ class JobReportWindow(tk.Toplevel):
         self.item_text.configure(state=tk.DISABLED)
 
         problems = report.problem_paths()
-        self.retry_plan = plan_retry(report) if self.retry is not None else None
+        # Whether those files are still on disk is checked when the button is
+        # pressed, not here: a manifest can point at a card since unplugged.
         self.retry_button.state(
-            ["!disabled"] if self.retry_plan is not None and self.retry_plan.ready else ["disabled"]
+            ["!disabled"] if self.retry is not None and retryable(report) else ["disabled"]
         )
         self.copy_button.state(["!disabled"] if problems else ["disabled"])
         self.source_button.state(["!disabled"] if _is_dir(report.source) else ["disabled"])
@@ -221,10 +221,14 @@ class JobReportWindow(tk.Toplevel):
 
     def _retry_failed(self) -> None:
         """Hand the still-present failed files back to the app that ran them."""
-        plan, run = self.retry_plan, self.retry
-        if plan is None or run is None or not plan.ready:
+        report, run = self.current, self.retry
+        if report is None or run is None or not retryable(report):
             return
-        if not messagebox.askyesno(self.title(), _retry_question(plan), parent=self):
+        plan = plan_retry(report)
+        if not plan.ready:
+            messagebox.showinfo(self.title(), plan.summary, parent=self)
+            return
+        if not messagebox.askyesno(self.title(), plan.question(), parent=self):
             return
         # Close first: the app takes over the screen from here, and this list
         # is about to be one job out of date.
@@ -290,18 +294,6 @@ def _where_to_retry(report: JobReport, here: bool) -> str:
         return "Retry Failed runs the ones that are still on disk."
     return f"Open {report.app_label} and use Job Results there to retry them."
 
-
-def _retry_question(plan: RetryPlan) -> str:
-    lines = [plan.summary, ""]
-    if plan.report.source:
-        lines.append(f"Source: {plan.report.source}")
-    if plan.report.destination:
-        lines.append(f"Destination: {plan.report.destination}")
-    lines.append("")
-    lines.append("They run again with the settings showing in the main window.")
-    lines.append("")
-    lines.append("Continue?")
-    return "\n".join(lines)
 
 
 def _folder_lines(report: JobReport) -> str:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import queue
 import threading
 import tkinter as tk
@@ -38,8 +39,6 @@ class AutoSelectorApp(tk.Tk):
         self.ui_queue: queue.Queue = queue.Queue()
         self.worker_thread: threading.Thread | None = None
         self.summary: AnalysisSummary | None = None
-        self.pending_retry = None
-        self.pending_retry_folders: tuple[str, str, str] = ("", "", "")
 
         self.raw_source_var = tk.StringVar()
         self.selected_jpg_var = tk.StringVar()
@@ -249,11 +248,11 @@ class AutoSelectorApp(tk.Tk):
             messagebox.showerror("폴더 없음", "그 작업의 작업용 폴더가 기록되어 있지 않습니다.")
             return
 
-        self.pending_retry = plan
-        self.pending_retry_folders = (selected_jpg, raw_source, work_folder)
         options = {
             "duplicate_policy": self.duplicate_var.get(),
-            "recursive": self.recursive_var.get(),
+            # The original run decided which folders were searched. Using the
+            # checkbox as it stands now could drop JPGs the job found.
+            "recursive": bool(plan.report.context.get("recursive", True)),
             "write_xmp": self.write_xmp_var.get(),
             "xmp_rating": int(self.xmp_rating_var.get()),
             "rating_from_jpg": self.rating_from_jpg_var.get(),
@@ -262,31 +261,27 @@ class AutoSelectorApp(tk.Tk):
         self.progress_var.set(0)
         self.status_var.set(f"실패 {len(plan.paths)}개 다시 복제 중...")
         self._log(f"재실행 시작: {len(plan.paths)}개")
+        folders = (selected_jpg, raw_source, work_folder)
         self.worker_thread = threading.Thread(
             target=self._retry_worker,
-            args=(Path(raw_source), Path(selected_jpg), Path(work_folder), list(plan.paths), options),
+            args=(plan, folders, options),
             daemon=True,
         )
         self.worker_thread.start()
 
-    def _retry_worker(
-        self,
-        raw_source: Path,
-        selected_jpg: Path,
-        work_folder: Path,
-        jpg_paths: list,
-        options: dict,
-    ) -> None:
+    def _retry_worker(self, plan, folders: tuple[str, str, str], options: dict) -> None:
+        selected_jpg, raw_source, work_folder = folders
+        jpg_paths = list(plan.paths)
         try:
             # 다시 분석해야 한다. 사용자가 그 사이 빠진 CR3를 넣었거나
             # 중복을 정리했을 수 있고, 그것이 재실행의 이유다.
             summary = self.service.analyze(
-                raw_source, selected_jpg, recursive=options["recursive"]
+                Path(raw_source), Path(selected_jpg), recursive=options["recursive"]
             )
             matches = self.service.matches_for(summary.matches, jpg_paths)
             result = self.service.copy_matches(
                 matches,
-                work_folder,
+                Path(work_folder),
                 options["duplicate_policy"],
                 write_xmp=options["write_xmp"],
                 xmp_rating=options["xmp_rating"],
@@ -295,7 +290,17 @@ class AutoSelectorApp(tk.Tk):
                     ("progress", current, total, name)
                 ),
             )
-            self.ui_queue.put(("copy_done", result))
+            # A JPG the analysis no longer lists would otherwise vanish from
+            # the record. Count it as missing so the manifest says so.
+            found = {os.path.normcase(str(match.jpg_path)) for match in matches}
+            for path in jpg_paths:
+                if os.path.normcase(str(path)) not in found:
+                    result.missing += 1
+                    result.messages.append(f"{path.name}: not in the selected JPG folder")
+                    result.items.append(
+                        {"path": str(path), "status": "missing", "detail": "not in the selected JPG folder"}
+                    )
+            self.ui_queue.put(("copy_done", result, (plan, folders, options)))
         except Exception as exc:
             self.ui_queue.put(("error", str(exc)))
 
@@ -403,7 +408,7 @@ class AutoSelectorApp(tk.Tk):
                 if kind == "analysis_done":
                     self._handle_analysis_done(event[1])
                 elif kind == "copy_done":
-                    self._handle_copy_done(event[1])
+                    self._handle_copy_done(event[1], event[2] if len(event) > 2 else None)
                 elif kind == "progress":
                     _, current, total, name = event
                     self.progress_var.set((current / total) * 100 if total else 0)
@@ -423,7 +428,8 @@ class AutoSelectorApp(tk.Tk):
         self._log(f"분석 완료: JPG {summary.selected_count}, 매칭 {summary.matched_count}, 누락 {summary.missing_count}")
         self._set_busy(False)
 
-    def _handle_copy_done(self, result) -> None:
+    def _handle_copy_done(self, result, retry=None) -> None:
+        """``retry`` is ``(plan, folders, options)`` when this was a retry, else None."""
         self.progress_var.set(100)
         self.status_var.set("CR3 복제 완료")
         self._log(
@@ -437,22 +443,21 @@ class AutoSelectorApp(tk.Tk):
             self._log(f"... 추가 메시지 {len(result.messages) - 80}개 생략")
         from ndex_common.workflow import record_extract
 
-        plan = self.pending_retry
-        if plan is not None:
-            selected_jpg, raw_source, work_folder = self.pending_retry_folders
-            record_extract(selected_jpg, raw_source, work_folder, result, context=plan.context())
+        if retry is not None:
+            plan, (selected_jpg, raw_source, work_folder), options = retry
+            context = {"recursive": options["recursive"], **plan.context()}
+            record_extract(selected_jpg, raw_source, work_folder, result, context=context)
         else:
             record_extract(
                 self.selected_jpg_var.get().strip(),
                 self.raw_source_var.get().strip(),
                 self.work_folder_var.get().strip(),
                 result,
+                context={"recursive": self.recursive_var.get()},
             )
-        self.pending_retry = None
         self._set_busy(False)
 
     def _handle_error(self, message: str) -> None:
-        self.pending_retry = None
         self.status_var.set("작업 실패")
         self._log(f"오류: {message}")
         self._set_busy(False)

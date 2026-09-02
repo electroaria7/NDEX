@@ -99,14 +99,14 @@ Phase 2는 PR #9로 병합되었으나, 이후 코드 리뷰에서 6건의 결�
 ## Verified Test Coverage
 
 ```powershell
-python -m unittest discover -s tests                      # 115
+python -m unittest discover -s tests                      # 123
 python -m unittest discover -s dsb_image_manager\tests    # 11
 python -m unittest discover -s ndex_auto_selector\tests   # 18
 python -m unittest discover -s ndex_launcher\tests        # 12
-python -m unittest discover -s ndex_frame\tests           # 142
+python -m unittest discover -s ndex_frame\tests           # 147
 ```
 
-2026-09-02 기준 298개 전부 통과.
+2026-09-02 기준 311개 전부 통과.
 
 ## Current Direction
 

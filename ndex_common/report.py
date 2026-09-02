@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any, Iterable, Iterator, Mapping
 
 from ndex_common.manifest import TYPES, load_manifest, manifests_dir
 
@@ -143,6 +143,42 @@ def latest_report(app: str, type: str, root: Path | None = None) -> JobReport | 
     return read_report(manifests_dir(root) / f"latest-{app}-{type}.json")
 
 
+def iter_reports(
+    *,
+    root: Path | None = None,
+    apps: Iterable[str] | None = None,
+    types: Iterable[str] | None = None,
+) -> Iterator[JobReport]:
+    """Timestamped manifests, newest first, parsed one at a time.
+
+    Manifests are written once and never edited, so file time is write time
+    and ordering by it costs one directory listing instead of a parse of
+    every file. Callers that want a few stop early.
+    """
+    wanted_apps = set(apps) if apps is not None else None
+    wanted_types = set(types) if types is not None else None
+
+    try:
+        candidates = [
+            path
+            for path in manifests_dir(root).glob("*.json")
+            # latest-* files duplicate a timestamped manifest; skip them here.
+            if not path.name.startswith("latest-")
+        ]
+        candidates.sort(key=lambda path: (path.stat().st_mtime_ns, path.name), reverse=True)
+    except OSError:
+        return
+    for candidate in candidates:
+        report = read_report(candidate)
+        if report is None:
+            continue
+        if wanted_apps is not None and report.app not in wanted_apps:
+            continue
+        if wanted_types is not None and report.type not in wanted_types:
+            continue
+        yield report
+
+
 def recent_reports(
     *,
     root: Path | None = None,
@@ -151,31 +187,25 @@ def recent_reports(
     limit: int = 20,
 ) -> list[JobReport]:
     """Timestamped manifests, newest first. ``limit=0`` returns all of them."""
-    wanted_apps = set(apps) if apps is not None else None
-    wanted_types = set(types) if types is not None else None
-
     reports: list[JobReport] = []
-    try:
-        candidates = sorted(manifests_dir(root).glob("*.json"))
-    except OSError:
-        return []
-    for candidate in candidates:
-        # latest-* files duplicate a timestamped manifest; skip them here.
-        if candidate.name.startswith("latest-"):
-            continue
-        report = read_report(candidate)
-        if report is None:
-            continue
-        if wanted_apps is not None and report.app not in wanted_apps:
-            continue
-        if wanted_types is not None and report.type not in wanted_types:
-            continue
+    for report in iter_reports(root=root, apps=apps, types=types):
         reports.append(report)
-
+        if limit > 0 and len(reports) >= limit:
+            break
+    # File time decided which to read; the recorded time decides the order.
     reports.sort(key=lambda report: (report.created_at, report.manifest_path.name), reverse=True)
-    if limit > 0:
-        return reports[:limit]
     return reports
+
+
+def latest_reports_by_app(apps: Iterable[str], *, root: Path | None = None) -> dict[str, JobReport]:
+    """The newest finished job of each app, reading no more manifests than needed."""
+    wanted = set(apps)
+    latest: dict[str, JobReport] = {}
+    for report in iter_reports(root=root, apps=wanted):
+        latest.setdefault(report.app, report)
+        if len(latest) == len(wanted):
+            break
+    return latest
 
 
 def _from_payload(path: Path, payload: Mapping[str, Any]) -> JobReport:

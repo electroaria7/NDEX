@@ -57,6 +57,25 @@ class RetryPlan:
             )
         return text
 
+    def question(self, *, destination_label: str = "Destination", note: str = "") -> str:
+        """The confirmation every app shows before a retry starts.
+
+        One text for all of them, so the promise about folders and settings
+        reads the same wherever the button lives.
+        """
+        lines = [self.summary, ""]
+        if self.report.source:
+            lines.append(f"Source: {self.report.source}")
+        if self.report.destination:
+            lines.append(f"{destination_label}: {self.report.destination}")
+        lines.append("")
+        if note:
+            lines.append(note)
+        lines.append("They run again with the settings showing in the main window.")
+        lines.append("")
+        lines.append("Continue?")
+        return chr(10).join(lines)
+
     def context(self) -> dict[str, Any]:
         """Manifest context marking the new job as a retry of the old one."""
         return {
@@ -71,8 +90,22 @@ def supports_retry(report: JobReport) -> bool:
     return RETRYABLE.get(report.app) == report.type
 
 
+def retryable(report: JobReport) -> bool:
+    """True when the job has problem files an app could run again.
+
+    This only reads the manifest. Whether the files are still on disk is
+    ``plan_retry``'s question, and that one touches the filesystem, so a
+    results list asks this first and plans only when the button is pressed.
+    """
+    return supports_retry(report) and bool(report.problem_paths())
+
+
 def plan_retry(report: JobReport) -> RetryPlan:
-    """Split the job's problem files into retryable ones and ones that are gone."""
+    """Split the job's problem files into retryable ones and ones that are gone.
+
+    Stats every problem path, so call it on demand rather than per selection:
+    a manifest can point at a card that has since been unplugged.
+    """
     if not supports_retry(report):
         return RetryPlan(report)
 
@@ -94,4 +127,4 @@ def is_retry(report: JobReport) -> bool:
     return bool(report.context.get("retry_of"))
 
 
-__all__ = ["RETRYABLE", "RetryPlan", "is_retry", "plan_retry", "supports_retry"]
+__all__ = ["RETRYABLE", "RetryPlan", "is_retry", "plan_retry", "retryable", "supports_retry"]

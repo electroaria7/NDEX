@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ndex_common import session as workflow_session
-from ndex_common.report import JobReport, recent_reports
+from ndex_common.report import JobReport, latest_reports_by_app
 from ndex_common.settings import load_all
 
 
@@ -87,7 +87,7 @@ def gather_workflow_state() -> list[StepState]:
         ),
     ]
 
-    results = _latest_result_by_app()
+    results = _latest_result_by_app([step.key for step in steps])
 
     for step in steps:
         document = documents[step.key]
@@ -100,9 +100,6 @@ def gather_workflow_state() -> list[StepState]:
     return steps
 
 
-def _latest_result_by_app() -> dict[str, JobReport]:
+def _latest_result_by_app(apps: list[str]) -> dict[str, JobReport]:
     """Newest finished job per app. Missing manifests are simply absent."""
-    latest: dict[str, JobReport] = {}
-    for report in recent_reports(limit=0):
-        latest.setdefault(report.app, report)
-    return latest
+    return latest_reports_by_app(apps)

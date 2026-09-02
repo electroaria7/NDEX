@@ -15,6 +15,8 @@ Phase 3 showed which files a job failed on but could only copy their paths to th
 - Auto Selector re-analyzes both folders before retrying, so a RAW that was missing and has since been put back is found.
 - Frame reopens exactly the failed files, restores that job's output folder, and exports them again.
 - The Launcher's Job Results still runs nothing itself; for a retryable job it now names the app to open.
+- NDEX One records a backup against the folders that were analysed, not whatever the form shows when the job ends. A destination edited between **Analyze** and the end of the backup used to be recorded as the job's destination.
+- Job Results reads manifests newest-first and stops at the history limit, and the Launcher reads only the newest manifest per app, instead of parsing every manifest ever written on each open.
 
 ## 2026-09-02 — Phase 3 job results (unreleased)
 

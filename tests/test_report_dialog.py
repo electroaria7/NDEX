@@ -188,11 +188,23 @@ class RetryButtonTests(unittest.TestCase):
         self.assertEqual(window.retry_button.winfo_manager(), "pack")
         self.assertNotIn("disabled", window.retry_button.state())
 
-    def test_the_button_is_disabled_when_the_failed_file_is_gone(self) -> None:
-        window = self._open(
-            [self._failed_report(path="Z:/gone/a.CR3")], retry=lambda _plan: None
-        )
-        self.assertIn("disabled", window.retry_button.state())
+    def test_a_gone_file_is_explained_on_click_rather_than_checked_per_selection(self) -> None:
+        # Selecting a job must not stat its files: the manifest can point at
+        # a card that has since been unplugged. The check happens on click.
+        handed = []
+        window = self._open([self._failed_report(path="Z:/gone/a.CR3")], retry=handed.append)
+        self.assertNotIn("disabled", window.retry_button.state())
+
+        with (
+            patch.object(report_dialog.messagebox, "showinfo") as info,
+            patch.object(report_dialog.messagebox, "askyesno") as ask,
+        ):
+            window._retry_failed()
+
+        self.assertEqual(handed, [])
+        ask.assert_not_called()
+        info.assert_called_once()
+        self.assertIn("nothing to retry", info.call_args.args[1])
 
     def test_the_button_is_disabled_for_a_job_with_no_problems(self) -> None:
         clean = _report(counts={"copied": 3}, items=(JobItem(path="a.CR3", status="copied"),))

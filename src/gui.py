@@ -400,6 +400,8 @@ class DSBApp(tk.Tk):
         self._save_settings()
         self.pending_backup = {
             "items": list(self.current_summary.items),
+            "source": str(self.current_summary.source_dir),
+            "destination": str(self.current_summary.backup_root),
             "duplicate_policy": self._selected_duplicate_policy(),
             "verify_mode": self._selected_verify_mode(),
             "dry_run": self.dry_run_var.get(),
@@ -455,6 +457,11 @@ class DSBApp(tk.Tk):
                 NDEX_ONE_TITLE, "Wait for the running job to finish, then retry."
             )
             return
+        if not plan.report.destination:
+            messagebox.showerror(
+                "Invalid Destination", "That job did not record a backup destination."
+            )
+            return
         destination = Path(plan.report.destination)
         if not destination.parent.exists():
             messagebox.showerror(
@@ -465,10 +472,14 @@ class DSBApp(tk.Tk):
 
         self.pending_retry = plan
         self.pending_backup = {
+            "source": plan.report.source,
+            "destination": plan.report.destination,
             "duplicate_policy": self._selected_duplicate_policy(),
             "verify_mode": self._selected_verify_mode(),
+            "dry_run": self.dry_run_var.get(),
         }
-        self._set_busy(True, f"Retrying {len(plan.paths)} file(s)...")
+        verb = "Rehearsing" if self.pending_backup["dry_run"] else "Retrying"
+        self._set_busy(True, f"{verb} {len(plan.paths)} file(s)...")
         self._run_worker(self._retry_worker)
 
     def _retry_worker(self) -> None:
@@ -483,7 +494,7 @@ class DSBApp(tk.Tk):
         result = execute_backup(
             items=items,
             duplicate_policy=self.pending_backup["duplicate_policy"],
-            dry_run=False,
+            dry_run=self.pending_backup["dry_run"],
             verify_mode=self.pending_backup["verify_mode"],
             progress_callback=self._queue_progress,
             logger=self.logger,
@@ -631,7 +642,14 @@ class DSBApp(tk.Tk):
                 context=plan.context(),
             )
             return
-        record_backup(self.source_var.get().strip(), self.destination_var.get().strip(), result)
+        # The folders the job actually used. The form can have changed since
+        # Analyze, and a manifest with the wrong destination misleads a retry.
+        pending = self.pending_backup or {}
+        record_backup(
+            pending.get("source") or self.source_var.get().strip(),
+            pending.get("destination") or self.destination_var.get().strip(),
+            result,
+        )
 
     def _render_backup_result(self, result) -> None:
         header = "Dry Run Result" if result.dry_run else "Backup Result"

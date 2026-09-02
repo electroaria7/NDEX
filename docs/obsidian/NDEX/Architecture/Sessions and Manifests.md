@@ -83,6 +83,7 @@ type마다 다르다.
 | --- | --- | --- |
 | `cancelled` | backup, export | 사용자가 중간에 멈췄는가 |
 | `raw_source` | extract | 원본 RAW 폴더. 재실행이 다시 매칭하려면 필요하다 |
+| `recursive` | extract | 하위 폴더까지 검색했는가. 재실행이 같은 범위를 뒤지기 위해 |
 | `frame_preset`, `output_profile` | export | 사용한 preset id |
 | `files` | select_handoff | 넘긴 파일 목록 |
 | `retry_of` | 재실행한 job 전부 | 이 job이 다시 돌린 원래 manifest 경로 |
