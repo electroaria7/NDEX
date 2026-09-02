@@ -35,6 +35,7 @@ def write_manifest(
     counts: Mapping[str, int] | None = None,
     items: Iterable[Mapping[str, Any]] | None = None,
     context: Mapping[str, Any] | None = None,
+    folders: Mapping[str, str] | None = None,
     root: Path | None = None,
 ) -> Path:
     if type not in TYPES:
@@ -51,6 +52,9 @@ def write_manifest(
         "counts": dict(counts or {}),
         "items": [dict(item) for item in (items or ())],
         "context": dict(context or {}),
+        # Every folder the job used, by role. source/destination above are
+        # the two a results view shows; a retry may need the others.
+        "folders": {str(key): str(value) for key, value in (folders or {}).items()},
     }
     write_json_atomic(path, payload)
     latest = manifests_dir(root) / f"latest-{app}-{type}.json"

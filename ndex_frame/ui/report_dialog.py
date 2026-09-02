@@ -9,7 +9,6 @@ handing the failed files back to the window that ran the export.
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Callable, Sequence
 
@@ -23,13 +22,14 @@ from PySide6.QtWidgets import (
     QLabel,
     QListWidget,
     QListWidgetItem,
+    QMessageBox,
     QPlainTextEdit,
     QPushButton,
     QVBoxLayout,
     QWidget,
 )
 
-from ndex_common.report import JobReport, read_report, recent_reports
+from ndex_common.report import JobReport, including, index_of, recent_reports
 from ndex_common.retry import RetryPlan, plan_retry, retryable
 
 HISTORY_LIMIT = 30
@@ -93,7 +93,7 @@ class FrameJobReportDialog(QDialog):
         layout.addWidget(buttons)
 
         if self.reports:
-            self.job_list.setCurrentRow(_row_for(self.reports, select))
+            self.job_list.setCurrentRow(index_of(self.reports, select))
 
     def _show_row(self, row: int) -> None:
         if row < 0 or row >= len(self.reports):
@@ -118,15 +118,15 @@ class FrameJobReportDialog(QDialog):
         self.output_button.setEnabled(_is_dir(report.destination))
 
     def _retry_failed(self) -> None:
-        """Hand the job back to the main window, which checks the files.
-
-        The window owns the message boxes, so a plan with nothing left on
-        disk goes there too and is explained there.
-        """
+        """Hand the still-present failed files back to the main window."""
         report, run = self.current, self.retry
         if report is None or run is None or not retryable(report):
             return
         plan = plan_retry(report)
+        if not plan.ready:
+            # Say so here, where the user is looking, and stay open.
+            QMessageBox.information(self, self.windowTitle(), plan.summary)
+            return
         # Close first: the window takes over from here, and this list is
         # about to be one job out of date.
         self.accept()
@@ -153,25 +153,7 @@ class FrameJobReportDialog(QDialog):
 
 def frame_reports(limit: int = HISTORY_LIMIT, select: Path | None = None) -> list[JobReport]:
     """Recent Frame jobs. ``select`` is read in even when it has aged out."""
-    reports = recent_reports(apps=("frame",), limit=limit)
-    if select is not None and not any(_same_file(item.manifest_path, select) for item in reports):
-        selected = read_report(select)
-        if selected is not None:
-            reports.insert(0, selected)
-    return reports
-
-
-def _row_for(reports: Sequence[JobReport], select: Path | None) -> int:
-    if select is None:
-        return 0
-    for index, report in enumerate(reports):
-        if _same_file(report.manifest_path, select):
-            return index
-    return 0
-
-
-def _same_file(left: Path, right: Path) -> bool:
-    return os.path.normcase(str(left)) == os.path.normcase(str(right))
+    return including(recent_reports(apps=("frame",), limit=limit), select, apps=("frame",))
 
 
 def item_listing(report: JobReport) -> str:

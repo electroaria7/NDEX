@@ -89,7 +89,7 @@ class WorkspaceState:
 
 
 class _ImportSignals(QObject):
-    completed = Signal(object, object)
+    completed = Signal(object, object, str)
     failed = Signal(object, str)
 
 
@@ -103,11 +103,27 @@ class _ImportRunnable(QRunnable):
 
     @Slot()
     def run(self) -> None:
+        # One unreadable file must not take the rest of the batch with it:
+        # the good ones open, the bad ones are named.
+        sources = []
+        problems = []
         try:
-            sources = [analyze_source(path) for path in discover_files(self.paths, self.recursive)]
-            self.signals.completed.emit(self, sources)
+            files = discover_files(self.paths, self.recursive)
         except Exception as error:
             self.signals.failed.emit(self, str(error) or error.__class__.__name__)
+            return
+        for path in files:
+            try:
+                sources.append(analyze_source(path))
+            except Exception as error:
+                problems.append(f"{path.name}: {str(error) or error.__class__.__name__}")
+        if not sources:
+            self.signals.failed.emit(self, "; ".join(problems) or "No images could be opened.")
+            return
+        warning = ""
+        if problems:
+            warning = f"Could not open {len(problems)} file(s): " + "; ".join(problems[:3])
+        self.signals.completed.emit(self, sources, warning)
 
 
 class _PreviewSignals(QObject):
@@ -167,6 +183,10 @@ class WorkspaceController(QObject):
     selectionChanged = Signal(object)
     previewReady = Signal(object, object, object, object)
     errorOccurred = Signal(str)
+    # Job-shaped outcomes a window can act on, next to the human-readable
+    # errorOccurred that still fires for the status bar.
+    importFailed = Signal(str)
+    exportAborted = Signal(str)
     exportProgress = Signal(object)
     exportFinished = Signal(object)
     busyChanged = Signal(bool)
@@ -198,9 +218,11 @@ class WorkspaceController(QObject):
         self.busyChanged.emit(True)
         self.thread_pool.start(job)
 
-    @Slot(object, object)
-    def _finish_import(self, job: QRunnable, sources: list[SourceItem]) -> None:
+    @Slot(object, object, str)
+    def _finish_import(self, job: QRunnable, sources: list[SourceItem], warning: str = "") -> None:
         self._jobs.discard(job)
+        if warning:
+            self.errorOccurred.emit(warning)
         self.state.replace_sources(sources)
         source_folder = getattr(job, "source_folder", None)
         if source_folder is not None:
@@ -218,6 +240,8 @@ class WorkspaceController(QObject):
     def _fail_job(self, job: QRunnable, message: str) -> None:
         self._jobs.discard(job)
         self.busyChanged.emit(False)
+        if isinstance(job, _ImportRunnable):
+            self.importFailed.emit(message)
         self.errorOccurred.emit(message)
 
     def select(self, path: Path) -> None:
@@ -333,4 +357,5 @@ class WorkspaceController(QObject):
         if result is not None:
             self.exportFinished.emit(result)
         else:
+            self.exportAborted.emit("Export worker stopped without a result.")
             self.errorOccurred.emit("Export worker stopped without a result.")

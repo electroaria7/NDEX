@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from dataclasses import replace
 from pathlib import Path
 
@@ -32,6 +31,7 @@ from PySide6.QtWidgets import (
 )
 
 from ndex_common.branding import APP_ICON_ICO, NDEX_FRAME_TITLE, get_branding_asset_path
+from ndex_common.retry import path_key
 from ndex_common.theme import apply_qt_theme
 from ndex_frame.core.framing_choices import normalize_hex_color
 from ndex_frame.core.geometry import resolve_canvas
@@ -67,7 +67,10 @@ class MainWindow(QMainWindow):
         self._interactive_dialogs = True
         self._last_report_dialog: QDialog | None = None
         self.pending_retry = None
-        self._retry_paths: list[Path] | None = None
+        # True while the retry's own import is in flight; the export starts
+        # when that import lands and nothing else has taken the workspace.
+        self._retry_importing = False
+        self._retry_previous_output: Path | None = None
         self.last_export_result: ExportResult | None = None
         self._last_completion_dialog: ExportCompletionDialog | None = None
         self._source_export_status: dict[Path, str] = {}
@@ -300,6 +303,8 @@ class MainWindow(QMainWindow):
         self.controller.busyChanged.connect(self._busy_changed)
         self.controller.exportProgress.connect(self._export_progress)
         self.controller.exportFinished.connect(self._export_finished)
+        self.controller.importFailed.connect(self._retry_import_failed)
+        self.controller.exportAborted.connect(self._retry_export_aborted)
 
     def _reload_preset_combos(self) -> None:
         frames: list[FramePreset]
@@ -463,43 +468,58 @@ class MainWindow(QMainWindow):
             if answer != QMessageBox.StandardButton.Yes:
                 return
 
+        # Remember the folder showing now: an abandoned retry puts it back.
+        self._retry_previous_output = self.controller.state.output_directory
         self.controller.state.output_directory = destination
         self.sync_output_folder_label()
         self.pending_retry = plan
 
-        loaded = {
-            os.path.normcase(str(source.path)): source
-            for source in self.controller.state.sources
-        }
-        already_open = [
-            loaded[key]
-            for key in (os.path.normcase(str(path)) for path in paths)
-            if key in loaded
-        ]
+        loaded = {path_key(source.path): source for source in self.controller.state.sources}
+        already_open = [loaded[key] for key in map(path_key, paths) if key in loaded]
         if len(already_open) == len(paths):
             self._export_retry(already_open)
             return
 
         # Some are not open. Load exactly those files; _sources_changed picks
         # the export up once the import lands.
-        self._retry_paths = paths
+        # Like every other import, this replaces the workspace, so a
+        # handoff no longer describes it.
+        self.handoff_path = None
+        self._retry_importing = True
         self.controller.import_paths(paths)
 
     def _export_retry(self, sources: list[SourceItem]) -> None:
         try:
             self.confirm_export(sources, "rename")
         except Exception as error:
-            self._drop_retry(f"Retry stopped: {error or error.__class__.__name__}")
+            self._drop_retry(f"Retry stopped: {str(error) or error.__class__.__name__}")
 
     def _drop_retry(self, message: str) -> None:
         """Forget a retry that cannot go ahead, and say so.
 
         Otherwise the flag would fire on the next unrelated import and the
-        next export would be recorded as a retry of the wrong job.
+        next export would be recorded as a retry of the wrong job. The
+        output folder goes back to what it was: the retry changed it for
+        pictures that are not going to be written.
         """
-        self._retry_paths = None
+        self._retry_importing = False
         self.pending_retry = None
+        self.controller.state.output_directory = self._retry_previous_output
+        self._retry_previous_output = None
+        self.sync_output_folder_label()
         self.show_nonfatal_error(message)
+
+    @Slot(str)
+    def _retry_import_failed(self, _message: str) -> None:
+        if self._retry_importing:
+            self._drop_retry("Retry stopped: the files could not be opened.")
+
+    @Slot(str)
+    def _retry_export_aborted(self, _message: str) -> None:
+        # The export ended without a result, so nothing will record the
+        # manifest that would have consumed the plan.
+        if self.pending_retry is not None:
+            self._drop_retry("Retry stopped: the export ended without a result.")
 
     @Slot()
     def _choose_files(self) -> None:
@@ -529,14 +549,14 @@ class MainWindow(QMainWindow):
             self._source_export_status.clear()
             self._known_source_paths = current
         self._refresh_sources()
-        if self._retry_paths is None:
+        if not self._retry_importing or self.pending_retry is None:
             return
         # Only the retry's own import may start the export. Anything else
         # arriving first (a drop, a handoff, Apply to all) means the
         # workspace is no longer what the retry was about.
-        wanted = {os.path.normcase(str(path)) for path in self._retry_paths}
-        loaded = {os.path.normcase(str(source.path)) for source in self.controller.state.sources}
-        self._retry_paths = None
+        wanted = set(map(path_key, self.pending_retry.paths))
+        loaded = {path_key(source.path) for source in self.controller.state.sources}
+        self._retry_importing = False
         if loaded != wanted:
             self._drop_retry("Retry stopped: different files were opened.")
             return
@@ -766,9 +786,6 @@ class MainWindow(QMainWindow):
             self.export_progress_bar.hide()
         if not exporting:
             self.cancel_button.setText("Cancel")
-        if not busy and not exporting and self._retry_paths is not None:
-            # The import ended without delivering sources: it failed.
-            self._drop_retry("Retry stopped: the files could not be opened.")
         self._sync_controls()
 
     @Slot(object)

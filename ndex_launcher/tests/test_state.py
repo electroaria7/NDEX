@@ -148,11 +148,12 @@ class LauncherStateTests(unittest.TestCase):
         newer_backup = _report("ndex_one", "backup", "2026-09-02T10:15:00Z", {"copied": 42, "failed": 1})
         export = _report("frame", "export", "2026-09-02T11:00:00Z", {"copied": 5})
 
+        pointers = {("ndex_one", "backup"): newer_backup, ("frame", "export"): export}
         with (
             patch.object(launcher_state, "load_all", return_value={}),
             patch(
-                "ndex_common.report.iter_reports",
-                return_value=iter([export, newer_backup, backup]),
+                "ndex_common.report.latest_report",
+                side_effect=lambda app, type, root=None: pointers.get((app, type)),
             ),
         ):
             steps = launcher_state.gather_workflow_state()

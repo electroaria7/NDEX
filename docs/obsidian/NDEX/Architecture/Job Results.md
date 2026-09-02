@@ -17,7 +17,8 @@ ndex_common\report.py
 ```
 
 - `read_report(path)` — manifest 하나를 `JobReport`로 파싱한다. 읽을 수 없으면 `None`.
-- `recent_reports(apps=..., types=..., limit=...)` — manifest 폴더를 훑어 최신순으로 준다. `latest-*` 포인터 파일은 건너뛴다. `limit=0`이면 전부.
+- `recent_reports(apps=..., types=..., limit=...)` — manifest 폴더를 훑어 최신순으로 준다. `latest-*` 포인터 파일은 건너뛴다. `limit=0`이면 전부. 순서는 파일명에 박힌 UTC 스탬프로 정한다. 파일 시간은 백업에서 복원하면 복원 시각이 되기 때문이다. `limit`만큼 읽고 멈춘다.
+- `latest_reports_by_app(apps)` — 앱별 최신 job. 폴더를 훑지 않고 `latest-{app}-{type}.json` 포인터만 읽는다. Launcher 카드가 쓴다.
 - `latest_report(app, type)` — `latest-{app}-{type}.json` 포인터를 읽는다.
 
 `JobReport`가 UI에 주는 것:
@@ -30,6 +31,7 @@ ndex_common\report.py
 | `items_by_status()` | 상태별로 묶되 문제 상태를 먼저 |
 | `problem_paths()` | `failed` / `error` / `ambiguous` / `missing` 경로 목록 |
 | `failed_count` | 기록된 카운트, 없으면 문제 항목 개수 |
+| `folders` | job이 쓴 폴더 전부. Auto Selector의 `raw_source`처럼 source/destination 밖의 것 |
 | `cancelled` | context의 취소 표시 |
 
 문제 상태는 `PROBLEM_STATUSES`에 있다. 여기에 들어간 항목은 목록 위로 올라가고, 목록 행이 빨간색으로 표시된다.
@@ -99,12 +101,15 @@ Auto Selector가 다시 분석하는 것이 핵심이다. `missing`이나 `ambig
 
 Frame의 재실행은 파일을 먼저 열고(비동기) 그 다음 내보낸다. 그 사이에 들어올 수 있는 것들이 있어서, 재실행은 아래 경우에 스스로 멈추고 상태 표시줄에 이유를 남긴다.
 
-- 열기가 실패했다 (읽을 수 없는 파일).
+- 열기가 실패했다 (파일이 하나도 안 열림). 일부만 못 열면 나머지로 진행하고 못 연 파일을 상태 표시줄에 적는다.
+- 내보내기가 결과 없이 끝났다 (worker가 죽음).
 - 열기가 끝났는데 워크스페이스에 있는 파일이 재실행 대상과 다르다 — 그 사이 드롭, handoff, **Apply to all**이 끼어든 경우.
 - 내보내기가 이미 돌고 있다.
 - 내보내기를 시작할 수 없다 (plan 오류).
 
-멈추지 않으면 다음 무관한 열기에서 export가 시작되고, 다음 export가 엉뚱한 job의 재실행으로 기록된다.
+멈추지 않으면 다음 무관한 열기에서 export가 시작되고, 다음 export가 엉뚱한 job의 재실행으로 기록된다. 멈출 때는 재실행이 바꿔 놓은 출력 폴더도 원래대로 되돌린다.
+
+판단은 controller의 `importFailed` / `exportAborted` 시그널로 한다. `busyChanged(False)`로 추측하면 preview 하나 실패한 것을 열기 실패로 오해한다.
 
 ### 어떤 값을 쓰는가
 
@@ -132,7 +137,7 @@ NDEX One: 창을 띄운 뒤 Job Results를 그 job에서 연다
 
 앱은 열기만 한다. 다른 프로세스가 띄운 앱이 확인도 없이 파일을 쓰기 시작하면 안 되고, 재실행이 쓰는 설정은 그 앱 창에 있으니 확인도 거기서 하는 게 맞다.
 
-`--retry`가 가리키는 manifest가 최근 30개에서 밀려났으면 따로 읽어 목록 맨 앞에 넣는다. 파일이 없거나 manifest가 아니면 그냥 최신 job에서 연다.
+`--retry`가 가리키는 manifest가 최근 30개에서 밀려났으면 따로 읽어 목록 맨 앞에 넣는다. 파일이 없거나 manifest가 아니면 그냥 최신 job에서 연다. **다른 앱의 manifest는 받지 않는다.** 백업 창에 extract job을 주면 그것을 백업으로 돌려 버릴 것이기 때문이다.
 
 Image Manager는 재실행할 job 종류가 없어서 `--retry`도 버튼도 없다.
 

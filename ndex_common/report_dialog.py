@@ -11,7 +11,6 @@ window itself copies nothing.
 
 from __future__ import annotations
 
-import os
 import subprocess
 import sys
 import tkinter as tk
@@ -19,7 +18,7 @@ from pathlib import Path
 from tkinter import messagebox, ttk
 from typing import Callable, Iterable, Sequence
 
-from ndex_common.report import JobReport, read_report, recent_reports
+from ndex_common.report import JobReport, including, index_of, recent_reports
 from ndex_common.retry import RetryPlan, plan_retry, retryable, supports_retry
 from ndex_common.theme import (
     BODY_PAD,
@@ -54,10 +53,7 @@ def open_job_reports(
     job on open, and is read in even when it has aged out of the recent list.
     """
     found = list(reports) if reports is not None else recent_reports(apps=apps, limit=_HISTORY_LIMIT)
-    if select is not None and not any(_same_file(item.manifest_path, select) for item in found):
-        selected = read_report(select)
-        if selected is not None:
-            found.insert(0, selected)
+    found = including(found, select, apps=apps)
     if not found:
         messagebox.showinfo(
             title,
@@ -112,12 +108,7 @@ class JobReportWindow(tk.Toplevel):
         self._build_job_list(body)
         self._build_detail(body)
 
-        first = "0"
-        if select is not None:
-            for index, report in enumerate(self.reports):
-                if _same_file(report.manifest_path, select):
-                    first = str(index)
-                    break
+        first = str(index_of(self.reports, select))
         self.job_list.selection_set(first)
         self.job_list.focus(first)
         self.job_list.see(first)
@@ -367,10 +358,6 @@ def _item_lines(items: Iterable) -> list[str]:
             text = f"{text}  -  {item.detail}"
         lines.append(text)
     return lines
-
-
-def _same_file(left: Path, right: Path) -> bool:
-    return os.path.normcase(str(left)) == os.path.normcase(str(right))
 
 
 def _is_dir(value: str) -> bool:

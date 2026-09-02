@@ -361,7 +361,7 @@ class SelectOnOpenTests(unittest.TestCase):
         aged = _report(manifest_path=Path("C:/m/backup-0.json"), created_at="2026-08-01T00:00:00Z")
         with (
             patch.object(report_dialog, "recent_reports", return_value=[_report()]),
-            patch.object(report_dialog, "read_report", return_value=aged) as read,
+            patch("ndex_common.report.read_report", return_value=aged) as read,
         ):
             window = report_dialog.open_job_reports(
                 self.root, title="NDEX One", apps=("ndex_one",), select=Path("C:/m/backup-0.json")

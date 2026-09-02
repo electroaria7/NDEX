@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import os
 import re
 import shutil
 from pathlib import Path
 
 from ndex_common.rating import read_jpg_rating
+from ndex_common.retry import path_key
 from ndex_common.xmp import write_xmp_sidecar
 
 from ..core.models import AnalysisSummary, CopyResult, DuplicatePolicy, SelectionMatch
@@ -127,19 +127,33 @@ class AutoSelectorService:
     @staticmethod
     def matches_for(
         matches: list[SelectionMatch], jpg_paths: list[Path]
-    ) -> list[SelectionMatch]:
+    ) -> tuple[list[SelectionMatch], list[Path]]:
         """The matches for the given selected JPGs, in the order asked for.
 
         A retry uses this: it re-analyzes both folders so the RAW index is
         current, then narrows the run to the JPGs that went wrong last time.
+        JPGs the analysis no longer lists come back separately so the caller
+        can record them instead of letting them vanish.
         """
-        by_path = {os.path.normcase(str(match.jpg_path)): match for match in matches}
-        found = []
+        by_path = {path_key(match.jpg_path): match for match in matches}
+        found: list[SelectionMatch] = []
+        missing: list[Path] = []
         for path in jpg_paths:
-            match = by_path.get(os.path.normcase(str(path)))
-            if match is not None:
+            match = by_path.get(path_key(path))
+            if match is None:
+                missing.append(path)
+            else:
                 found.append(match)
-        return found
+        return found, missing
+
+    @staticmethod
+    def note_missing(result: CopyResult, jpg_paths: list[Path], detail: str) -> None:
+        """Record JPGs a run could not reach, in the same shape copy_matches uses."""
+        for path in jpg_paths:
+            result.total += 1
+            result.missing += 1
+            result.messages.append(f"{path.name}: {detail}")
+            result.items.append({"path": str(path), "status": "missing", "detail": detail})
 
     @staticmethod
     def _index_cr3_files(root: Path, recursive: bool) -> dict[str, list[Path]]:

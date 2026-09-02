@@ -13,6 +13,7 @@ from ndex_common.workflow import (
     record_export,
     record_extract,
     record_select_handoff,
+    trim_items,
 )
 
 
@@ -145,10 +146,12 @@ class RetryRecordTests(unittest.TestCase):
             root = Path(tmp)
             patches = self._patch_roots(root)
             with patches[0], patches[1], patches[2], patches[3], patches[4]:
-                path = record_extract("D:/Selected", "E:/RAW", "D:/Work", result)
+                path = record_extract("D:/Selected", "E:/RAW", "D:/Work", result, recursive=False)
                 loaded = manifest.load_manifest(path)
 
-        self.assertEqual(loaded["context"]["raw_source"], "E:/RAW")
+        self.assertEqual(loaded["folders"]["raw_source"], "E:/RAW")
+        self.assertEqual(loaded["folders"]["work"], "D:/Work")
+        self.assertIs(loaded["context"]["recursive"], False)
 
     def test_a_retry_marks_which_job_it_came_from(self) -> None:
         result = SimpleNamespace(
@@ -188,6 +191,25 @@ class RetryRecordTests(unittest.TestCase):
 
         self.assertEqual(loaded["context"]["frame_preset"], "white-3-4")
         self.assertEqual(loaded["context"]["retry_of"], "export-1.json")
+
+
+class TrimItemsTests(unittest.TestCase):
+    def test_problems_are_always_kept_and_successes_are_capped(self) -> None:
+        items = [{"path": f"a{index}.CR3", "status": "copied"} for index in range(5)]
+        items.append({"path": "bad.CR3", "status": "failed", "detail": "disk full"})
+        items.append({"path": "b.CR3", "status": "skipped"})
+
+        kept = trim_items(items, keep=2)
+
+        statuses = [item["status"] for item in kept]
+        self.assertEqual(statuses.count("copied"), 3)  # 2 kept + the closing record
+        self.assertIn({"path": "bad.CR3", "status": "failed", "detail": "disk full"}, kept)
+        self.assertEqual(kept[-1], {"path": "", "status": "copied", "detail": "+3 more not listed"})
+        self.assertEqual(statuses.count("skipped"), 1)
+
+    def test_nothing_is_added_when_under_the_cap(self) -> None:
+        items = [{"path": "a.CR3", "status": "copied"}]
+        self.assertEqual(trim_items(items, keep=2), items)
 
 
 

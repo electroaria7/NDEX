@@ -3,6 +3,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from ndex_common import retry
 from ndex_common.report import JobItem, JobReport
@@ -137,9 +138,23 @@ class RetryContextTests(unittest.TestCase):
         self.assertEqual(context["retry_of_created_at"], "2026-09-02T10:15:00Z")
         self.assertEqual(context["retried"], 1)
 
-    def test_is_retry_reads_that_marker_back(self) -> None:
-        self.assertFalse(retry.is_retry(_report()))
-        self.assertTrue(retry.is_retry(_report(context={"retry_of": "backup-1.json"})))
+    def test_a_missing_folder_settles_its_files_with_one_look(self) -> None:
+        gone = Path("Z:/unplugged/card")
+        report = _report(
+            items=(
+                JobItem(path=str(gone / "a.CR3"), status="failed"),
+                JobItem(path=str(gone / "b.CR3"), status="failed"),
+            )
+        )
+        with (
+            patch.object(Path, "is_dir", return_value=False) as is_dir,
+            patch.object(Path, "is_file") as is_file,
+        ):
+            plan = retry.plan_retry(report)
+
+        self.assertEqual(len(plan.missing), 2)
+        self.assertEqual(is_dir.call_count, 1)
+        is_file.assert_not_called()
 
 class RetryQuestionTests(unittest.TestCase):
     def _plan(self):

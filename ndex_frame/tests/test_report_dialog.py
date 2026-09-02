@@ -230,20 +230,20 @@ class FrameRetryTests(unittest.TestCase):
         window = self._window()
         window.confirm_export = Mock()
         window.pending_retry = plan_retry(self._failed_report())
-        window._retry_paths = [self.failed]
+        window._retry_importing = True
         self.state.replace_sources([_source(self.failed)])
 
         window._sources_changed()
         window._start_pending_retry()
 
-        self.assertIsNone(window._retry_paths)
+        self.assertFalse(window._retry_importing)
         window.confirm_export.assert_called_once()
 
     def test_an_unrelated_import_drops_the_retry_instead_of_exporting(self) -> None:
         window = self._window()
         window.confirm_export = Mock()
         window.pending_retry = plan_retry(self._failed_report())
-        window._retry_paths = [self.failed]
+        window._retry_importing = True
         other = self.root / "other.jpg"
         other.write_bytes(b"jpg")
         self.state.replace_sources([_source(other)])
@@ -258,14 +258,72 @@ class FrameRetryTests(unittest.TestCase):
     def test_a_failed_import_drops_the_retry(self) -> None:
         window = self._window()
         window.pending_retry = plan_retry(self._failed_report())
-        window._retry_paths = [self.failed]
+        window._retry_importing = True
 
-        # What the controller emits when an import job raises.
-        window._busy_changed(False)
+        self.controller.importFailed.emit("unreadable")
 
-        self.assertIsNone(window._retry_paths)
+        self.assertFalse(window._retry_importing)
         self.assertIsNone(window.pending_retry)
         self.assertIn("could not be opened", window.statusBar().currentMessage())
+
+    def test_a_preview_failure_does_not_touch_a_retry(self) -> None:
+        window = self._window()
+        window.pending_retry = plan_retry(self._failed_report())
+        window._retry_importing = True
+
+        # A preview job failing emits busyChanged(False) and errorOccurred,
+        # but not importFailed.
+        self.controller.busyChanged.emit(False)
+        self.controller.errorOccurred.emit("preview failed")
+
+        self.assertTrue(window._retry_importing)
+        self.assertIsNotNone(window.pending_retry)
+
+    def test_an_export_that_ends_without_a_result_drops_the_retry(self) -> None:
+        window = self._window()
+        window.pending_retry = plan_retry(self._failed_report())
+
+        self.controller.exportAborted.emit("worker died")
+
+        self.assertIsNone(window.pending_retry)
+        self.assertIn("without a result", window.statusBar().currentMessage())
+
+    def test_a_dropped_retry_puts_the_output_folder_back(self) -> None:
+        window = self._window()
+        self.controller.import_paths = Mock()
+        before = self.root / "today"
+        before.mkdir()
+        self.state.output_directory = before
+
+        window._retry_export(plan_retry(self._failed_report()))
+        self.assertEqual(self.state.output_directory, self.root)
+        self.controller.importFailed.emit("unreadable")
+
+        self.assertEqual(self.state.output_directory, before)
+        self.assertEqual(window.output_folder_label.text(), str(before))
+
+    def test_a_retry_import_forgets_the_handoff(self) -> None:
+        window = self._window()
+        self.controller.import_paths = Mock()
+        window.handoff_path = self.root / "select.json"
+
+        window._retry_export(plan_retry(self._failed_report()))
+
+        self.assertIsNone(window.handoff_path)
+
+    def test_dialog_explains_an_empty_plan_and_stays_open(self) -> None:
+        from ndex_frame.ui import report_dialog
+
+        handed = []
+        gone = self._failed_report(items=(JobItem(path="Z:/gone/bad.jpg", status="failed"),))
+        dialog = FrameJobReportDialog([gone], retry=handed.append)
+        self.addCleanup(dialog.close)
+        with patch.object(report_dialog.QMessageBox, "information") as info:
+            dialog.retry_button.click()
+
+        self.assertEqual(handed, [])
+        info.assert_called_once()
+        self.assertIn("nothing to retry", info.call_args.args[2])
 
     def test_retry_waits_for_a_running_job(self) -> None:
         window = self._window()
@@ -318,7 +376,7 @@ class SelectOnOpenTests(unittest.TestCase):
         aged = _report(manifest_path=Path("C:/m/export-0.json"), created_at="2026-08-01T00:00:00Z")
         with (
             patch.object(report_dialog, "recent_reports", return_value=[_report()]),
-            patch.object(report_dialog, "read_report", return_value=aged),
+            patch("ndex_common.report.read_report", return_value=aged),
         ):
             reports = report_dialog.frame_reports(select=Path("C:/m/export-0.json"))
         self.assertIs(reports[0], aged)

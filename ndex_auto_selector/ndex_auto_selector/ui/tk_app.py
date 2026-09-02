@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import queue
 import threading
 import tkinter as tk
@@ -242,8 +241,9 @@ class AutoSelectorApp(tk.Tk):
 
         selected_jpg = plan.report.source
         work_folder = plan.report.destination
-        # 오래된 manifest에는 원본 폴더가 없다. 그때는 창에 있는 값을 쓴다.
-        raw_source = str(plan.report.context.get("raw_source") or "").strip()
+        # 원본 폴더는 manifest의 folders에 있다. 그 전 manifest에는 없으니
+        # 그때는 창에 있는 값을 쓴다.
+        raw_source = str(plan.report.folders.get("raw_source") or "").strip()
         raw_source = raw_source or self.raw_source_var.get().strip()
 
         for label, folder in (("원본 CR3", raw_source), ("셀렉 JPG", selected_jpg)):
@@ -254,59 +254,39 @@ class AutoSelectorApp(tk.Tk):
             messagebox.showerror("폴더 없음", "그 작업의 작업용 폴더가 기록되어 있지 않습니다.")
             return
 
-        options = {
-            "duplicate_policy": self.duplicate_var.get(),
-            # The original run decided which folders were searched. Using the
-            # checkbox as it stands now could drop JPGs the job found.
-            "recursive": bool(plan.report.context.get("recursive", True)),
-            "write_xmp": self.write_xmp_var.get(),
-            "xmp_rating": int(self.xmp_rating_var.get()),
-            "rating_from_jpg": self.rating_from_jpg_var.get(),
-        }
+        options = self._copy_options()
+        # The original run decided which folders were searched. Using the
+        # checkbox as it stands now could drop JPGs the job found.
+        options["recursive"] = bool(plan.report.context.get("recursive", True))
         self._set_busy(True)
         self.progress_var.set(0)
         self.status_var.set(f"실패 {len(plan.paths)}개 다시 복제 중...")
         self._log(f"재실행 시작: {len(plan.paths)}개")
-        folders = (selected_jpg, raw_source, work_folder)
-        self.worker_thread = threading.Thread(
-            target=self._retry_worker,
-            args=(plan, folders, options),
-            daemon=True,
-        )
+        job = {
+            "selected_jpg": selected_jpg,
+            "raw_source": raw_source,
+            "work_folder": work_folder,
+            "options": options,
+            "plan": plan,
+        }
+        self.worker_thread = threading.Thread(target=self._retry_worker, args=(job,), daemon=True)
         self.worker_thread.start()
 
-    def _retry_worker(self, plan, folders: tuple[str, str, str], options: dict) -> None:
-        selected_jpg, raw_source, work_folder = folders
-        jpg_paths = list(plan.paths)
+    def _retry_worker(self, job: dict) -> None:
+        plan, options = job["plan"], job["options"]
+        selected_jpg, raw_source, work_folder = job["selected_jpg"], job["raw_source"], job["work_folder"]
         try:
             # 다시 분석해야 한다. 사용자가 그 사이 빠진 CR3를 넣었거나
             # 중복을 정리했을 수 있고, 그것이 재실행의 이유다.
             summary = self.service.analyze(
                 Path(raw_source), Path(selected_jpg), recursive=options["recursive"]
             )
-            matches = self.service.matches_for(summary.matches, jpg_paths)
-            result = self.service.copy_matches(
-                matches,
-                Path(work_folder),
-                options["duplicate_policy"],
-                write_xmp=options["write_xmp"],
-                xmp_rating=options["xmp_rating"],
-                rating_from_jpg=options["rating_from_jpg"],
-                progress_callback=lambda current, total, name: self.ui_queue.put(
-                    ("progress", current, total, name)
-                ),
-            )
+            matches, dropped = self.service.matches_for(summary.matches, list(plan.paths))
+            result = self._copy(matches, Path(work_folder), options)
             # A JPG the analysis no longer lists would otherwise vanish from
             # the record. Count it as missing so the manifest says so.
-            found = {os.path.normcase(str(match.jpg_path)) for match in matches}
-            for path in jpg_paths:
-                if os.path.normcase(str(path)) not in found:
-                    result.missing += 1
-                    result.messages.append(f"{path.name}: not in the selected JPG folder")
-                    result.items.append(
-                        {"path": str(path), "status": "missing", "detail": "not in the selected JPG folder"}
-                    )
-            self.ui_queue.put(("copy_done", result, (plan, folders, options)))
+            self.service.note_missing(result, dropped, "not in the selected JPG folder")
+            self.ui_queue.put(("copy_done", result, job))
         except Exception as exc:
             self.ui_queue.put(("error", str(exc)))
 
@@ -337,11 +317,22 @@ class AutoSelectorApp(tk.Tk):
         except Exception as exc:
             self.ui_queue.put(("error", str(exc)))
 
-    def _save_settings(self) -> None:
+    def _copy_options(self) -> dict:
+        """What a copy run needs from the form, read on the UI thread."""
         try:
             rating = int(self.xmp_rating_var.get())
         except (TypeError, ValueError):
             rating = 5
+        return {
+            "duplicate_policy": self.duplicate_var.get(),
+            "recursive": self.recursive_var.get(),
+            "write_xmp": self.write_xmp_var.get(),
+            "xmp_rating": rating,
+            "rating_from_jpg": self.rating_from_jpg_var.get(),
+        }
+
+    def _save_settings(self) -> None:
+        rating = self._copy_options()["xmp_rating"]
         try:
             update_section(
                 SETTINGS_SECTION,
@@ -379,32 +370,42 @@ class AutoSelectorApp(tk.Tk):
             messagebox.showwarning("작업 폴더 필요", "CR3 파일을 복제할 작업용 폴더를 선택하세요.")
             return
         self._save_settings()
+        # Fixed now, not read when the job ends: the form can change while
+        # the copy runs, and the manifest must say what the job used.
+        job = {
+            "selected_jpg": str(self.summary.selected_jpg_dir),
+            "raw_source": str(self.summary.raw_source_dir),
+            "work_folder": work_folder,
+            "options": self._copy_options(),
+            "plan": None,
+        }
         self._set_busy(True)
         self.progress_var.set(0)
         self.status_var.set("CR3 복제 중...")
         self._log("복제 시작")
-        self.worker_thread = threading.Thread(
-            target=self._copy_worker,
-            args=(Path(work_folder), self.duplicate_var.get()),
-            daemon=True,
-        )
+        self.worker_thread = threading.Thread(target=self._copy_worker, args=(job,), daemon=True)
         self.worker_thread.start()
 
-    def _copy_worker(self, work_folder: Path, duplicate_policy: str) -> None:
+    def _copy_worker(self, job: dict) -> None:
         try:
             assert self.summary is not None
-            result = self.service.copy_matches(
-                self.summary.matches,
-                work_folder,
-                duplicate_policy,
-                write_xmp=self.write_xmp_var.get(),
-                xmp_rating=int(self.xmp_rating_var.get()),
-                rating_from_jpg=self.rating_from_jpg_var.get(),
-                progress_callback=lambda current, total, name: self.ui_queue.put(("progress", current, total, name)),
-            )
-            self.ui_queue.put(("copy_done", result))
+            result = self._copy(self.summary.matches, Path(job["work_folder"]), job["options"])
+            self.ui_queue.put(("copy_done", result, job))
         except Exception as exc:
             self.ui_queue.put(("error", str(exc)))
+
+    def _copy(self, matches, work_folder: Path, options: dict):
+        return self.service.copy_matches(
+            matches,
+            work_folder,
+            options["duplicate_policy"],
+            write_xmp=options["write_xmp"],
+            xmp_rating=options["xmp_rating"],
+            rating_from_jpg=options["rating_from_jpg"],
+            progress_callback=lambda current, total, name: self.ui_queue.put(
+                ("progress", current, total, name)
+            ),
+        )
 
     def _process_queue(self) -> None:
         try:
@@ -414,7 +415,8 @@ class AutoSelectorApp(tk.Tk):
                 if kind == "analysis_done":
                     self._handle_analysis_done(event[1])
                 elif kind == "copy_done":
-                    self._handle_copy_done(event[1], event[2] if len(event) > 2 else None)
+                    _, result, job = event
+                    self._handle_copy_done(result, job)
                 elif kind == "progress":
                     _, current, total, name = event
                     self.progress_var.set((current / total) * 100 if total else 0)
@@ -434,8 +436,8 @@ class AutoSelectorApp(tk.Tk):
         self._log(f"분석 완료: JPG {summary.selected_count}, 매칭 {summary.matched_count}, 누락 {summary.missing_count}")
         self._set_busy(False)
 
-    def _handle_copy_done(self, result, retry=None) -> None:
-        """``retry`` is ``(plan, folders, options)`` when this was a retry, else None."""
+    def _handle_copy_done(self, result, job: dict) -> None:
+        """``job`` is what the run was started with; ``job["plan"]`` marks a retry."""
         self.progress_var.set(100)
         self.status_var.set("CR3 복제 완료")
         self._log(
@@ -449,18 +451,15 @@ class AutoSelectorApp(tk.Tk):
             self._log(f"... 추가 메시지 {len(result.messages) - 80}개 생략")
         from ndex_common.workflow import record_extract
 
-        if retry is not None:
-            plan, (selected_jpg, raw_source, work_folder), options = retry
-            context = {"recursive": options["recursive"], **plan.context()}
-            record_extract(selected_jpg, raw_source, work_folder, result, context=context)
-        else:
-            record_extract(
-                self.selected_jpg_var.get().strip(),
-                self.raw_source_var.get().strip(),
-                self.work_folder_var.get().strip(),
-                result,
-                context={"recursive": self.recursive_var.get()},
-            )
+        plan = job["plan"]
+        record_extract(
+            job["selected_jpg"],
+            job["raw_source"],
+            job["work_folder"],
+            result,
+            recursive=job["options"]["recursive"],
+            context=plan.context() if plan is not None else None,
+        )
         self._set_busy(False)
 
     def _handle_error(self, message: str) -> None:

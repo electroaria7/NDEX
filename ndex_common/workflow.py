@@ -7,6 +7,36 @@ from typing import Any, Iterable, Mapping
 
 from ndex_common import manifest, session
 
+# Per-file records a manifest keeps for statuses that went fine. Problems are
+# always kept in full: they are what a retry reads. Totals live in counts.
+KEEP_PER_STATUS = 500
+PROBLEM_STATUSES = frozenset({"failed", "error", "ambiguous", "missing"})
+
+
+def trim_items(items: Iterable[Mapping[str, Any]], keep: int = KEEP_PER_STATUS) -> list[dict[str, Any]]:
+    """Cap the per-file records of each untroubled status.
+
+    A card backup can reach tens of thousands of files, and every one of
+    them would otherwise be written twice and parsed on every open of Job
+    Results. The first ``keep`` of each status stay, and one closing record
+    says how many more there were.
+    """
+    kept: list[dict[str, Any]] = []
+    seen: dict[str, int] = {}
+    for item in items:
+        entry = dict(item)
+        status = str(entry.get("status") or "unknown")
+        if status.casefold() in PROBLEM_STATUSES:
+            kept.append(entry)
+            continue
+        seen[status] = seen.get(status, 0) + 1
+        if seen[status] <= keep:
+            kept.append(entry)
+    for status, total in seen.items():
+        if total > keep:
+            kept.append({"path": "", "status": status, "detail": f"+{total - keep} more not listed"})
+    return kept
+
 
 def record_job(
     *,
@@ -26,8 +56,9 @@ def record_job(
             source=source,
             destination=destination,
             counts=counts,
-            items=items,
+            items=trim_items(items or ()),
             context=context,
+            folders=folders,
         )
     except OSError:
         return None
@@ -64,8 +95,10 @@ def record_extract(
     work_folder: Path | str,
     result: Any,
     *,
+    recursive: bool | None = None,
     context: Mapping[str, Any] | None = None,
 ) -> Path | None:
+    """``recursive`` is which folders were searched; a retry searches the same."""
     counts = {
         "copied": int(getattr(result, "copied", 0)),
         "skipped": int(getattr(result, "skipped", 0)),
@@ -85,7 +118,10 @@ def record_extract(
             "raw_source": str(raw_source),
             "work": str(work_folder),
         },
-        context={"raw_source": str(raw_source), **dict(context or {})},
+        context={
+            **({"recursive": bool(recursive)} if recursive is not None else {}),
+            **dict(context or {}),
+        },
     )
 
 

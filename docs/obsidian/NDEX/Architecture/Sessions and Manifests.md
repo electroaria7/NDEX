@@ -61,7 +61,8 @@ status: shipped in phase 2
   "destination": "",
   "counts": { "selected": 42 },
   "items": [{ "path": "D:\\Shoot\\IMG_1024.JPG", "status": "selected" }],
-  "context": {}
+  "context": {},
+  "folders": { "source": "D:/Shoot" }
 }
 ```
 
@@ -75,6 +76,12 @@ Manifest 작성은 job 기록의 본체이고, 세션 갱신은 그 위의 편�
 
 취소된 job은 처리하지 못한 파일을 기록하지 않는다.
 
+잘 된 파일의 기록은 상태별 500개까지만 남기고, 넘치면 `+N more not listed` 한 줄로 닫는다 (`workflow.trim_items`). 문제 항목은 개수와 상관없이 전부 남는다. 재실행이 읽는 것이 그것이고, 합계는 `counts`에 있다.
+
+### folders
+
+`source` / `destination`은 결과 창에 보여줄 둘이고, `folders`에는 job이 쓴 폴더가 역할별로 전부 들어간다. 세션의 `folders`와 같은 키다. Auto Selector 재실행이 `raw_source`를 여기서 읽는다.
+
 ### context
 
 type마다 다르다.
@@ -82,7 +89,6 @@ type마다 다르다.
 | Key | 어디에 | 내용 |
 | --- | --- | --- |
 | `cancelled` | backup, export | 사용자가 중간에 멈췄는가 |
-| `raw_source` | extract | 원본 RAW 폴더. 재실행이 다시 매칭하려면 필요하다 |
 | `recursive` | extract | 하위 폴더까지 검색했는가. 재실행이 같은 범위를 뒤지기 위해 |
 | `frame_preset`, `output_profile` | export | 사용한 preset id |
 | `files` | select_handoff | 넘긴 파일 목록 |
