@@ -97,6 +97,9 @@ def main() -> int:
         )
         for message in result.messages:
             _emit(message)
+        from ndex_common.workflow import record_extract
+
+        record_extract(args.selected_jpg, args.raw_source, args.work_folder, result)
 
     return 0
 

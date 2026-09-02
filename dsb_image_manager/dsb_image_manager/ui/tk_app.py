@@ -119,6 +119,7 @@ class ImageManagerApp(tk.Tk):
         file_menu.add_command(label="Backup Picked...", command=self.backup_picked)
         file_menu.add_command(label="Export XMP Sidecars (Picked/Rated)", command=self.export_xmp_sidecars)
         file_menu.add_command(label="Send to Auto Selector...", command=self.send_to_auto_selector)
+        file_menu.add_command(label="Send Picks to Frame...", command=self.send_picks_to_frame)
         file_menu.add_separator()
         file_menu.add_command(label="Exit", command=self.destroy)
         menu_bar.add_cascade(label="File", menu=file_menu)
@@ -400,6 +401,9 @@ class ImageManagerApp(tk.Tk):
             return
         try:
             update_section(SETTINGS_SECTION, {"last_source": str(self.source_dir)})
+            from ndex_common.session import remember
+
+            remember("image_manager", folders={"source": str(self.source_dir)})
         except OSError:
             pass
 
@@ -607,6 +611,22 @@ class ImageManagerApp(tk.Tk):
             if record.id is not None:
                 self.catalog.update_backup_status(record.id, "backed_up")
         self.refresh_records()
+        from ndex_common.workflow import record_job
+
+        record_job(
+            app="image_manager",
+            type="backup",
+            source=str(self.source_dir or ""),
+            destination=destination,
+            counts={
+                "copied": summary.copied,
+                "skipped": summary.skipped,
+                "failed": summary.errors,
+                "overwritten": summary.overwritten,
+            },
+            items=[{"path": "", "status": "message", "detail": message} for message in summary.messages[:50]],
+            folders={"source": str(self.source_dir or "")},
+        )
         messagebox.showinfo(
             "Backup complete",
             f"Copied {summary.copied} / skipped {summary.skipped} / errors {summary.errors}",
@@ -645,6 +665,34 @@ class ImageManagerApp(tk.Tk):
             messagebox.showerror(
                 NDEX_IMAGE_MANAGER_TITLE,
                 "Could not find NDEX Auto Selector. Build or install it first.",
+            )
+
+    def send_picks_to_frame(self) -> None:
+        if not self.catalog:
+            messagebox.showinfo(NDEX_IMAGE_MANAGER_TITLE, "Scan a folder first.")
+            return
+        from ndex_common.manifest import frame_ready_paths
+        from ndex_common.workflow import record_select_handoff
+
+        records = self.catalog.list_images(pick_filter="Pick")
+        files = frame_ready_paths(record.file_path for record in records if record.media_type == "jpg")
+        if not files:
+            files = frame_ready_paths(record.file_path for record in records)
+        if not files:
+            messagebox.showinfo(
+                NDEX_IMAGE_MANAGER_TITLE,
+                "No picked JPG/PNG/TIFF files to send. Frame does not import RAW.",
+            )
+            return
+        handoff = record_select_handoff(self.source_dir or files[0].parent, files)
+        args = ["--open"]
+        if handoff is not None:
+            args.extend(["--handoff", str(handoff)])
+        launched = launch_app("frame", args)
+        if not launched:
+            messagebox.showerror(
+                NDEX_IMAGE_MANAGER_TITLE,
+                "Could not find NDEX Frame. Build or install it first.",
             )
 
     def open_export_dialog(self) -> None:

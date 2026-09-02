@@ -36,7 +36,7 @@ DUPLICATE_LABEL_TO_POLICY = {label: policy for policy, label in DUPLICATE_POLICY
 
 
 class DSBApp(tk.Tk):
-    def __init__(self):
+    def __init__(self, initial_source: Path | None = None, initial_destination: Path | None = None):
         super().__init__()
         self.title(NDEX_ONE_TITLE)
         self.geometry("1220x820")
@@ -61,6 +61,10 @@ class DSBApp(tk.Tk):
 
         self.source_var = tk.StringVar(value=self.settings.get("last_source", ""))
         self.destination_var = tk.StringVar(value=self.settings.get("last_destination", ""))
+        if initial_source:
+            self.source_var.set(str(initial_source))
+        if initial_destination:
+            self.destination_var.set(str(initial_destination))
         self.duplicate_var = tk.StringVar(
             value=DUPLICATE_POLICY_LABELS.get(
                 self.settings.get("duplicate_policy", "rename"), DUPLICATE_POLICY_LABELS["rename"]
@@ -310,6 +314,18 @@ class DSBApp(tk.Tk):
                 "raw_brands": self._enabled_brands(),
             }
         )
+        try:
+            from ndex_common.session import remember
+
+            remember(
+                "ndex_one",
+                folders={
+                    "source": self.source_var.get().strip(),
+                    "destination": self.destination_var.get().strip(),
+                },
+            )
+        except OSError:
+            pass
 
     def _start_analysis(self) -> None:
         source = Path(self.source_var.get())
@@ -469,6 +485,7 @@ class DSBApp(tk.Tk):
                         f"Skipped: {result.skipped}, "
                         f"Errors: {result.errors}"
                     )
+                    self._record_backup_session(result)
                 self._render_backup_result(result)
                 self._set_busy(False, status)
                 if not result.dry_run and (result.verification_failed or result.errors):
@@ -536,6 +553,11 @@ class DSBApp(tk.Tk):
                 parts.append(f"{label}: {count}")
         return " / ".join(parts) if parts else "None"
 
+    def _record_backup_session(self, result) -> None:
+        from ndex_common.workflow import record_backup
+
+        record_backup(self.source_var.get().strip(), self.destination_var.get().strip(), result)
+
     def _render_backup_result(self, result) -> None:
         header = "Dry Run Result" if result.dry_run else "Backup Result"
         lines = [
@@ -569,6 +591,6 @@ class DSBApp(tk.Tk):
         self.handoff_button.config(state=destination_ready)
 
 
-def run_app() -> None:
-    app = DSBApp()
+def run_app(initial_source: Path | None = None, initial_destination: Path | None = None) -> None:
+    app = DSBApp(initial_source=initial_source, initial_destination=initial_destination)
     app.mainloop()

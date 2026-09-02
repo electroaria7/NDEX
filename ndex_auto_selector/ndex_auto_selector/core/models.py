@@ -52,3 +52,4 @@ class CopyResult:
     ambiguous: int = 0
     errors: int = 0
     messages: list[str] = field(default_factory=list)
+    items: list[dict] = field(default_factory=list)

@@ -1,5 +1,11 @@
 # NDEX Frame Patch Notes
 
+## 2026-09-02 — Select handoff and export manifest
+
+- Launcher / Image Manager can start Frame with `--open --handoff PATH` (select-handoff JSON) and `--output PATH`.
+- Image Manager **Send Picks to Frame…** sends picked JPG/PNG/TIFF files only (RAW is skipped).
+- A successful export writes an archive manifest under `%LOCALAPPDATA%\NDEX\manifests\` (preset id, output profile, copied/skipped/failed). Photographs are not modified.
+
 ## 2026-09-01
 
 ### Main-window framing shortcuts

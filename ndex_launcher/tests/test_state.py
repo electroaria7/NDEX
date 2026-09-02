@@ -55,6 +55,29 @@ class LauncherStateTests(unittest.TestCase):
                 steps[3].launch_args, ["--open", "--source", str(masters)]
             )
 
+    def test_frame_continue_prefers_handoff_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            handoff = Path(tmp) / "select-handoff.json"
+            handoff.write_text("{}", encoding="utf-8")
+            data = {
+                "shared": {
+                    "sessions": {
+                        "frame": {
+                            "kind": "ndex.session",
+                            "app": "frame",
+                            "folders": {"source": "Z:/gone"},
+                            "last_manifest": str(handoff),
+                            "context": {"handoff": str(handoff)},
+                        }
+                    }
+                }
+            }
+            with patch.object(launcher_state, "load_all", return_value=data):
+                steps = launcher_state.gather_workflow_state()
+
+        self.assertTrue(steps[3].has_session)
+        self.assertEqual(steps[3].launch_args[:3], ["--open", "--handoff", str(handoff)])
+
     def test_frame_launch_skips_missing_source_folder(self) -> None:
         data = {"frame": {"last_source": "Z:/definitely/not/here"}}
         with patch.object(launcher_state, "load_all", return_value=data):

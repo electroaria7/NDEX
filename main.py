@@ -47,6 +47,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--analyze", action="store_true", help="Analyze files and print a summary")
     parser.add_argument("--backup", action="store_true", help="Run the backup after analysis")
+    parser.add_argument(
+        "--open",
+        action="store_true",
+        help="Open the GUI with folder arguments preloaded (used by NDEX handoff)",
+    )
     return parser
 
 
@@ -116,6 +121,10 @@ def run_cli(args: argparse.Namespace) -> int:
                 f"overwritten={result.overwritten}, errors={result.errors}, "
                 f"cancelled={result.cancelled}"
             )
+        if not result.dry_run:
+            from ndex_common.workflow import record_backup
+
+            record_backup(args.source, args.destination, result)
     return 0
 
 
@@ -134,6 +143,10 @@ def main() -> int:
     install_crash_logging("NDEX One")
     parser = build_parser()
     args = parser.parse_args()
+
+    if args.open:
+        run_app(initial_source=args.source, initial_destination=args.destination)
+        return 0
 
     cli_mode = any(
         [

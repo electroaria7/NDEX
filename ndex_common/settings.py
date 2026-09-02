@@ -34,6 +34,11 @@ SECTION_KEYS = ("shared", "image_manager", "auto_selector", "frame", "launcher",
 _THREAD_LOCK = threading.Lock()
 
 
+def data_dir() -> Path:
+    """``%LOCALAPPDATA%/NDEX`` (parent of the config folder)."""
+    return _config_dir().parent
+
+
 def settings_path() -> Path:
     return _config_dir() / "settings.json"
 

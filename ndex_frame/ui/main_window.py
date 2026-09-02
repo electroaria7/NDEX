@@ -69,6 +69,7 @@ class MainWindow(QMainWindow):
         self._known_source_paths: set[Path] = set()
         self._export_total = 0
         self._busy = False
+        self.handoff_path: Path | None = None
         self.setWindowTitle(NDEX_FRAME_TITLE)
         self.resize(1180, 760)
         apply_qt_theme(self)
@@ -551,10 +552,28 @@ class MainWindow(QMainWindow):
         self.preview_widget.set_preview(QPixmap.fromImage(image), plan, background, x, y)
 
     def queue_source(self, source: Path) -> None:
+        self.handoff_path = None
         if source.is_dir():
             self.controller.import_paths([source])
         else:
             self.show_nonfatal_error(f"Source folder does not exist: {source}")
+
+    def queue_handoff(self, handoff: Path) -> None:
+        from ndex_common.manifest import handoff_files, load_manifest
+
+        path = Path(handoff)
+        payload = load_manifest(path)
+        if payload is None:
+            self.handoff_path = None
+            self.show_nonfatal_error(f"Could not read handoff: {path}")
+            return
+        files = handoff_files(payload)
+        if not files:
+            self.handoff_path = None
+            self.show_nonfatal_error("Handoff has no JPG/PNG/TIFF files Frame can import.")
+            return
+        self.handoff_path = path
+        self.controller.import_paths(files)
 
     @Slot(str)
     def show_nonfatal_error(self, message: str) -> None:

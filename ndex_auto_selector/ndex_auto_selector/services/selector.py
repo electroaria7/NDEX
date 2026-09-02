@@ -72,10 +72,16 @@ class AutoSelectorService:
                     result.messages.append(
                         f"ambiguous RAW match for {match.jpg_path.name}; skipped copy"
                     )
+                    result.items.append(
+                        {"path": str(match.jpg_path), "status": "ambiguous", "detail": "multiple RAW matches"}
+                    )
                     continue
                 if match.raw_path is None:
                     result.missing += 1
                     result.messages.append(f"missing CR3 for {match.jpg_path.name}")
+                    result.items.append(
+                        {"path": str(match.jpg_path), "status": "missing", "detail": "no RAW match"}
+                    )
                     continue
 
                 effective_rating = xmp_rating
@@ -92,18 +98,25 @@ class AutoSelectorService:
                         result.xmp_written += 1
                     result.skipped += 1
                     result.messages.append(f"skipped existing {destination_path.name}")
+                    result.items.append(
+                        {"path": str(destination_path), "status": "skipped", "detail": "already exists"}
+                    )
                     continue
                 if action == "overwrite":
                     result.overwritten += 1
 
                 shutil.copy2(match.raw_path, final_path)
                 result.copied += 1
+                result.items.append({"path": str(final_path), "status": "copied"})
                 if write_xmp:
                     self._write_selected_xmp(final_path, effective_rating, xmp_label)
                     result.xmp_written += 1
             except Exception as exc:  # pragma: no cover - filesystem errors vary
                 result.errors += 1
                 result.messages.append(f"{match.file_stem}: {exc}")
+                result.items.append(
+                    {"path": str(match.jpg_path), "status": "failed", "detail": str(exc)}
+                )
             finally:
                 if progress_callback:
                     progress_callback(index, len(matches), match.file_stem)

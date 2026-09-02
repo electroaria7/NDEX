@@ -1,5 +1,15 @@
 # NDEX Patch Notes
 
+## 2026-09-02 — Phase 2 sessions and manifests (unreleased)
+
+Not a version bump. `NDEX_VERSION` stays `0.9.1`. This is workflow state, not a GitHub release.
+
+- Each app writes an explicit session document under `%LOCALAPPDATA%\NDEX\sessions\{app}.json`. The latest snapshot is also stored in `settings.json` under `shared.sessions` (add-only; `schema_version` remains 1). Legacy last-folder keys still hydrate Continue.
+- Launcher Continue restores last work context: folders when they exist, and Frame `--handoff` when the select-handoff file exists. Missing folders fall back to Open Empty (`--open` only).
+- Job manifests live under `%LOCALAPPDATA%\NDEX\manifests\` (backup, extract, export, select_handoff). They record copied / skipped / ambiguous / failed items and do not modify photographs.
+- Image Manager **Send Picks to Frame…** writes a select-handoff JSON of picked JPG/PNG/TIFF files. Frame `--handoff` imports that list; `--output` preloads the export folder.
+- NDEX One `--open` preloads GUI folders without entering CLI mode.
+
 ## 2026-09-01 — 0.9.1 public beta
 
 NDEX is a public beta, not a 1.0 product. `NDEX_VERSION` is `0.9.1` (`NDEX_CHANNEL = "beta"`). Packages: `NDEX_v0.9.1.zip` / `NDEX_Setup_0.9.1.exe`.
