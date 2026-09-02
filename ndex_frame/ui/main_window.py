@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import replace
 from pathlib import Path
 
-from PySide6.QtCore import QSignalBlocker, Qt, Slot
+from PySide6.QtCore import QSignalBlocker, Qt, QTimer, Slot
 from PySide6.QtGui import QCloseEvent, QColor, QIcon, QImage, QPixmap
 from PySide6.QtWidgets import (
     QColorDialog,
@@ -19,6 +20,7 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QMainWindow,
+    QMessageBox,
     QProgressBar,
     QPushButton,
     QSlider,
@@ -64,6 +66,8 @@ class MainWindow(QMainWindow):
         self.preset_store = preset_store
         self._interactive_dialogs = True
         self._last_report_dialog: QDialog | None = None
+        self.pending_retry = None
+        self._retry_paths: list[Path] | None = None
         self.last_export_result: ExportResult | None = None
         self._last_completion_dialog: ExportCompletionDialog | None = None
         self._source_export_status: dict[Path, str] = {}
@@ -419,11 +423,79 @@ class MainWindow(QMainWindow):
         if not reports:
             self.show_nonfatal_error("No export results recorded yet.")
             return None
-        dialog = FrameJobReportDialog(reports, self)
+        dialog = FrameJobReportDialog(reports, self, retry=self._retry_export)
         self._last_report_dialog = dialog
         if self._interactive_dialogs:
             dialog.exec()
         return dialog
+
+    def _retry_export(self, plan) -> None:
+        """Export again the files an earlier job failed on.
+
+        The output folder comes from that job, not from the one showing now:
+        a retry belongs with the pictures it was meant to sit beside.
+        """
+        if not plan.ready:
+            self.show_nonfatal_error(plan.summary)
+            return
+        if self._busy or self.controller._export_thread is not None:
+            self.show_nonfatal_error("Wait for the running job to finish, then retry.")
+            return
+        paths = list(plan.paths)
+        destination = Path(plan.report.destination) if plan.report.destination else None
+        if destination is None or not destination.is_dir():
+            self.show_nonfatal_error(
+                f"That job's output folder is gone: {plan.report.destination}"
+            )
+            return
+        if self._interactive_dialogs:
+            answer = QMessageBox.question(
+                self,
+                "Retry Failed",
+                plan.question(
+                    destination_label="Output", note="Frame opens just these files."
+                ),
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+
+        self.controller.state.output_directory = destination
+        self.sync_output_folder_label()
+        self.pending_retry = plan
+
+        loaded = {
+            os.path.normcase(str(source.path)): source
+            for source in self.controller.state.sources
+        }
+        already_open = [
+            loaded[key]
+            for key in (os.path.normcase(str(path)) for path in paths)
+            if key in loaded
+        ]
+        if len(already_open) == len(paths):
+            self._export_retry(already_open)
+            return
+
+        # Some are not open. Load exactly those files; _sources_changed picks
+        # the export up once the import lands.
+        self._retry_paths = paths
+        self.controller.import_paths(paths)
+
+    def _export_retry(self, sources: list[SourceItem]) -> None:
+        try:
+            self.confirm_export(sources, "rename")
+        except Exception as error:
+            self._drop_retry(f"Retry stopped: {error or error.__class__.__name__}")
+
+    def _drop_retry(self, message: str) -> None:
+        """Forget a retry that cannot go ahead, and say so.
+
+        Otherwise the flag would fire on the next unrelated import and the
+        next export would be recorded as a retry of the wrong job.
+        """
+        self._retry_paths = None
+        self.pending_retry = None
+        self.show_nonfatal_error(message)
 
     @Slot()
     def _choose_files(self) -> None:
@@ -453,6 +525,24 @@ class MainWindow(QMainWindow):
             self._source_export_status.clear()
             self._known_source_paths = current
         self._refresh_sources()
+        if self._retry_paths is None:
+            return
+        # Only the retry's own import may start the export. Anything else
+        # arriving first (a drop, a handoff, Apply to all) means the
+        # workspace is no longer what the retry was about.
+        wanted = {os.path.normcase(str(path)) for path in self._retry_paths}
+        loaded = {os.path.normcase(str(source.path)) for source in self.controller.state.sources}
+        self._retry_paths = None
+        if loaded != wanted:
+            self._drop_retry("Retry stopped: different files were opened.")
+            return
+        # Let the import finish emitting before the export claims the UI.
+        QTimer.singleShot(0, self._start_pending_retry)
+
+    def _start_pending_retry(self) -> None:
+        if self.pending_retry is None:
+            return
+        self._export_retry(list(self.controller.state.sources))
 
     def _status_for(self, path: Path) -> str:
         export_status = self._source_export_status.get(path)
@@ -672,6 +762,9 @@ class MainWindow(QMainWindow):
             self.export_progress_bar.hide()
         if not exporting:
             self.cancel_button.setText("Cancel")
+        if not busy and not exporting and self._retry_paths is not None:
+            # The import ended without delivering sources: it failed.
+            self._drop_retry("Retry stopped: the files could not be opened.")
         self._sync_controls()
 
     @Slot(object)

@@ -51,3 +51,5 @@ class BackupResult:
     cancelled: bool = False
     dry_run: bool = False
     messages: list[str] = field(default_factory=list)
+    # One entry per file the backup actually reached, for the job manifest.
+    items: list[dict] = field(default_factory=list)

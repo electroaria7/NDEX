@@ -16,7 +16,20 @@ NDEX는 기존 DSB 백업 도구에서 출발해 사진 백업/선별/원본 추
 | 0 | `fix/phase-0-correctness` | #6 | 백업/사이드카/RAW 매칭 정확성 | merged |
 | 1 | `fix/phase-1-foundation` | #7 | 설정 잠금, CI, 크래시 로그, 0.9.1 재태깅 | merged |
 | 2 | `feat/phase-2-sessions` | #9 | 세션 문서, job manifest, 앱 간 handoff | merged + 후속 수정 |
-| 3 | `feat/phase-3-job-results` | - | job 결과를 UI에서 읽기 | 작업 중 |
+| 3 | `feat/phase-3-job-results` | #10 | job 결과를 UI에서 읽기 | merged |
+| 4 | `feat/phase-4-retry-failed` | - | 실패 항목 재실행 | 작업 중 |
+
+### Phase 4 (2026-09-02)
+
+Phase 3이 보여준 실패 목록을 실제로 다시 돌린다. 자세한 내용은 [[Architecture/Job Results]]에 있다.
+
+- Job Results 창의 **Retry Failed**. job을 실행하는 세 앱(NDEX One, Auto Selector, Frame)에만 붙는다.
+- 폴더는 그 job의 manifest에서 온다. 설정은 지금 창에 떠 있는 값을 쓴다.
+- 그 사이 사라진 파일은 세어서 제외하고, 전부 사라졌으면 재실행하지 않는다.
+- 재실행 결과는 새 manifest로 남고 `context.retry_of`로 원래 job을 가리킨다.
+- NDEX One이 백업의 파일별 결과를 기록하기 시작했다. 그전까지 백업 manifest에는 로그 메시지만 있어서 실패 경로를 목록에 낼 수도, 복사할 수도 없었다.
+- extract manifest에 원본 RAW 폴더가 들어간다. 재실행이 다시 매칭하려면 필요하다.
+- Launcher의 Job Results는 여전히 아무것도 실행하지 않는다. 대신 어느 앱을 열어야 하는지 알려준다.
 
 ### Phase 3 (2026-09-02)
 
@@ -25,7 +38,7 @@ Phase 2가 남긴 manifest를 읽어 UI에 보여준다. 자세한 내용은 [[R
 - `ndex_common/report.py`가 manifest를 찾아 요약하고 상태별로 묶는다.
 - **Job Results** 창에서 최근 job과 파일별 처리 결과를 본다. 문제 파일이 먼저 나온다.
 - Launcher 카드마다 마지막 job 결과 한 줄이 붙는다.
-- 실패 항목 재실행은 이번 phase에 넣지 않았다. 문제 경로 복사까지만 제공한다.
+- 실패 항목 재실행은 넣지 않고 문제 경로 복사까지만 제공했다. Phase 4에서 처리했다.
 
 ### Phase 2 후속 수정 (2026-09-02)
 
@@ -86,15 +99,15 @@ Phase 2는 PR #9로 병합되었으나, 이후 코드 리뷰에서 6건의 결�
 ## Verified Test Coverage
 
 ```powershell
-python -m unittest discover -s tests                      # 79
+python -m unittest discover -s tests                      # 123
 python -m unittest discover -s dsb_image_manager\tests    # 11
-python -m unittest discover -s ndex_auto_selector\tests   # 15
+python -m unittest discover -s ndex_auto_selector\tests   # 18
 python -m unittest discover -s ndex_launcher\tests        # 12
-python -m unittest discover -s ndex_frame\tests           # 135
+python -m unittest discover -s ndex_frame\tests           # 147
 ```
 
-2026-09-02 기준 252개 전부 통과.
+2026-09-02 기준 311개 전부 통과.
 
 ## Current Direction
 
-각 프로그램은 단독 실행 가능한 상태로 유지하되, 공통 브랜딩/빌드/설정/세션 규칙은 `ndex_common`에서 재사용한다. Phase 2로 앱 간 데이터 흐름(session + manifest)이 생겼으므로, 다음 단계는 이 흐름을 사용자가 실제로 신뢰할 수 있게 만드는 쪽이다. [[Roadmap]] 참고.
+각 프로그램은 단독 실행 가능한 상태로 유지하되, 공통 브랜딩/빌드/설정/세션 규칙은 `ndex_common`에서 재사용한다. Phase 2가 앱 간 데이터 흐름(session + manifest)을 만들었고, phase 3이 그것을 읽게 했고, phase 4가 그 결과에 손을 댈 수 있게 했다. 다음 단계는 [[Roadmap]] 참고.

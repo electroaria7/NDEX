@@ -41,10 +41,18 @@ def execute_backup(
             )
             if action == "skip":
                 result.skipped += 1
+                _record(result, item, final_path, "skipped", "already exists")
                 if logger:
                     logger.skip(f"{item.source_path.name} already exists")
             elif action == "skip_identical":
                 result.skipped += 1
+                _record(
+                    result,
+                    item,
+                    final_path,
+                    "skipped",
+                    f"identical file already backed up as {final_path.name}",
+                )
                 if logger:
                     logger.skip(
                         f"{item.source_path.name} identical file already backed up "
@@ -57,6 +65,7 @@ def execute_backup(
                     result.copied += 1
                     if overwriting_existing:
                         result.overwritten += 1
+                    _record(result, item, final_path, "planned")
                     if logger:
                         logger.info(
                             f"[DRY RUN] {item.source_path.name} -> {final_path.parent.as_posix()}"
@@ -74,6 +83,7 @@ def execute_backup(
                             result.copied += 1
                             if overwriting_existing:
                                 result.overwritten += 1
+                            _record(result, item, final_path, "copied")
                             if logger:
                                 logger.ok(
                                     f"copied {item.source_path.name} -> {final_path.parent.as_posix()}"
@@ -90,6 +100,13 @@ def execute_backup(
                                 f"after copy ({verify_mode}); existing backup left untouched"
                             )
                             result.messages.append(message)
+                            _record(
+                                result,
+                                item,
+                                final_path,
+                                "failed",
+                                f"verification failed ({verify_mode})",
+                            )
                             if logger:
                                 logger.error(message)
                     finally:
@@ -103,6 +120,7 @@ def execute_backup(
             result.errors += 1
             message = f"{item.source_path.name} failed: {exc}"
             result.messages.append(message)
+            _record(result, item, destination_path, "failed", str(exc))
             if logger:
                 logger.error(message)
 
@@ -115,6 +133,28 @@ def execute_backup(
         else:
             logger.info("Backup completed")
     return result
+
+
+def _record(
+    result: BackupResult,
+    item: ScanItem,
+    destination: Path,
+    status: str,
+    detail: str = "",
+) -> None:
+    """Note what happened to one file, keyed by its source path.
+
+    The source path is what a retry needs: it is the file to copy again, and
+    it is still meaningful when the destination was never written.
+    """
+    result.items.append(
+        {
+            "path": str(item.source_path),
+            "status": status,
+            "detail": detail,
+            "destination": str(destination),
+        }
+    )
 
 
 def _resolve_destination(

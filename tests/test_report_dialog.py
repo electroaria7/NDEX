@@ -44,9 +44,12 @@ class JobReportWindowTests(unittest.TestCase):
         del self.root
         gc.collect()
 
-    def _open(self, reports) -> report_dialog.JobReportWindow:
-        window = report_dialog.JobReportWindow(self.root, title="NDEX One", reports=reports)
-        self.addCleanup(window.destroy)
+    def _open(self, reports, retry=None, close=True) -> report_dialog.JobReportWindow:
+        window = report_dialog.JobReportWindow(
+            self.root, title="NDEX One", reports=reports, retry=retry
+        )
+        if close:
+            self.addCleanup(window.destroy)
         return window
 
     def test_first_job_is_selected_and_rendered(self) -> None:
@@ -146,6 +149,122 @@ class RevealFolderTests(unittest.TestCase):
             with patch.object(report_dialog.subprocess, "Popen") as popen:
                 self.assertTrue(report_dialog.reveal_folder(Path(tmp)))
             popen.assert_called_once()
+
+class RetryButtonTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.root = tk.Tk()
+        self.root.withdraw()
+        self.addCleanup(self._close_root)
+        self.folder = tempfile.TemporaryDirectory()
+        self.addCleanup(self.folder.cleanup)
+        self.present = Path(self.folder.name) / "a.CR3"
+        self.present.write_bytes(b"raw")
+
+    def _close_root(self) -> None:
+        # Release the interpreter on this thread. Left to the garbage
+        # collector it can be finalized from a worker thread in a later
+        # test, and Tcl aborts the process.
+        self.root.destroy()
+        del self.root
+        gc.collect()
+
+    def _open(self, reports, retry=None, close=True):
+        window = report_dialog.JobReportWindow(
+            self.root, title="NDEX One", reports=reports, retry=retry
+        )
+        if close:
+            self.addCleanup(window.destroy)
+        return window
+
+    def _failed_report(self, path=None):
+        return _report(items=(JobItem(path=str(path or self.present), status="failed"),))
+
+    def test_no_retry_button_without_a_handler(self) -> None:
+        window = self._open([self._failed_report()])
+        self.assertEqual(window.retry_button.winfo_manager(), "")
+
+    def test_the_button_is_shown_and_enabled_when_a_file_can_be_retried(self) -> None:
+        window = self._open([self._failed_report()], retry=lambda _plan: None)
+        self.assertEqual(window.retry_button.winfo_manager(), "pack")
+        self.assertNotIn("disabled", window.retry_button.state())
+
+    def test_a_gone_file_is_explained_on_click_rather_than_checked_per_selection(self) -> None:
+        # Selecting a job must not stat its files: the manifest can point at
+        # a card that has since been unplugged. The check happens on click.
+        handed = []
+        window = self._open([self._failed_report(path="Z:/gone/a.CR3")], retry=handed.append)
+        self.assertNotIn("disabled", window.retry_button.state())
+
+        with (
+            patch.object(report_dialog.messagebox, "showinfo") as info,
+            patch.object(report_dialog.messagebox, "askyesno") as ask,
+        ):
+            window._retry_failed()
+
+        self.assertEqual(handed, [])
+        ask.assert_not_called()
+        info.assert_called_once()
+        self.assertIn("nothing to retry", info.call_args.args[1])
+
+    def test_the_button_is_disabled_for_a_job_with_no_problems(self) -> None:
+        clean = _report(counts={"copied": 3}, items=(JobItem(path="a.CR3", status="copied"),))
+        window = self._open([clean], retry=lambda _plan: None)
+        self.assertIn("disabled", window.retry_button.state())
+
+    def test_a_select_handoff_cannot_be_retried(self) -> None:
+        handoff = _report(
+            app="image_manager",
+            type="select_handoff",
+            items=(JobItem(path=str(self.present), status="failed"),),
+        )
+        window = self._open([handoff], retry=lambda _plan: None)
+        self.assertIn("disabled", window.retry_button.state())
+
+    def test_confirming_hands_the_plan_over_and_closes_the_window(self) -> None:
+        handed = []
+        window = self._open([self._failed_report()], retry=handed.append, close=False)
+        with patch.object(report_dialog.messagebox, "askyesno", return_value=True):
+            window._retry_failed()
+
+        self.assertEqual(len(handed), 1)
+        self.assertEqual(handed[0].paths, (self.present,))
+        self.assertFalse(window.winfo_exists())
+
+    def test_declining_leaves_the_job_alone(self) -> None:
+        handed = []
+        window = self._open([self._failed_report()], retry=handed.append)
+        with patch.object(report_dialog.messagebox, "askyesno", return_value=False):
+            window._retry_failed()
+
+        self.assertEqual(handed, [])
+        self.assertTrue(window.winfo_exists())
+
+    def test_open_job_reports_passes_the_handler_through(self) -> None:
+        handler = lambda _plan: None
+        with patch.object(report_dialog, "recent_reports", return_value=[self._failed_report()]):
+            window = report_dialog.open_job_reports(
+                self.root, title="NDEX One", apps=("ndex_one",), retry=handler
+            )
+        assert window is not None
+        self.addCleanup(window.destroy)
+        self.assertIs(window.retry, handler)
+
+
+class RetryHintTests(unittest.TestCase):
+    """What the copy dialog tells you to do with the paths."""
+
+    def test_the_launcher_is_told_which_app_can_retry(self) -> None:
+        hint = report_dialog._where_to_retry(_report(), here=False)
+        self.assertIn("Open NDEX One", hint)
+
+    def test_the_owning_app_is_pointed_at_its_own_button(self) -> None:
+        hint = report_dialog._where_to_retry(_report(), here=True)
+        self.assertIn("Retry Failed", hint)
+
+    def test_a_job_no_app_can_rerun_falls_back_to_running_it_again(self) -> None:
+        handoff = _report(app="image_manager", type="select_handoff")
+        self.assertIn("Re-run the job", report_dialog._where_to_retry(handoff, here=True))
+
 
 
 if __name__ == "__main__":

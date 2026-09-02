@@ -150,8 +150,9 @@ class LauncherStateTests(unittest.TestCase):
 
         with (
             patch.object(launcher_state, "load_all", return_value={}),
-            patch.object(
-                launcher_state, "recent_reports", return_value=[export, newer_backup, backup]
+            patch(
+                "ndex_common.report.iter_reports",
+                return_value=iter([export, newer_backup, backup]),
             ),
         ):
             steps = launcher_state.gather_workflow_state()

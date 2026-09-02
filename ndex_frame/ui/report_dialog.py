@@ -3,14 +3,14 @@
 The Tk apps share ``ndex_common.report_dialog``; Frame is PySide6, so it reads
 the same manifests through ``ndex_common.report`` and renders them here.
 
-Read-only: it opens folders and copies path lists, and never edits a manifest
-or a photograph.
+It reads manifests and never edits one. It can start a retry, but only by
+handing the failed files back to the window that ran the export.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Sequence
+from typing import Callable, Sequence
 
 from PySide6.QtCore import QUrl
 from PySide6.QtGui import QDesktopServices
@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
 )
 
 from ndex_common.report import JobReport, recent_reports
+from ndex_common.retry import RetryPlan, plan_retry, retryable
 
 HISTORY_LIMIT = 30
 
@@ -36,12 +37,18 @@ HISTORY_LIMIT = 30
 class FrameJobReportDialog(QDialog):
     """Recent Frame jobs on the left, the selected job's items below."""
 
-    def __init__(self, reports: Sequence[JobReport], parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        reports: Sequence[JobReport],
+        parent: QWidget | None = None,
+        retry: Callable[[RetryPlan], None] | None = None,
+    ) -> None:
         super().__init__(parent)
         self.setWindowTitle("NDEX Frame - Job Results")
         self.resize(880, 560)
         self.reports = list(reports)
         self.current: JobReport | None = None
+        self.retry = retry
 
         layout = QVBoxLayout(self)
 
@@ -62,6 +69,10 @@ class FrameJobReportDialog(QDialog):
         layout.addWidget(self.item_view, 2)
 
         actions = QHBoxLayout()
+        self.retry_button = QPushButton("Retry Failed")
+        self.retry_button.clicked.connect(self._retry_failed)
+        if self.retry is not None:
+            actions.addWidget(self.retry_button)
         self.copy_button = QPushButton("Copy Problem Paths")
         self.copy_button.clicked.connect(self._copy_problems)
         self.output_button = QPushButton("Open Output Folder")
@@ -98,8 +109,26 @@ class FrameJobReportDialog(QDialog):
         self.summary_label.setText(summary)
         self.item_view.setPlainText(item_listing(report))
 
+        # Whether those files are still on disk is checked when the button is
+        # pressed, not here: a manifest can point at a card since unplugged.
+        self.retry_button.setEnabled(self.retry is not None and retryable(report))
         self.copy_button.setEnabled(bool(report.problem_paths()))
         self.output_button.setEnabled(_is_dir(report.destination))
+
+    def _retry_failed(self) -> None:
+        """Hand the job back to the main window, which checks the files.
+
+        The window owns the message boxes, so a plan with nothing left on
+        disk goes there too and is explained there.
+        """
+        report, run = self.current, self.retry
+        if report is None or run is None or not retryable(report):
+            return
+        plan = plan_retry(report)
+        # Close first: the window takes over from here, and this list is
+        # about to be one job out of date.
+        self.accept()
+        run(plan)
 
     def _copy_problems(self) -> None:
         if self.current is None:

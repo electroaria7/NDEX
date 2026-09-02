@@ -45,7 +45,9 @@ NDEX_Frame.exe --open --source "D:\Masters" --output "D:\Framed"
 
 export가 끝나면 `export` manifest가 기록된다. 파일별 `exported` / `skipped` / `failed` 상태와 사용한 frame preset, output profile이 들어간다.
 
-툴바의 **Job Results**로 그 기록을 다시 볼 수 있다. Tk 앱들과 달리 Frame은 Qt 전용 창을 쓴다. [[Architecture/Job Results]] 참고.
+툴바의 **Job Results**로 그 기록을 다시 볼 수 있다. Tk 앱들과 달리 Frame은 Qt 전용 창을 쓴다.
+
+실패한 export는 같은 창의 **Retry Failed**로 다시 돌린다. Frame은 그 파일들만 열고, 그 job의 출력 폴더를 되살린 뒤, 지금 설정된 frame/output preset으로 내보낸다. 이미 열려 있는 파일이면 다시 읽지 않는다. [[Architecture/Job Results]] 참고.
 
 ## Project Location
 

@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-import shutil
+import os
 import re
+import shutil
 from pathlib import Path
 
 from ndex_common.rating import read_jpg_rating
@@ -122,6 +123,23 @@ class AutoSelectorService:
                     progress_callback(index, len(matches), match.file_stem)
 
         return result
+
+    @staticmethod
+    def matches_for(
+        matches: list[SelectionMatch], jpg_paths: list[Path]
+    ) -> list[SelectionMatch]:
+        """The matches for the given selected JPGs, in the order asked for.
+
+        A retry uses this: it re-analyzes both folders so the RAW index is
+        current, then narrows the run to the JPGs that went wrong last time.
+        """
+        by_path = {os.path.normcase(str(match.jpg_path)): match for match in matches}
+        found = []
+        for path in jpg_paths:
+            match = by_path.get(os.path.normcase(str(path)))
+            if match is not None:
+                found.append(match)
+        return found
 
     @staticmethod
     def _index_cr3_files(root: Path, recursive: bool) -> dict[str, list[Path]]:

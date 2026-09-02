@@ -180,12 +180,15 @@ def _run_gui(args: argparse.Namespace) -> int:
         if controller.state.sources:
             source = str(controller.state.sources[0].path.parent)
         destination = controller.state.output_directory or ""
+        plan = window.pending_retry
+        window.pending_retry = None
         record_export(
             source,
             destination,
             result,
             frame_preset=controller.state.working_frame.id,
             output_profile=controller.state.output_profile.id,
+            context=plan.context() if plan is not None else None,
         )
 
     controller.sourcesChanged.connect(remember_frame_session)

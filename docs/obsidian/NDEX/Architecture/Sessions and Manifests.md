@@ -69,6 +69,25 @@ status: shipped in phase 2
 
 Manifest 작성은 job 기록의 본체이고, 세션 갱신은 그 위의 편의 기능이다. 세션 쓰기가 실패해도 manifest 경로는 반환된다.
 
+### items
+
+`items`는 job이 실제로 도달한 파일마다 한 줄이다. `path`는 언제나 **원본 경로**다. 다시 처리할 대상이고, 대상 파일이 만들어지지 않았을 때도 남아 있는 유일한 값이기 때문이다. 재실행이 이 값을 읽는다.
+
+취소된 job은 처리하지 못한 파일을 기록하지 않는다.
+
+### context
+
+type마다 다르다.
+
+| Key | 어디에 | 내용 |
+| --- | --- | --- |
+| `cancelled` | backup, export | 사용자가 중간에 멈췄는가 |
+| `raw_source` | extract | 원본 RAW 폴더. 재실행이 다시 매칭하려면 필요하다 |
+| `recursive` | extract | 하위 폴더까지 검색했는가. 재실행이 같은 범위를 뒤지기 위해 |
+| `frame_preset`, `output_profile` | export | 사용한 preset id |
+| `files` | select_handoff | 넘긴 파일 목록 |
+| `retry_of` | 재실행한 job 전부 | 이 job이 다시 돌린 원래 manifest 경로 |
+
 ## Continue Rules
 
 Launcher는 `ndex_common.session.launch_args`로 실행 인자를 만든다.
@@ -78,7 +97,7 @@ Launcher는 `ndex_common.session.launch_args`로 실행 인자를 만든다.
 3. 쓸 수 있는 게 하나도 없으면 `--open`만 넘긴다. 즉 Open Empty와 같다.
 4. Frame에서 사용자가 파일이나 폴더를 새로 열면 handoff는 지워진다. 그러지 않으면 오래된 목록이 계속 살아난다.
 
-manifest를 다시 읽어 보여주는 쪽은 [[Job Results]]에 있다.
+manifest를 다시 읽어 보여주고 실패 항목을 다시 돌리는 쪽은 [[Job Results]]에 있다.
 
 ## Entry Points
 

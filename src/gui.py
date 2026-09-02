@@ -14,7 +14,7 @@ from .config import ConfigManager
 from .file_types import FILE_TYPE_ORDER, RAW_BRANDS, get_file_type_definitions, get_file_type_label, get_visible_file_types
 from .logger import AppLogger
 from .metadata import MetadataExtractor
-from .scanner import analyze_source
+from .scanner import analyze_source, build_scan_items
 
 from ndex_common.launch import launch_app
 from ndex_common.theme import apply_tk_theme, apply_window_icon, build_app_header, style_text_widget
@@ -63,6 +63,7 @@ class DSBApp(tk.Tk):
         self.is_busy = False
         self.pending_analysis: dict | None = None
         self.pending_backup: dict | None = None
+        self.pending_retry = None
 
         # With preload_only the caller passed the folders to use (NDEX handoff),
         # so remembered folders stay out of the way and "Open Empty" is empty.
@@ -399,6 +400,8 @@ class DSBApp(tk.Tk):
         self._save_settings()
         self.pending_backup = {
             "items": list(self.current_summary.items),
+            "source": str(self.current_summary.source_dir),
+            "destination": str(self.current_summary.backup_root),
             "duplicate_policy": self._selected_duplicate_policy(),
             "verify_mode": self._selected_verify_mode(),
             "dry_run": self.dry_run_var.get(),
@@ -439,7 +442,65 @@ class DSBApp(tk.Tk):
         """Show what recent backups copied, skipped, or failed on."""
         from ndex_common.report_dialog import open_job_reports
 
-        open_job_reports(self, title=NDEX_ONE_TITLE, apps=("ndex_one",))
+        open_job_reports(
+            self, title=NDEX_ONE_TITLE, apps=("ndex_one",), retry=self._retry_backup
+        )
+
+    def _retry_backup(self, plan) -> None:
+        """Back up the files an earlier job failed on, into the same destination.
+
+        The folders come from that job's manifest, not from the form: the
+        window may be showing a different pair by now.
+        """
+        if self.is_busy:
+            messagebox.showinfo(
+                NDEX_ONE_TITLE, "Wait for the running job to finish, then retry."
+            )
+            return
+        if not plan.report.destination:
+            messagebox.showerror(
+                "Invalid Destination", "That job did not record a backup destination."
+            )
+            return
+        destination = Path(plan.report.destination)
+        if not destination.parent.exists():
+            messagebox.showerror(
+                "Invalid Destination",
+                f"The backup destination of that job is gone: {destination}",
+            )
+            return
+
+        self.pending_retry = plan
+        self.pending_backup = {
+            "source": plan.report.source,
+            "destination": plan.report.destination,
+            "duplicate_policy": self._selected_duplicate_policy(),
+            "verify_mode": self._selected_verify_mode(),
+            "dry_run": self.dry_run_var.get(),
+        }
+        verb = "Rehearsing" if self.pending_backup["dry_run"] else "Retrying"
+        self._set_busy(True, f"{verb} {len(plan.paths)} file(s)...")
+        self._run_worker(self._retry_worker)
+
+    def _retry_worker(self) -> None:
+        plan = self.pending_retry
+        items, _counts = build_scan_items(
+            list(plan.paths),
+            Path(plan.report.destination),
+            self.metadata_extractor,
+            progress_callback=self._queue_progress,
+            logger=self.logger,
+        )
+        result = execute_backup(
+            items=items,
+            duplicate_policy=self.pending_backup["duplicate_policy"],
+            dry_run=self.pending_backup["dry_run"],
+            verify_mode=self.pending_backup["verify_mode"],
+            progress_callback=self._queue_progress,
+            logger=self.logger,
+            cancel_event=self.cancel_event,
+        )
+        self.ui_queue.put(("backup_done", result))
 
     def _open_backup_folder(self) -> None:
         destination = Path(self.destination_var.get())
@@ -572,7 +633,23 @@ class DSBApp(tk.Tk):
     def _record_backup_session(self, result) -> None:
         from ndex_common.workflow import record_backup
 
-        record_backup(self.source_var.get().strip(), self.destination_var.get().strip(), result)
+        plan = self.pending_retry
+        if plan is not None:
+            record_backup(
+                plan.report.source,
+                plan.report.destination,
+                result,
+                context=plan.context(),
+            )
+            return
+        # The folders the job actually used. The form can have changed since
+        # Analyze, and a manifest with the wrong destination misleads a retry.
+        pending = self.pending_backup or {}
+        record_backup(
+            pending.get("source") or self.source_var.get().strip(),
+            pending.get("destination") or self.destination_var.get().strip(),
+            result,
+        )
 
     def _render_backup_result(self, result) -> None:
         header = "Dry Run Result" if result.dry_run else "Backup Result"
@@ -587,6 +664,10 @@ class DSBApp(tk.Tk):
 
     def _set_busy(self, busy: bool, status: str) -> None:
         self.is_busy = busy
+        # A retry belongs to the job that is ending; the next one starts clean
+        # even when this one stopped on an error.
+        if not busy:
+            self.pending_retry = None
         self.status_var.set(status)
         if not busy:
             self.progress_var.set(0.0)
