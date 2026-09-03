@@ -1,7 +1,7 @@
 # Sessions and Manifests
 
 type: architecture-note
-updated: 2026-09-02
+updated: 2026-09-03
 status: shipped in phase 2
 
 ## Purpose
@@ -94,6 +94,20 @@ type마다 다르다.
 | `files` | select_handoff | 넘긴 파일 목록 |
 | `retry_of` | 재실행한 job 전부 | 이 job이 다시 돌린 원래 manifest 경로 |
 
+### 보관 정책
+
+`ndex_common/retention.py`가 job이 끝날 때마다 manifest 폴더를 정리한다. type별로 최신 100개(`KEEP_PER_TYPE`)만 남는다. type은 파일명 앞부분에서 읽으므로 지울 파일을 열어 볼 필요가 없다. type과 app은 1:1이라 결과는 app별로 세는 것과 같다.
+
+다음은 지우지 않는다.
+
+- 세션의 `last_manifest`가 가리키는 것. Job Results가 그 job에서 열린다.
+- 세션의 `context.handoff`가 가리키는 것. Frame이 그 목록을 읽는다.
+- `latest-*.json` 포인터와 manifest가 아닌 파일.
+
+지워지지 않는 파일은 건너뛰고 나머지를 계속 지운다. 정리는 뒷정리일 뿐이라 job이 실패로 보고되는 이유가 되지 않는다.
+
+재실행의 `context.retry_of`는 원래 job 경로를 적어 두지만 그 경로를 다시 여는 코드는 없고 옆의 `retry_of_created_at`이 필요한 정보를 담고 있으므로, 이것은 보관 대상을 고정하지 않는다.
+
 ## Continue Rules
 
 Launcher는 `ndex_common.session.launch_args`로 실행 인자를 만든다.
@@ -111,6 +125,7 @@ manifest를 다시 읽어 보여주고 실패 항목을 다시 돌리는 쪽은 
 ndex_common\session.py
 ndex_common\manifest.py
 ndex_common\workflow.py
+ndex_common\retention.py
 ndex_launcher\state.py
 ```
 
@@ -120,5 +135,7 @@ ndex_launcher\state.py
 python -m unittest tests.test_session
 python -m unittest tests.test_manifest
 python -m unittest tests.test_workflow
+python -m unittest tests.test_retention
+python -m unittest tests.test_workflow_handoff
 python -m unittest discover -s ndex_launcher\tests
 ```

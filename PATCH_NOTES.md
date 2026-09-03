@@ -1,5 +1,17 @@
 # NDEX Patch Notes
 
+## 2026-09-03 — Phase 6 handoff coverage and manifest retention (unreleased)
+
+Not a version bump. `NDEX_VERSION` stays `0.9.1`.
+
+Two things the earlier phases left open: nothing tested the four apps as one chain, and nothing ever removed a manifest.
+
+- The four stages now run end to end in one test against a throwaway data folder — backup, send picks, extract, export — asserting that the Launcher can Continue each app afterwards. It covers the four checks PR #9 left to be done by hand, including Continue falling back to Open Empty when a folder is gone and Frame dropping a handoff whose files have been moved.
+- Manifests no longer accumulate without limit. The newest 100 of each job type stay and older ones are removed after each finished job (`ndex_common/retention.py`).
+- Nothing is removed while something points at it: a session's `last_manifest`, or the handoff Frame would import. A manifest that will not delete is left alone and the rest still go — pruning never makes a job report a failure.
+- `latest-*.json` pointers, and any file in the folder that is not a manifest, are never touched.
+- Export manifests count `exported` rather than `copied`, matching the status their own items carry. Job Results reads both, so manifests written before this still display.
+
 ## 2026-09-02 — Phase 5 retry from the Launcher (unreleased)
 
 Not a version bump. `NDEX_VERSION` stays `0.9.1`.

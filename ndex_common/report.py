@@ -187,7 +187,7 @@ def iter_reports(
         ]
     except OSError:
         return
-    candidates.sort(key=_name_order, reverse=True)
+    candidates.sort(key=name_order, reverse=True)
     for candidate in candidates:
         report = read_report(candidate)
         if report is None:
@@ -214,11 +214,11 @@ def recent_reports(
             break
     # The name stamp decided which to read; the recorded time decides the
     # order, with the name stamp breaking ties the same way.
-    reports.sort(key=lambda report: (report.created_at, _name_order(report.manifest_path)), reverse=True)
+    reports.sort(key=lambda report: (report.created_at, name_order(report.manifest_path)), reverse=True)
     return reports
 
 
-def _name_order(path: Path) -> tuple[str, int, str]:
+def name_order(path: Path) -> tuple[str, int, str]:
     """Sort key from the stamp in a manifest name; unstamped names sort last."""
     match = _STAMP.search(path.name)
     if match is None:
