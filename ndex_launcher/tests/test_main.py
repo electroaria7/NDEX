@@ -1,14 +1,44 @@
 from __future__ import annotations
 
 import unittest
+from tkinter import ttk
+from types import SimpleNamespace
 from pathlib import Path
 from unittest.mock import patch
 
 from ndex_common.report import JobItem, JobReport
 from ndex_launcher.main import COMPACT_LAYOUT_WIDTH, LauncherApp, uses_compact_card_layout
+from ndex_launcher.state import StepState
 
 
 class LauncherLayoutTests(unittest.TestCase):
+    def test_long_sessions_remain_reachable_in_small_and_wide_windows(self) -> None:
+        steps = [StepState(key=str(i), title=f"{i}. Backup", description="Copy camera files.",
+                           last_folder="C:/" + "long photo folder/" * 25,
+                           launch_args=["--continue"]) for i in range(4)]
+        with patch("ndex_launcher.main.gather_workflow_state", return_value=steps):
+            app = LauncherApp()
+            self.addCleanup(app.destroy)
+            for size in ("880x520", "1040x620", "1200x560"):
+                with self.subTest(size=size):
+                    app.geometry(size)
+                    app.refresh_status()
+                    app.update()
+                    self.assertGreater(app._body.winfo_height(), app._canvas.winfo_height())
+                    for card in app._cards.values():
+                        for button in (w for w in card.winfo_children() if isinstance(w, ttk.Button)):
+                            self.assertTrue(button.winfo_ismapped())
+                            self.assertLessEqual(button.winfo_y() + button.winfo_height(), card.winfo_height())
+                    button = list(app._cards.values())[-1].winfo_children()[-1]
+                    app._reveal_focused_control(SimpleNamespace(widget=button))
+                    app.update()
+                    self.assertGreaterEqual(button.winfo_rooty(), app._canvas.winfo_rooty())
+                    self.assertLessEqual(button.winfo_rooty() + button.winfo_height(),
+                                         app._canvas.winfo_rooty() + app._canvas.winfo_height() + 1)
+                    footer = app.grid_slaves(row=2)[0]
+                    self.assertLessEqual(footer.winfo_y() + footer.winfo_height(), app.winfo_height())
+                    self.assertGreater(footer.winfo_height(), 1)
+
     def test_compact_layout_threshold_is_1100px(self) -> None:
         self.assertTrue(uses_compact_card_layout(COMPACT_LAYOUT_WIDTH - 1))
         self.assertFalse(uses_compact_card_layout(COMPACT_LAYOUT_WIDTH))

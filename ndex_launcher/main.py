@@ -9,6 +9,7 @@ from ndex_common.launch import launch_app
 from ndex_common.report_dialog import open_job_reports
 from ndex_common.settings import settings_path
 from ndex_common.theme import (
+    APP_BG,
     apply_tk_theme,
     apply_window_icon,
     build_app_header,
@@ -48,10 +49,25 @@ class LauncherApp(tk.Tk):
             tagline="Photo workflow: backup, select, extract, frame",
             holder=self.brand_images,
         )
-        header.pack(fill=tk.X)
+        self.columnconfigure(0, weight=1)
+        self.rowconfigure(1, weight=1)
+        header.grid(row=0, column=0, sticky="ew")
 
-        self._body = ttk.Frame(self, padding=(20, 4, 20, 12))
-        self._body.pack(fill=tk.BOTH, expand=True)
+        viewport = ttk.Frame(self)
+        viewport.grid(row=1, column=0, sticky="nsew")
+        viewport.columnconfigure(0, weight=1)
+        viewport.rowconfigure(0, weight=1)
+        self._canvas = tk.Canvas(viewport, background=APP_BG, highlightthickness=0)
+        self._canvas.grid(row=0, column=0, sticky="nsew")
+        scrollbar = ttk.Scrollbar(viewport, orient=tk.VERTICAL, command=self._canvas.yview)
+        scrollbar.grid(row=0, column=1, sticky="ns")
+        self._canvas.configure(yscrollcommand=scrollbar.set)
+        self._body = ttk.Frame(self._canvas, padding=(20, 4, 20, 12))
+        self._body_window = self._canvas.create_window(0, 0, anchor="nw", window=self._body)
+        self._canvas.bind("<Configure>", self._resize_viewport)
+        self._body.bind("<Configure>", self._update_scroll_region)
+        self.bind("<MouseWheel>", self._scroll_cards, add="+")
+        self.bind("<FocusIn>", self._reveal_focused_control, add="+")
 
         self._cards = {}
         self._arrows = []
@@ -61,16 +77,42 @@ class LauncherApp(tk.Tk):
         self._apply_card_layout(self.winfo_width())
 
         footer = ttk.Frame(self, padding=(20, 0, 20, 16), style="Footer.TFrame")
-        footer.pack(fill=tk.X)
-        ttk.Button(footer, text="Refresh Status", command=self.refresh_status).pack(side=tk.LEFT)
-        ttk.Button(footer, text="Job Results...", command=self.open_job_results).pack(
-            side=tk.LEFT, padx=(8, 0)
+        footer.grid(row=2, column=0, sticky="ew")
+        footer.columnconfigure(2, weight=1)
+        ttk.Button(footer, text="Refresh Status", command=self.refresh_status).grid(row=0, column=0)
+        ttk.Button(footer, text="Job Results...", command=self.open_job_results).grid(
+            row=0, column=1, padx=(8, 0)
         )
-        ttk.Label(
+        settings_label = ttk.Label(
             footer,
             text=f"Shared settings: {settings_path()}",
             style="Faint.TLabel",
-        ).pack(side=tk.RIGHT)
+        )
+        settings_label.grid(row=1, column=0, columnspan=3, sticky="w", pady=(6, 0))
+        footer.bind("<Configure>", lambda event: settings_label.configure(wraplength=max(80, event.width - 40)))
+
+    def _resize_viewport(self, event: tk.Event) -> None:
+        self._canvas.itemconfigure(self._body_window, width=event.width)
+
+    def _update_scroll_region(self, event: tk.Event) -> None:
+        self._canvas.configure(scrollregion=self._canvas.bbox("all"))
+
+    def _scroll_cards(self, event: tk.Event) -> None:
+        if self._body.winfo_height() > self._canvas.winfo_height():
+            self._canvas.yview_scroll(-int(event.delta / 120), "units")
+
+    def _reveal_focused_control(self, event: tk.Event) -> None:
+        widget = event.widget
+        if not str(widget).startswith(str(self._body) + "."):
+            return
+        top = widget.winfo_rooty() - self._body.winfo_rooty()
+        bottom = top + widget.winfo_height()
+        visible_top = self._canvas.canvasy(0)
+        height = self._canvas.winfo_height()
+        if top < visible_top:
+            self._canvas.yview_moveto(top / max(1, self._body.winfo_height()))
+        elif bottom > visible_top + height:
+            self._canvas.yview_moveto((bottom - height) / max(1, self._body.winfo_height()))
 
     def _on_window_configure(self, event: tk.Event) -> None:
         if event.widget is not self:
@@ -122,6 +164,7 @@ class LauncherApp(tk.Tk):
 
     def _render_card(self, step: StepState) -> None:
         card = self._cards[step.key]
+        card.bind("<Configure>", self._wrap_card_text)
         for child in card.winfo_children():
             child.destroy()
 
@@ -164,6 +207,11 @@ class LauncherApp(tk.Tk):
                 text="Open Empty",
                 command=lambda s=step: self._launch(s.key, ["--open"]),
             ).pack(anchor="w", fill=tk.X, pady=(8, 0))
+
+    def _wrap_card_text(self, event: tk.Event) -> None:
+        for child in event.widget.winfo_children():
+            if isinstance(child, ttk.Label):
+                child.configure(wraplength=max(80, event.width - 36))
 
     def open_job_results(self) -> None:
         """Show what every app's recent jobs copied, skipped, or failed on."""
