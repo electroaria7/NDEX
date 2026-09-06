@@ -58,7 +58,7 @@ def empty_session(app: str) -> dict[str, Any]:
     }
 
 
-def load_session(app: str, root: Path | None = None) -> dict[str, Any] | None:
+def load_session(app: str, root: Path | None = None, *, strict_io: bool = False) -> dict[str, Any] | None:
     """Return the on-disk session document, or None if it is missing or invalid."""
     path = session_path(app, root)
     if not path.is_file():
@@ -67,7 +67,15 @@ def load_session(app: str, root: Path | None = None) -> dict[str, Any] | None:
         import json
 
         payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+    except FileNotFoundError:
+        return None
+    except OSError:
+        if strict_io:
+            raise
+        return None
+    except ValueError:
+        return None
+    if not isinstance(payload, dict):
         return None
     return _normalize(payload, app)
 

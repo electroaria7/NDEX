@@ -1,6 +1,6 @@
 # Development Progress
 
-updated: 2026-09-02
+updated: 2026-09-03
 type: progress-note
 
 ## Summary
@@ -104,19 +104,21 @@ Phase 2는 PR #9로 병합되었으나, 이후 코드 리뷰에서 6건의 결�
   - 패키징된 앱은 `%LOCALAPPDATA%\NDEX\logs\`에 크래시 로그 기록.
   - Windows CI가 Python 3.10과 3.12에서 단위 테스트 실행.
   - 릴리스 폴더에 `SHA256SUMS.txt` 포함, 태그와 `NDEX_VERSION` 불일치 시 빌드 실패.
+  - 4단계 workflow(백업 → 셀렉 넘기기 → 추출 → export)를 GUI 없이 끝까지 도는 통합 테스트.
+  - job manifest 보관 정책: type별 최신 100개만 남기고, 세션이 가리키는 것은 남긴다.
 
 ## Verified Test Coverage
 
 ```powershell
-python -m unittest discover -s tests                      # 134
+python -m unittest discover -s tests                      # 157
 python -m unittest discover -s dsb_image_manager\tests    # 11
-python -m unittest discover -s ndex_auto_selector\tests   # 18
+python -m unittest discover -s ndex_auto_selector\tests   # 19
 python -m unittest discover -s ndex_launcher\tests        # 13
-python -m unittest discover -s ndex_frame\tests           # 150
+python -m unittest discover -s ndex_frame\tests           # 155
 ```
 
-2026-09-02 기준 326개 전부 통과.
+2026-09-03 기준 355개 전부 통과.
 
 ## Current Direction
 
-각 프로그램은 단독 실행 가능한 상태로 유지하되, 공통 브랜딩/빌드/설정/세션 규칙은 `ndex_common`에서 재사용한다. Phase 2가 앱 간 데이터 흐름(session + manifest)을 만들었고, phase 3이 그것을 읽게 했고, phase 4가 그 결과에 손을 댈 수 있게 했다. 다음 단계는 [[Roadmap]] 참고.
+각 프로그램은 단독 실행 가능한 상태로 유지하되, 공통 브랜딩/빌드/설정/세션 규칙은 `ndex_common`에서 재사용한다. Phase 2가 앱 간 데이터 흐름(session + manifest)을 만들었고, phase 3이 그것을 읽게 했고, phase 4가 그 결과에 손을 댈 수 있게 했고, phase 5가 Launcher에서 그 앱으로 넘겼다. Phase 6은 그 흐름 전체를 한 테스트로 묶고, 쌓이기만 하던 manifest에 보관 한도를 뒀다. 다음 단계는 [[Roadmap]] 참고.

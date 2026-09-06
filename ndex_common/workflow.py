@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
-from ndex_common import manifest, session
+from ndex_common import manifest, retention, session
 
 # Per-file records a manifest keeps for statuses that went fine. Problems are
 # always kept in full: they are what a retry reads. Totals live in counts.
@@ -86,6 +86,11 @@ def record_job(
             )
     except OSError:
         pass
+
+    # Now that the sessions point where they should, drop the manifests
+    # nothing points at any more. After the session update, so a manifest
+    # this job just pinned is never a candidate.
+    retention.prune_manifests()
     return path
 
 
@@ -143,8 +148,10 @@ def record_export(
         }
         for item in getattr(result, "items", ()) or ()
     ]
+    # "exported", not "copied": it is the status the items themselves carry,
+    # and an export writes a new file rather than copying one.
     counts = {
-        "copied": int(getattr(result, "exported", 0)),
+        "exported": int(getattr(result, "exported", 0)),
         "skipped": int(getattr(result, "skipped", 0)),
         "failed": int(getattr(result, "failed", 0)),
     }
