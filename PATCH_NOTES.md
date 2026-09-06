@@ -1,5 +1,12 @@
 # NDEX Patch Notes
 
+## 2026-09-05 — Concurrent job recording (unreleased)
+
+- Serialize manifest creation, session updates, and retention under one reentrant process lock so simultaneous app instances cannot overwrite job records or prune a job before its session points at it.
+- Preserve concurrent updates to different fields of the same app session.
+- Share the lock implementation with settings and acquire the Windows byte lock before accessing its contents, preventing contention from raising a premature PermissionError.
+- Add four spawned-process regression tests covering same-second jobs, session merges, retention ordering, and settings writes.
+
 ## 2026-09-05 — Retention review fixes (unreleased)
 
 - Restrict pruning to complete generated manifest filenames; similarly prefixed JSON files stay untouched.

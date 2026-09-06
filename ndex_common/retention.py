@@ -25,6 +25,7 @@ from pathlib import Path
 import re
 
 from ndex_common import session
+from ndex_common.locking import file_lock
 from ndex_common.manifest import TYPES, manifests_dir
 from ndex_common.report import name_order, path_key
 from ndex_common.settings import load_all
@@ -71,42 +72,46 @@ def prune_manifests(*, root: Path | None = None, keep: int | None = None) -> lis
     any file that will not delete -- pruning is housekeeping and never the
     reason a job reports a failure.
     """
-    keep = max(1, KEEP_PER_TYPE if keep is None else keep)
     try:
-        folder = manifests_dir(root)
-        candidates = list(folder.glob("*.json"))
+        with file_lock((root or session.data_dir()) / "workflow.lock"):
+            keep = max(1, KEEP_PER_TYPE if keep is None else keep)
+            try:
+                folder = manifests_dir(root)
+                candidates = list(folder.glob("*.json"))
+            except OSError:
+                return []
+
+            by_type: dict[str, list[Path]] = {}
+            for path in candidates:
+                if path.name.startswith("latest-"):
+                    continue
+                match = _MANIFEST_NAME.fullmatch(path.name)
+                if match is None:
+                    continue
+                type_name = match.group(1)
+                by_type.setdefault(type_name, []).append(path)
+
+            stale = [
+                path
+                for paths in by_type.values()
+                for path in sorted(paths, key=name_order, reverse=True)[keep:]
+            ]
+            if not stale:
+                return []
+
+            try:
+                pinned = pinned_paths(root)
+            except OSError:
+                return []
+            deleted: list[Path] = []
+            for path in stale:
+                if path_key(path) in pinned:
+                    continue
+                try:
+                    path.unlink()
+                except OSError:
+                    continue
+                deleted.append(path)
+            return deleted
     except OSError:
         return []
-
-    by_type: dict[str, list[Path]] = {}
-    for path in candidates:
-        if path.name.startswith("latest-"):
-            continue
-        match = _MANIFEST_NAME.fullmatch(path.name)
-        if match is None:
-            continue
-        type_name = match.group(1)
-        by_type.setdefault(type_name, []).append(path)
-
-    stale = [
-        path
-        for paths in by_type.values()
-        for path in sorted(paths, key=name_order, reverse=True)[keep:]
-    ]
-    if not stale:
-        return []
-
-    try:
-        pinned = pinned_paths(root)
-    except OSError:
-        return []
-    deleted: list[Path] = []
-    for path in stale:
-        if path_key(path) in pinned:
-            continue
-        try:
-            path.unlink()
-        except OSError:
-            continue
-        deleted.append(path)
-    return deleted
