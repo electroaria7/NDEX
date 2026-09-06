@@ -609,8 +609,9 @@ class ImageManagerApp(tk.Tk):
             return
         records = self.catalog.list_images(pick_filter="Pick")
         summary = BackupService().backup(records, Path(destination), duplicate_policy="rename")
+        copied = {item["path"] for item in summary.items if item["status"] == "copied"}
         for record in records:
-            if record.id is not None:
+            if record.id is not None and str(record.file_path) in copied:
                 self.catalog.update_backup_status(record.id, "backed_up")
         self.refresh_records()
         from ndex_common.workflow import record_job
@@ -626,7 +627,7 @@ class ImageManagerApp(tk.Tk):
                 "failed": summary.errors,
                 "overwritten": summary.overwritten,
             },
-            items=[{"path": "", "status": "message", "detail": message} for message in summary.messages[:50]],
+            items=summary.items,
             folders={"source": str(self.source_dir or "")},
         )
         messagebox.showinfo(

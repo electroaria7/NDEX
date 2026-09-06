@@ -1,9 +1,14 @@
 # Development Progress
 
-updated: 2026-09-03
+updated: 2026-09-06
 type: progress-note
 
 ## Summary
+
+현재 공개 버전은 0.9.2 Beta (PR #17, 태그 v0.9.2). Phase 0~6, 동시 기록 보호,
+Launcher 화면 개선, 실제 설치/제거 검증을 포함한다. 다음 작업은 [[Roadmap]]의
+7A~9 통합 계획을 따른다. 7A 파일 복사 안전성 및 백업 상태 정확성은 구현/회귀 검증 완료,
+다음 배포에 포함 예정이다. 7B 이후는 계획이며 완료로 간주하지 않는다.
 
 NDEX는 기존 DSB 백업 도구에서 출발해 사진 백업/선별/원본 추출/내보내기 workflow를 분리한 프로그램 시리즈다. 각 앱은 독립 실행이 가능하고, [[Programs/NDEX Launcher]]가 4단계 순서를 묶는다.
 
@@ -18,7 +23,9 @@ NDEX는 기존 DSB 백업 도구에서 출발해 사진 백업/선별/원본 추
 | 2 | `feat/phase-2-sessions` | #9 | 세션 문서, job manifest, 앱 간 handoff | merged + 후속 수정 |
 | 3 | `feat/phase-3-job-results` | #10 | job 결과를 UI에서 읽기 | merged |
 | 4 | `feat/phase-4-retry-failed` | #11 | 실패 항목 재실행 | merged |
-| 5 | `feat/phase-5-launcher-retry` | - | Launcher에서 앱으로 넘기는 재실행 | 작업 중 |
+| 5 | `feat/phase-5-launcher-retry` | - | Launcher에서 앱으로 넘기는 재실행 | 0.9.2 포함 |
+| 6 | - | - | 통합 handoff 테스트와 기록 보관 정책 | 0.9.2 포함 |
+| 7A | `fix/file-copy-safety` | - | 복사 안전성·백업 상태·skip XMP 보호 | 구현/회귀 검증 완료 |
 
 ### Phase 5 (2026-09-02)
 

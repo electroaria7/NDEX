@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import re
-import shutil
 from pathlib import Path
+
+from ndex_common.filecopy import copy_verified
 
 from ..core.models import DuplicatePolicy, ExportOptions, ExportSummary, ImageRecord
 
@@ -23,9 +24,9 @@ class ExportService:
                 if action == "skip":
                     summary.skipped += 1
                     continue
+                copy_verified(record.file_path, final_path, overwrite=action == "overwrite")
                 if action == "overwrite":
                     summary.overwritten += 1
-                shutil.copy2(record.file_path, final_path)
                 summary.exported += 1
                 summary.exported_paths.append(final_path)
             except Exception as exc:  # pragma: no cover - filesystem failures vary

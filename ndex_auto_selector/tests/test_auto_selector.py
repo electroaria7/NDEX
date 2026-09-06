@@ -3,11 +3,53 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from ndex_auto_selector.ndex_auto_selector.services.selector import AutoSelectorService
 
 
 class AutoSelectorServiceTests(unittest.TestCase):
+    def test_skip_preserves_existing_raw_and_sidecar(self):
+        for existing_xmp in (True, False):
+            with self.subTest(existing_xmp=existing_xmp), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                source, selected, work = root / "raw", root / "jpg", root / "work"
+                for folder in (source, selected, work):
+                    folder.mkdir()
+                (source / "IMG_0001.CR3").write_bytes(b"new RAW")
+                (selected / "IMG_0001.JPG").write_bytes(b"jpg")
+                target = work / "IMG_0001.CR3"
+                sidecar = work / "IMG_0001.xmp"
+                target.write_bytes(b"different RAW")
+                if existing_xmp:
+                    sidecar.write_bytes(b"existing edits")
+                service = AutoSelectorService()
+                result = service.copy_matches(service.analyze(source, selected).matches, work,
+                                              "skip", write_xmp=True)
+                self.assertEqual((result.skipped, result.xmp_written, result.errors), (1, 0, 0))
+                self.assertEqual(target.read_bytes(), b"different RAW")
+                self.assertEqual(sidecar.exists(), existing_xmp)
+                if existing_xmp:
+                    self.assertEqual(sidecar.read_bytes(), b"existing edits")
+
+    def test_failed_overwrite_preserves_raw_and_does_not_write_xmp(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source, selected, work = root / "raw", root / "jpg", root / "work"
+            for folder in (source, selected, work):
+                folder.mkdir()
+            (source / "IMG_0001.CR3").write_bytes(b"new RAW")
+            (selected / "IMG_0001.JPG").write_bytes(b"jpg")
+            target = work / "IMG_0001.CR3"
+            target.write_bytes(b"existing RAW")
+            service = AutoSelectorService()
+            with patch("ndex_common.filecopy.shutil.copy2", side_effect=OSError("disk full")):
+                result = service.copy_matches(service.analyze(source, selected).matches, work,
+                                              "overwrite", write_xmp=True)
+            self.assertEqual((result.copied, result.overwritten, result.errors), (0, 0, 1))
+            self.assertEqual(target.read_bytes(), b"existing RAW")
+            self.assertFalse((work / "IMG_0001.xmp").exists())
+
     def test_analyze_matches_selected_jpg_to_cr3_case_insensitive(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
