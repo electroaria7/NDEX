@@ -2,30 +2,47 @@
 
 [English](README.md)
 
-**공개 베타 · 0.9.2**
+**공개 베타 · 0.9.3**
 
 사진 작업 흐름(백업 → 선별 → 원본 추출 → 프레임·내보내기)을 위한 Windows 데스크톱 유틸리티입니다.
-각 앱은 혼자 실행할 수 있고, XMP 사이드카와 공용 설정으로 느슨하게 연동됩니다 (Lightroom / Evoto 호환).
+각 앱은 혼자 실행할 수 있고, XMP 사이드카와 공용 설정으로 연동됩니다. Lightroom / Evoto에서의 실제 XMP 해석은 별도 검증이 필요합니다.
 
 지금은 **공개 베타**이며 1.0 안정판이 아닙니다. EXE는 코드 서명이 없어서 Windows SmartScreen이 경고할 수 있습니다. 안정 릴리스 전에 더 바뀔 수 있습니다.
 
 ## 공개 베타
 
-- 현재 버전: **0.9.2**. 패키지: `NDEX_v0.9.2.zip` (포터블), `NDEX_Setup_0.9.2.exe` (설치본).
-- GitHub 태그 `v1.0.0` / `v1.0.1`은 같은 베타 줄에 안정 버전 번호를 붙인 기록입니다. 그 파일은 그대로 받을 수 있고, 현재 릴리스는 **0.9.2**입니다.
-- 이미 `NDEX_Setup_1.0.1.exe`를 설치했다면 `0.9.2`을 설치하기 전에 제거하세요. Windows는 `0.9.2`을 `1.0.1`보다 낮은 버전으로 봅니다.
+- 현재 버전: **0.9.3**. 패키지: `NDEX_v0.9.3.zip` (포터블), `NDEX_Setup_0.9.3.exe` (설치본).
+- GitHub 태그 `v1.0.0` / `v1.0.1`은 같은 베타 줄에 안정 버전 번호를 붙인 기록입니다. 그 파일은 그대로 받을 수 있고, 현재 릴리스는 **0.9.3**입니다.
+- 이미 `NDEX_Setup_1.0.1.exe`를 설치했다면 `0.9.3`을 설치하기 전에 제거하세요. Windows는 `0.9.3`을 `1.0.1`보다 낮은 버전으로 봅니다.
 - 변경점: [PATCH_NOTES.md](PATCH_NOTES.md).
 
 ## 빠른 시작
 
+**0.9.3 주요 변경**
+
+- Image Manager는 실제로 백업에 성공한 사진만 완료로 표시합니다.
+- Image Manager 백업·내보내기와 Auto Selector 복사는 임시 파일의 크기·SHA-256을 검증한 후 최종 파일로 반영합니다. 실패한 덮어쓰기는 기존 파일을 보존합니다.
+- Auto Selector의 중복 `skip`은 기존 RAW와 XMP를 모두 보존합니다. XMP만 갱신하려는 경우에도 `skip`은 변경하지 않습니다.
+- 검증 과정에서 추가 디스크 읽기가 발생합니다. 대량 작업의 성능·취소·종료 개선은 다음 패치에서 진행합니다.
+
+**다음 패치: 긴 작업의 조작 가능성**
+
+1. Image Manager 복사·XMP 작업을 백그라운드에서 실행해 화면 응답 유지.
+2. Auto Selector 작업 취소와 종료 시 안전한 작업 정리.
+3. 취소·중단 결과 기록 및 재실행 진행 상태 표시.
+4. 대량 사진에서 처리 시간·취소 반응·원본과 기존 출력 보존 검증.
+
+실행 전 용량 요약·CSV/HTML 리포트·언어 통일·배포 자동화는 이후 순서입니다.
+상세 계획은 [통합 로드맵](https://github.com/electroaria7/NDEX/blob/main/docs/obsidian/NDEX/Roadmap.md)을 참고하세요.
+
 **Windows 패키지 (권장)**
 
-1. [Releases](https://github.com/electroaria7/NDEX/releases)에서 `NDEX_v0.9.2.zip`을 받습니다.
+1. [Releases](https://github.com/electroaria7/NDEX/releases)에서 `NDEX_v0.9.3.zip`을 받습니다.
 2. 압축을 풉니다. `Apps\` 폴더는 그대로 둡니다.
 3. `NDEX_Launcher.exe`를 더블클릭합니다.
 4. 카드 순서대로 진행합니다: **1. Backup** → **2. Select & Rate** → **3. Extract** → **4. Frame & Export**.
 
-**설치본 (`NDEX_Setup_0.9.2.exe`)**
+**설치본 (`NDEX_Setup_0.9.3.exe`)**
 
 1. 설치 프로그램을 실행합니다. 파일은 `C:\Program Files\NDEX`에 들어갑니다.
 2. 시작 메뉴 또는 바탕화면의 **NDEX Launcher**를 엽니다.
@@ -94,7 +111,7 @@ Frame 데이터: `%LOCALAPPDATA%\NDEX\Frame\`
 ## 패키지 구성 (설치본·포터블)
 
 ```
-NDEX_v0.9.2\                  설치 위치: C:\Program Files\NDEX\
+NDEX_v0.9.3\                  설치 위치: C:\Program Files\NDEX\
   NDEX_Launcher.exe           여기서 시작
   SHA256SUMS.txt
   Apps\
@@ -125,7 +142,7 @@ powershell -ExecutionPolicy Bypass -File .\build_all.ps1
 powershell -ExecutionPolicy Bypass -File .\build_all.ps1 -Installer
 ```
 
-결과: `release\NDEX_v0.9.2\` (포터블)과 `release\NDEX_Setup_0.9.2.exe`.
+결과: `release\NDEX_v0.9.3\` (포터블)과 `release\NDEX_Setup_0.9.3.exe`.
 
 ```powershell
 python -m ndex_launcher.main

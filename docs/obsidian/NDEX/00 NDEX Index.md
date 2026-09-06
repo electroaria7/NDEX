@@ -9,7 +9,7 @@ status: active
 
 NDEX는 사진 작업 흐름을 중심으로 만든 로컬 데스크톱 유틸리티 시리즈다. 백업 정리, 이미지 선별/관리, 셀렉 JPG 기반 CR3 원본 추출, 크롭 없는 Instagram 내보내기를 각각 담당하는 4개 프로그램과, 이들을 순서대로 실행하는 런처 1개로 구성된다.
 
-현재 버전은 `NDEX_VERSION = 0.9.2` (`NDEX_CHANNEL = "beta"`)이다. 공개 베타이며 1.0 제품이 아니다.
+현재 버전은 `NDEX_VERSION = 0.9.3` (`NDEX_CHANNEL = "beta"`)이다. 공개 베타이며 1.0 제품이 아니다.
 
 ## Program Notes
 
