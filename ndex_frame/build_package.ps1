@@ -25,6 +25,7 @@ $v3 = [int]$parts[2]
 $v4 = [int]$parts[3]
 
 python -m pip install "pyinstaller==6.11.1"
+if ($LASTEXITCODE -ne 0) { throw "PyInstaller installation failed: $LASTEXITCODE" }
 
 New-Item -ItemType Directory -Force -Path $distPath, $workPath | Out-Null
 

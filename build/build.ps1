@@ -18,12 +18,15 @@ if (-not (Test-Path $VendorExifTool)) {
 }
 
 python -m pip install --upgrade "pyinstaller==6.11.1"
+if ($LASTEXITCODE -ne 0) { throw "PyInstaller installation failed: $LASTEXITCODE" }
 if ($OneFile) {
     python -m PyInstaller --noconfirm --clean $OneFileSpecPath
 }
 else {
     python -m PyInstaller --noconfirm --clean $SpecPath
 }
+
+if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed with exit code $LASTEXITCODE" }
 
 if ($Installer) {
     Write-Host "The suite installer ships all five apps from the assembled release folder."
@@ -34,6 +37,7 @@ if ($Installer) {
     }
 
     & $Iscc.Source (Join-Path $ProjectRoot "build\installer.iss")
+    if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed: $LASTEXITCODE" }
 }
 
 Write-Host "Build completed."
