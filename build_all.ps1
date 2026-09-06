@@ -41,18 +41,23 @@ Write-Host "== NDEX release build v$version =="
 if (-not $SkipBuild) {
     Write-Host "[1/5] NDEX One"
     powershell -ExecutionPolicy Bypass -File (Join-Path $repoRoot "build\build.ps1") -OneFile
+    if ($LASTEXITCODE -ne 0) { throw "App build failed with exit code $LASTEXITCODE" }
 
     Write-Host "[2/5] NDEX Image Manager"
     powershell -ExecutionPolicy Bypass -File (Join-Path $repoRoot "dsb_image_manager\build_package.ps1")
+    if ($LASTEXITCODE -ne 0) { throw "App build failed with exit code $LASTEXITCODE" }
 
     Write-Host "[3/5] NDEX Auto Selector"
     powershell -ExecutionPolicy Bypass -File (Join-Path $repoRoot "ndex_auto_selector\build_package.ps1")
+    if ($LASTEXITCODE -ne 0) { throw "App build failed with exit code $LASTEXITCODE" }
 
     Write-Host "[4/5] NDEX Frame"
     powershell -ExecutionPolicy Bypass -File (Join-Path $repoRoot "ndex_frame\build_package.ps1")
+    if ($LASTEXITCODE -ne 0) { throw "App build failed with exit code $LASTEXITCODE" }
 
     Write-Host "[5/5] NDEX Launcher"
     powershell -ExecutionPolicy Bypass -File (Join-Path $repoRoot "ndex_launcher\build_package.ps1")
+    if ($LASTEXITCODE -ne 0) { throw "App build failed with exit code $LASTEXITCODE" }
 }
 
 # Structured package: Launcher at root, workflow apps in Apps\, docs in Docs\

@@ -28,3 +28,5 @@ python -m PyInstaller `
   --add-data "$repoRoot\assets\branding;assets\branding" `
   --icon "$repoRoot\assets\branding\ndex_icon.ico" `
   $entryPoint
+
+if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed with exit code $LASTEXITCODE" }
