@@ -18,7 +18,7 @@ NDEX_FRAME_TITLE = "NDEX Frame"
 버전 값도 같은 모듈에 있다.
 
 ```text
-NDEX_VERSION = "0.9.1"
+NDEX_VERSION = "0.9.2"
 NDEX_CHANNEL = "beta"
 ```
 
