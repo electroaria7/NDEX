@@ -94,7 +94,21 @@ type마다 다르다.
 | `files` | select_handoff | 넘긴 파일 목록 |
 | `retry_of` | 재실행한 job 전부 | 이 job이 다시 돌린 원래 manifest 경로 |
 
-### 보관 정책
+### 동시 실행 보호 (2026-09-05)
+
+`ndex_common/locking.py`의 재진입 가능한 프로세스 잠금을 사용한다.
+`workflow.lock`은 manifest 파일명 선택/쓰기, 세션 읽기/병합/쓰기,
+보호 경로 조회/삭제를 직렬화한다. `record_job`은 이 전체 구간을 한 번에
+잠그므로 새 기록이 세션에 연결되기 전에 다른 프로세스가 정리하지 못한다.
+개별 `write_manifest`, `remember`, `prune_manifests` 호출도 같은 잠금을 쓴다.
+
+잠금 순서는 `workflow.lock` → `settings.json.lock`이다. 설정 mutator에서
+workflow 쓰기를 호출하지 않는다. 사진 복사나 이미지 렌더링은 잠금 범위
+밖에서 실행하며, 잠금 파일은 삭제하지 않는다. 이 보호는 같은 잠금 규칙을
+사용하는 새 버전 프로세스 사이에 적용된다. 프로세스 강제 종료 시 여러 JSON
+파일의 쓰기를 되돌리는 트랜잭션 복구 기능은 아니다.
+
+### 보관 개수와 보호 대상
 
 `ndex_common/retention.py`가 job이 끝날 때마다 manifest 폴더를 정리한다. type별로 최신 100개(`KEEP_PER_TYPE`)만 남는다. type은 파일명 앞부분에서 읽으므로 지울 파일을 열어 볼 필요가 없다. type과 app은 1:1이라 결과는 app별로 세는 것과 같다.
 

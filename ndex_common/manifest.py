@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
+from ndex_common.locking import file_lock
 from ndex_common.jsonio import write_json_atomic
 from ndex_common.settings import data_dir
 
@@ -38,28 +39,29 @@ def write_manifest(
     folders: Mapping[str, str] | None = None,
     root: Path | None = None,
 ) -> Path:
-    if type not in TYPES:
-        raise ValueError(f"Unknown manifest type: {type}")
-    path = _unused_path(manifests_dir(root), type)
-    payload = {
-        "kind": KIND,
-        "schema_version": SCHEMA_VERSION,
-        "type": type,
-        "app": app,
-        "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "source": source,
-        "destination": destination,
-        "counts": dict(counts or {}),
-        "items": [dict(item) for item in (items or ())],
-        "context": dict(context or {}),
-        # Every folder the job used, by role. source/destination above are
-        # the two a results view shows; a retry may need the others.
-        "folders": {str(key): str(value) for key, value in (folders or {}).items()},
-    }
-    write_json_atomic(path, payload)
-    latest = manifests_dir(root) / f"latest-{app}-{type}.json"
-    write_json_atomic(latest, payload)
-    return path
+    with file_lock((root or data_dir()) / "workflow.lock"):
+        if type not in TYPES:
+            raise ValueError(f"Unknown manifest type: {type}")
+        path = _unused_path(manifests_dir(root), type)
+        payload = {
+            "kind": KIND,
+            "schema_version": SCHEMA_VERSION,
+            "type": type,
+            "app": app,
+            "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "source": source,
+            "destination": destination,
+            "counts": dict(counts or {}),
+            "items": [dict(item) for item in (items or ())],
+            "context": dict(context or {}),
+            # Every folder the job used, by role. source/destination above are
+            # the two a results view shows; a retry may need the others.
+            "folders": {str(key): str(value) for key, value in (folders or {}).items()},
+        }
+        write_json_atomic(path, payload)
+        latest = manifests_dir(root) / f"latest-{app}-{type}.json"
+        write_json_atomic(latest, payload)
+        return path
 
 
 def _unused_path(folder: Path, type: str) -> Path:

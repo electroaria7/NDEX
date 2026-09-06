@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from ndex_common import manifest, retention, session
+from ndex_common.locking import file_lock
 
 # Per-file records a manifest keeps for statuses that went fine. Problems are
 # always kept in full: they are what a retry reads. Totals live in counts.
@@ -50,48 +51,52 @@ def record_job(
     context: Mapping[str, Any] | None = None,
 ) -> Path | None:
     try:
-        path = manifest.write_manifest(
-            type=type,
-            app=app,
-            source=source,
-            destination=destination,
-            counts=counts,
-            items=trim_items(items or ()),
-            context=context,
-            folders=folders,
-        )
+        with file_lock(manifest.data_dir() / "workflow.lock"):
+            try:
+                path = manifest.write_manifest(
+                    type=type,
+                    app=app,
+                    source=source,
+                    destination=destination,
+                    counts=counts,
+                    items=trim_items(items or ()),
+                    context=context,
+                    folders=folders,
+                )
+            except OSError:
+                return None
+
+            # The manifest is the record of the job. Updating the session is a
+            # convenience on top of it, so a failure there still returns the manifest.
+            try:
+                extra = dict(context or {})
+                extra.pop("files", None)
+                extra["counts"] = dict(counts or {})
+                if type == "select_handoff":
+                    extra["handoff"] = str(path)
+                session.remember(
+                    app,
+                    folders=dict(folders or {}),
+                    last_manifest=str(path),
+                    context=extra,
+                )
+                if type == "select_handoff":
+                    session.remember(
+                        "frame",
+                        folders={"source": source} if source else {},
+                        last_manifest=str(path),
+                        context={"handoff": str(path)},
+                    )
+            except OSError:
+                pass
+
+            # Now that the sessions point where they should, drop the manifests
+            # nothing points at any more. After the session update, so a manifest
+            # this job just pinned is never a candidate.
+            retention.prune_manifests()
+            return path
     except OSError:
         return None
-
-    # The manifest is the record of the job. Updating the session is a
-    # convenience on top of it, so a failure there still returns the manifest.
-    try:
-        extra = dict(context or {})
-        extra.pop("files", None)
-        extra["counts"] = dict(counts or {})
-        if type == "select_handoff":
-            extra["handoff"] = str(path)
-        session.remember(
-            app,
-            folders=dict(folders or {}),
-            last_manifest=str(path),
-            context=extra,
-        )
-        if type == "select_handoff":
-            session.remember(
-                "frame",
-                folders={"source": source} if source else {},
-                last_manifest=str(path),
-                context={"handoff": str(path)},
-            )
-    except OSError:
-        pass
-
-    # Now that the sessions point where they should, drop the manifests
-    # nothing points at any more. After the session update, so a manifest
-    # this job just pinned is never a candidate.
-    retention.prune_manifests()
-    return path
 
 
 def record_extract(

@@ -19,19 +19,17 @@ from __future__ import annotations
 import json
 import os
 import shutil
-import sys
-import threading
 from contextlib import contextmanager
 from copy import deepcopy
 from pathlib import Path
 from typing import Callable, Iterator
 
 from ndex_common.jsonio import write_json_atomic
+from ndex_common.locking import file_lock
 
 APP_NAME = "NDEX"
 SCHEMA_VERSION = 1
 SECTION_KEYS = ("shared", "image_manager", "auto_selector", "frame", "launcher", "ndex_one")
-_THREAD_LOCK = threading.Lock()
 
 
 def data_dir() -> Path:
@@ -112,35 +110,8 @@ def migrate(data: dict | None) -> dict:
 def settings_lock(path: Path | None = None) -> Iterator[None]:
     """Exclusive lock for one settings file (Windows ``msvcrt`` / POSIX ``fcntl``)."""
     target = path or settings_path()
-    lock_path = target.with_name(f"{target.name}.lock")
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    with _THREAD_LOCK:
-        handle = lock_path.open("a+b")
-        try:
-            if sys.platform == "win32":
-                import msvcrt
-
-                handle.seek(0)
-                if handle.read(1) == b"":
-                    handle.write(b"\0")
-                    handle.flush()
-                handle.seek(0)
-                msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
-                try:
-                    yield
-                finally:
-                    handle.seek(0)
-                    msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
-            else:
-                import fcntl
-
-                fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
-                try:
-                    yield
-                finally:
-                    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
-        finally:
-            handle.close()
+    with file_lock(target.with_name(f"{target.name}.lock")):
+        yield
 
 
 def _schema_version(data: dict) -> int:

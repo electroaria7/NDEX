@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from ndex_common.locking import file_lock
 from ndex_common.jsonio import write_json_atomic
 from ndex_common.settings import atomic_update, data_dir, load_all
 
@@ -122,27 +123,28 @@ def remember(
     root: Path | None = None,
 ) -> dict[str, Any]:
     """Write the session file and merge the snapshot into ``shared.sessions``."""
-    current = load_session(app, root) or empty_session(app)
-    merged_folders = dict(current.get("folders") or {})
-    if folders:
-        for key, value in folders.items():
-            if value:
-                merged_folders[key] = str(value)
-    merged_context = dict(current.get("context") or {})
-    if context:
-        merged_context.update(context)
-    document = {
-        "kind": KIND,
-        "schema_version": SCHEMA_VERSION,
-        "app": app,
-        "updated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "folders": merged_folders,
-        "last_manifest": last_manifest or str(current.get("last_manifest") or ""),
-        "context": merged_context,
-    }
-    write_json_atomic(session_path(app, root), document)
-    _store_snapshot(app, document)
-    return document
+    with file_lock((root or data_dir()) / "workflow.lock"):
+        current = load_session(app, root) or empty_session(app)
+        merged_folders = dict(current.get("folders") or {})
+        if folders:
+            for key, value in folders.items():
+                if value:
+                    merged_folders[key] = str(value)
+        merged_context = dict(current.get("context") or {})
+        if context:
+            merged_context.update(context)
+        document = {
+            "kind": KIND,
+            "schema_version": SCHEMA_VERSION,
+            "app": app,
+            "updated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "folders": merged_folders,
+            "last_manifest": last_manifest or str(current.get("last_manifest") or ""),
+            "context": merged_context,
+        }
+        write_json_atomic(session_path(app, root), document)
+        _store_snapshot(app, document)
+        return document
 
 
 def usable_handoff(document: dict[str, Any]) -> str:
