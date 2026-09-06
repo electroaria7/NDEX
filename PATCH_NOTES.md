@@ -1,13 +1,13 @@
 # NDEX Patch Notes
 
-## 2026-09-06 — File copy safety (unreleased)
+## 0.9.3 Beta — 2026-09-06
 
 - Mark Image Manager backup completion only for files successfully copied, and record per-file failures in Job Results.
 - Stage Manager backup/export and Auto Selector copies in unique temporary files, verify SHA-256 and size, then commit atomically. Non-overwrite operations do not replace a destination created concurrently.
 - Preserve both existing RAW and XMP when Auto Selector skips a duplicate. Count overwrites only after a successful copy.
 - Consolidate the existing roadmap and post-0.9.2 review into safety, usability, release automation, and real-world compatibility milestones.
 
-## 0.9.2 Beta ? 2026-09-05
+## 0.9.2 Beta - 2026-09-05
 
 This release includes the workflow handoff, job history/retry, retention, concurrent recording, build validation, and Launcher layout improvements listed below. All changes previously marked unreleased are included in 0.9.2.
 
@@ -196,6 +196,6 @@ See `ndex_frame/PATCH_NOTES.md` (copied to `Docs\FRAME_PATCH_NOTES.md`): ratio/c
 
 ### Installer
 
-- GitHub first shipped the suite installer as `NDEX_Setup_1.0.0.exe`. Current builds produce `NDEX_Setup_0.9.2.exe` into `C:\Program Files\NDEX`.
+- GitHub first shipped the suite installer as `NDEX_Setup_1.0.0.exe`. Current builds produce `NDEX_Setup_0.9.3.exe` into `C:\Program Files\NDEX`.
 - Desktop icon and post-install run launch **NDEX Launcher**.
 - MIT `LICENSE` plus English/Korean user agreement (`TERMS.md`, `TERMS.ko.md`). The installer shows the agreement before install. Copies go in `Docs\`. NDEX stays free of charge.

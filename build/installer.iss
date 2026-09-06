@@ -1,8 +1,8 @@
 #define MyAppName "NDEX"
-#define MyAppVersion "0.9.2"
+#define MyAppVersion "0.9.3"
 #define MyAppPublisher "NDEX"
 #define MyAppExeName "NDEX_Launcher.exe"
-#define ReleaseFolder "..\release\NDEX_v0.9.2"
+#define ReleaseFolder "..\release\NDEX_v0.9.3"
 
 [Setup]
 AppId={{8F2C4A91-6D3E-4B17-9C58-1A7E0F4B2D90}
@@ -14,7 +14,7 @@ DefaultDirName={autopf}\NDEX
 DefaultGroupName=NDEX
 DisableProgramGroupPage=yes
 OutputDir=..\release
-OutputBaseFilename=NDEX_Setup_0.9.2
+OutputBaseFilename=NDEX_Setup_0.9.3
 SetupIconFile=..\assets\branding\ndex_icon.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 Compression=lzma

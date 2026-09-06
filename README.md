@@ -2,30 +2,47 @@
 
 [한국어](README.ko.md)
 
-**Public beta · 0.9.2**
+**Public beta · 0.9.3**
 
 Windows desktop tools for a photo workflow: backup → select → extract masters → frame & export.
-Each app can run alone. Together they share XMP sidecars and one settings file (Lightroom / Evoto friendly).
+Each app can run alone. Together they share XMP sidecars and one settings file. Actual XMP interpretation in Lightroom / Evoto still needs separate validation.
 
 This is a **public beta**, not a 1.0 product. EXEs are unsigned, so Windows SmartScreen may warn. Expect more changes before a stable release.
 
 ## Public beta
 
-- Current version: **0.9.2**. Packages: `NDEX_v0.9.2.zip` (portable) and `NDEX_Setup_0.9.2.exe` (installer).
-- GitHub tags `v1.0.0` and `v1.0.1` were this same beta line with a premature stable number. Those downloads still work; the current release is **0.9.2**.
-- If `NDEX_Setup_1.0.1.exe` is already installed, uninstall it before installing `0.9.2`. Windows treats `0.9.2` as older than `1.0.1`.
+- Current version: **0.9.3**. Packages: `NDEX_v0.9.3.zip` (portable) and `NDEX_Setup_0.9.3.exe` (installer).
+- GitHub tags `v1.0.0` and `v1.0.1` were this same beta line with a premature stable number. Those downloads still work; the current release is **0.9.3**.
+- If `NDEX_Setup_1.0.1.exe` is already installed, uninstall it before installing `0.9.3`. Windows treats `0.9.3` as older than `1.0.1`.
 - Changelog: [PATCH_NOTES.md](PATCH_NOTES.md).
 
 ## Quick start
 
+**What's new in 0.9.3**
+
+- Image Manager marks only successfully copied photos as backed up.
+- Manager backup/export and Auto Selector stage copies, verify size and SHA-256, then commit them atomically. Failed overwrites preserve existing files.
+- Auto Selector duplicate `skip` preserves both existing RAW and XMP; it no longer updates sidecars for skipped files.
+- Verification adds disk reads. Large-job performance, cancellation, and shutdown handling are the next patch's focus.
+
+**Next patch: responsive long-running jobs**
+
+1. Run Image Manager copy/XMP operations in the background.
+2. Add Auto Selector cancellation and safe shutdown while work is active.
+3. Record cancelled/interrupted outcomes and show retry progress.
+4. Validate throughput, cancellation response, and source/existing-output preservation on large jobs.
+
+Preflight capacity summaries, CSV/HTML reports, localization, and release automation follow this work.
+See the [consolidated roadmap](https://github.com/electroaria7/NDEX/blob/main/docs/obsidian/NDEX/Roadmap.md).
+
 **Windows package (recommended)**
 
-1. Download `NDEX_v0.9.2.zip` from [Releases](https://github.com/electroaria7/NDEX/releases).
+1. Download `NDEX_v0.9.3.zip` from [Releases](https://github.com/electroaria7/NDEX/releases).
 2. Unzip the folder. Keep `Apps\` together.
 3. Double-click `NDEX_Launcher.exe`.
 4. Use the four cards: **1. Backup** → **2. Select & Rate** → **3. Extract** → **4. Frame & Export**.
 
-**Installed (`NDEX_Setup_0.9.2.exe`)**
+**Installed (`NDEX_Setup_0.9.3.exe`)**
 
 1. Run the installer. Files go to `C:\Program Files\NDEX`.
 2. Open **NDEX Launcher** from the Start menu or the desktop icon.
@@ -94,7 +111,7 @@ Shared settings `frame` section: `%LOCALAPPDATA%\NDEX\config\settings.json`
 ## Packaged layout (installer and portable)
 
 ```
-NDEX_v0.9.2\                  also installed as C:\Program Files\NDEX\
+NDEX_v0.9.3\                  also installed as C:\Program Files\NDEX\
   NDEX_Launcher.exe           start here
   SHA256SUMS.txt
   Apps\
@@ -125,7 +142,7 @@ powershell -ExecutionPolicy Bypass -File .\build_all.ps1
 powershell -ExecutionPolicy Bypass -File .\build_all.ps1 -Installer
 ```
 
-Output: `release\NDEX_v0.9.2\` (portable package) and `release\NDEX_Setup_0.9.2.exe`.
+Output: `release\NDEX_v0.9.3\` (portable package) and `release\NDEX_Setup_0.9.3.exe`.
 
 ```powershell
 python -m ndex_launcher.main
