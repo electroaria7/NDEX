@@ -1,28 +1,39 @@
 # NDEX Patch Notes
 
-## 2026-09-05 — Launcher overflow (unreleased)
+## 0.9.2 Beta ? 2026-09-05
+
+This release includes the workflow handoff, job history/retry, retention, concurrent recording, build validation, and Launcher layout improvements listed below. All changes previously marked unreleased are included in 0.9.2.
+
+- Continue sessions across Backup, Image Manager, Auto Selector, and Frame; inspect job results and retry from the owning app.
+- Protect job history and shared settings during concurrent app use; prune only eligible, unreferenced records.
+- Keep Launcher actions reachable with long paths using scrolling, wrapping, and keyboard focus visibility.
+- Stop packaging immediately when a build tool fails.
+
+Public beta status is unchanged. Existing 1.0.1 installations should be removed before installing this beta line.
+
+## 2026-09-05 — Launcher overflow (included in 0.9.2)
 
 - Keep workflow cards scrollable when long session paths exceed the window height, with mouse-wheel scrolling and automatic visibility for keyboard-focused controls.
 - Keep Refresh Status and Job Results visible below the cards; wrap settings and card text to the available width.
 - Verify long sessions at minimum, default, and wide window sizes, including after status refresh.
 
-## 2026-09-05 — Concurrent job recording (unreleased)
+## 2026-09-05 — Concurrent job recording (included in 0.9.2)
 
 - Serialize manifest creation, session updates, and retention under one reentrant process lock so simultaneous app instances cannot overwrite job records or prune a job before its session points at it.
 - Preserve concurrent updates to different fields of the same app session.
 - Share the lock implementation with settings and acquire the Windows byte lock before accessing its contents, preventing contention from raising a premature PermissionError.
 - Add four spawned-process regression tests covering same-second jobs, session merges, retention ordering, and settings writes.
 
-## 2026-09-05 — Retention review fixes (unreleased)
+## 2026-09-05 — Retention review fixes (included in 0.9.2)
 
 - Restrict pruning to complete generated manifest filenames; similarly prefixed JSON files stay untouched.
 - Skip pruning when session/settings I/O prevents collecting protected paths.
 - Ignore non-object session JSON instead of raising an AttributeError.
 - Add regression coverage for filename filtering, unreadable protection records, and malformed session shapes.
 
-## 2026-09-03 — Phase 6 handoff coverage and manifest retention (unreleased)
+## 2026-09-03 — Phase 6 handoff coverage and manifest retention (included in 0.9.2)
 
-Not a version bump. `NDEX_VERSION` stays `0.9.1`.
+This work originally kept `NDEX_VERSION` at `0.9.1`; it is now included in `0.9.2`.
 
 Two things the earlier phases left open: nothing tested the four apps as one chain, and nothing ever removed a manifest.
 
@@ -32,9 +43,9 @@ Two things the earlier phases left open: nothing tested the four apps as one cha
 - `latest-*.json` pointers, and any file in the folder that is not a manifest, are never touched.
 - Export manifests count `exported` rather than `copied`, matching the status their own items carry. Job Results reads both, so manifests written before this still display.
 
-## 2026-09-02 — Phase 5 retry from the Launcher (unreleased)
+## 2026-09-02 — Phase 5 retry from the Launcher (included in 0.9.2)
 
-Not a version bump. `NDEX_VERSION` stays `0.9.1`.
+This work originally kept `NDEX_VERSION` at `0.9.1`; it is now included in `0.9.2`.
 
 Phase 4 put **Retry Failed** in the three apps that run jobs. The Launcher shows every app's jobs but runs none of them, so from there a failed job was a dead end. Now it is a hop.
 
@@ -55,9 +66,9 @@ Phase 4 put **Retry Failed** in the three apps that run jobs. The Launcher shows
 - Retry planning stats each missing folder once instead of every file in it.
 - The post-backup warning now points at Job Results and Retry Failed.
 
-## 2026-09-02 — Phase 4 retry failed items (unreleased)
+## 2026-09-02 — Phase 4 retry failed items (included in 0.9.2)
 
-Not a version bump. `NDEX_VERSION` stays `0.9.1`.
+This work originally kept `NDEX_VERSION` at `0.9.1`; it is now included in `0.9.2`.
 
 Phase 3 showed which files a job failed on but could only copy their paths to the clipboard. Phase 4 runs them again.
 
@@ -73,9 +84,9 @@ Phase 3 showed which files a job failed on but could only copy their paths to th
 - NDEX One records a backup against the folders that were analysed, not whatever the form shows when the job ends. A destination edited between **Analyze** and the end of the backup used to be recorded as the job's destination.
 - Job Results reads manifests newest-first and stops at the history limit, and the Launcher reads only the newest manifest per app, instead of parsing every manifest ever written on each open.
 
-## 2026-09-02 — Phase 3 job results (unreleased)
+## 2026-09-02 — Phase 3 job results (included in 0.9.2)
 
-Not a version bump. `NDEX_VERSION` stays `0.9.1`.
+This work originally kept `NDEX_VERSION` at `0.9.1`; it is now included in `0.9.2`.
 
 Phase 2 recorded every finished job to a manifest, but nothing read those files back. Phase 3 is the read side.
 
@@ -96,9 +107,9 @@ Six defects found reviewing the merged phase 2 code:
 - Image Manager's **Send Picks to Frame…** reports an error when the handoff cannot be written, instead of opening Frame with nothing sent.
 - Two jobs of the same type finishing in the same second get separate manifest files instead of one overwriting the other.
 
-## 2026-09-02 — Phase 2 sessions and manifests (unreleased)
+## 2026-09-02 — Phase 2 sessions and manifests (included in 0.9.2)
 
-Not a version bump. `NDEX_VERSION` stays `0.9.1`. This is workflow state, not a GitHub release.
+This work originally kept `NDEX_VERSION` at `0.9.1`; it is now included in `0.9.2`. This is workflow state, not a GitHub release.
 
 - Each app writes an explicit session document under `%LOCALAPPDATA%\NDEX\sessions\{app}.json`. The latest snapshot is also stored in `settings.json` under `shared.sessions` (add-only; `schema_version` remains 1). Legacy last-folder keys still hydrate Continue.
 - Launcher Continue restores last work context: folders when they exist, and Frame `--handoff` when the select-handoff file exists. Missing folders fall back to Open Empty (`--open` only).
@@ -178,6 +189,6 @@ See `ndex_frame/PATCH_NOTES.md` (copied to `Docs\FRAME_PATCH_NOTES.md`): ratio/c
 
 ### Installer
 
-- GitHub first shipped the suite installer as `NDEX_Setup_1.0.0.exe`. Current builds produce `NDEX_Setup_0.9.1.exe` into `C:\Program Files\NDEX`.
+- GitHub first shipped the suite installer as `NDEX_Setup_1.0.0.exe`. Current builds produce `NDEX_Setup_0.9.2.exe` into `C:\Program Files\NDEX`.
 - Desktop icon and post-install run launch **NDEX Launcher**.
 - MIT `LICENSE` plus English/Korean user agreement (`TERMS.md`, `TERMS.ko.md`). The installer shows the agreement before install. Copies go in `Docs\`. NDEX stays free of charge.
