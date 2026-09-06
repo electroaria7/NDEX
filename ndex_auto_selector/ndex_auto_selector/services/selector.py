@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import re
-import shutil
 from pathlib import Path
+
+from ndex_common.filecopy import copy_verified
 
 from ndex_common.rating import read_jpg_rating
 from ndex_common.retry import path_key
@@ -94,19 +95,15 @@ class AutoSelectorService:
                 destination_path = work_folder / match.raw_path.name
                 final_path, action = self._resolve_duplicate(destination_path, duplicate_policy)
                 if action == "skip":
-                    if write_xmp:
-                        self._write_selected_xmp(destination_path, effective_rating, xmp_label)
-                        result.xmp_written += 1
                     result.skipped += 1
                     result.messages.append(f"skipped existing {destination_path.name}")
                     result.items.append(
-                        {"path": str(destination_path), "status": "skipped", "detail": "already exists"}
+                        {"path": str(destination_path), "status": "skipped", "detail": "already exists; RAW and XMP preserved"}
                     )
                     continue
+                copy_verified(match.raw_path, final_path, overwrite=action == "overwrite")
                 if action == "overwrite":
                     result.overwritten += 1
-
-                shutil.copy2(match.raw_path, final_path)
                 result.copied += 1
                 result.items.append({"path": str(final_path), "status": "copied"})
                 if write_xmp:

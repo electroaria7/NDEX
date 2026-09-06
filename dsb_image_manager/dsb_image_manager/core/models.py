@@ -114,6 +114,7 @@ class BackupSummary:
     overwritten: int = 0
     errors: int = 0
     messages: list[str] = field(default_factory=list)
+    items: list[dict[str, str]] = field(default_factory=list)
 
 
 @dataclass(slots=True)
