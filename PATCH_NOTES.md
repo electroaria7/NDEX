@@ -1,5 +1,11 @@
 # NDEX Patch Notes
 
+## 2026-09-05 — Launcher overflow (unreleased)
+
+- Keep workflow cards scrollable when long session paths exceed the window height, with mouse-wheel scrolling and automatic visibility for keyboard-focused controls.
+- Keep Refresh Status and Job Results visible below the cards; wrap settings and card text to the available width.
+- Verify long sessions at minimum, default, and wide window sizes, including after status refresh.
+
 ## 2026-09-05 — Concurrent job recording (unreleased)
 
 - Serialize manifest creation, session updates, and retention under one reentrant process lock so simultaneous app instances cannot overwrite job records or prune a job before its session points at it.
