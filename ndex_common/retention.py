@@ -22,30 +22,33 @@ decide it can go. Each type is written by exactly one app, so the two agree.
 from __future__ import annotations
 
 from pathlib import Path
+import re
 
 from ndex_common import session
 from ndex_common.manifest import TYPES, manifests_dir
 from ndex_common.report import name_order, path_key
+from ndex_common.settings import load_all
 
 # Manifests kept per job type. Four types, so this bounds the folder at
-# 4x this many files. Job Results lists the 20 most recent, and a retry
+# 4x this many files, plus pinned manifests. Job Results lists the 20 most recent, and a retry
 # reaches back only as far as the job the user picked, so this is well
 # clear of what the UI can reach.
 KEEP_PER_TYPE = 100
+_MANIFEST_NAME = re.compile(
+    rf"({'|'.join(re.escape(value) for value in TYPES)})-\d{{8}}T\d{{6}}Z(?:-[1-9]\d*)?\.json"
+)
 
 
 def pinned_paths(root: Path | None = None) -> set[str]:
     """Manifests a session still points at, as :func:`path_key` spellings."""
     documents: list[dict] = []
     for app in session.APPS:
-        document = session.load_session(app, root)
+        document = session.load_session(app, root, strict_io=True)
         if document is not None:
             documents.append(document)
-    try:
-        # The settings snapshot covers a wiped sessions folder.
-        documents.extend(session.latest_from_settings().values())
-    except OSError:
-        pass
+    # The settings snapshot covers a wiped sessions folder. Let read errors
+    # reach the caller: an incomplete pin set is not safe to delete against.
+    documents.extend(session.latest_from_settings(load_all(strict_io=True)).values())
 
     pinned: set[str] = set()
     for document in documents:
@@ -79,9 +82,10 @@ def prune_manifests(*, root: Path | None = None, keep: int | None = None) -> lis
     for path in candidates:
         if path.name.startswith("latest-"):
             continue
-        type_name = path.name.split("-", 1)[0]
-        if type_name not in TYPES:
+        match = _MANIFEST_NAME.fullmatch(path.name)
+        if match is None:
             continue
+        type_name = match.group(1)
         by_type.setdefault(type_name, []).append(path)
 
     stale = [
@@ -92,7 +96,10 @@ def prune_manifests(*, root: Path | None = None, keep: int | None = None) -> lis
     if not stale:
         return []
 
-    pinned = pinned_paths(root)
+    try:
+        pinned = pinned_paths(root)
+    except OSError:
+        return []
     deleted: list[Path] = []
     for path in stale:
         if path_key(path) in pinned:

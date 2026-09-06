@@ -1,5 +1,12 @@
 # NDEX Patch Notes
 
+## 2026-09-05 — Retention review fixes (unreleased)
+
+- Restrict pruning to complete generated manifest filenames; similarly prefixed JSON files stay untouched.
+- Skip pruning when session/settings I/O prevents collecting protected paths.
+- Ignore non-object session JSON instead of raising an AttributeError.
+- Add regression coverage for filename filtering, unreadable protection records, and malformed session shapes.
+
 ## 2026-09-03 — Phase 6 handoff coverage and manifest retention (unreleased)
 
 Not a version bump. `NDEX_VERSION` stays `0.9.1`.

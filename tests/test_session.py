@@ -32,6 +32,15 @@ def _write_handoff(folder: Path, *, missing_files: bool) -> Path:
 
 
 class SessionDocumentTests(unittest.TestCase):
+    def test_non_object_session_json_is_ignored(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = session.session_path("frame", root)
+            for payload in ([], None, "invalid", 42):
+                with self.subTest(payload=payload):
+                    path.write_text(json.dumps(payload), encoding="utf-8")
+                    self.assertIsNone(session.load_session("frame", root))
+
     def test_remember_writes_file_and_shared_snapshot(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

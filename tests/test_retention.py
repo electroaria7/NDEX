@@ -55,6 +55,44 @@ class RetentionTestCase(unittest.TestCase):
 
 
 class PruneTests(RetentionTestCase):
+    def test_unreadable_pin_files_prevent_deletion(self) -> None:
+        paths = self.stamps(3)
+        session.remember("ndex_one", last_manifest=str(paths[0]))
+        before = self.names()
+        real_open = Path.open
+        for target in (session.session_path("ndex_one"), self.root / "config" / "settings.json"):
+            def refuse(path, *args, **kwargs):
+                if path == target:
+                    raise PermissionError("busy")
+                return real_open(path, *args, **kwargs)
+            with self.subTest(target=target), unittest.mock.patch.object(Path, "open", refuse):
+                self.assertEqual(prune_manifests(keep=1), [])
+                self.assertEqual(self.names(), before)
+
+    def test_preserves_files_that_only_share_a_manifest_prefix(self) -> None:
+        self.stamps(3)
+        strangers = [manifests_dir() / name for name in (
+            "backup-notes.json", "backup-20260501T120000Z-extra.json",
+        )]
+        for path in strangers:
+            path.write_text("{}", encoding="utf-8")
+        prune_manifests(keep=1)
+        self.assertTrue(all(path.is_file() for path in strangers))
+
+    def test_skips_pruning_when_session_pins_cannot_be_read(self) -> None:
+        self.stamps(3)
+        before = self.names()
+        with unittest.mock.patch("ndex_common.session.load_session", side_effect=PermissionError("busy")):
+            self.assertEqual(prune_manifests(keep=1), [])
+        self.assertEqual(self.names(), before)
+
+    def test_skips_pruning_when_settings_pins_cannot_be_read(self) -> None:
+        self.stamps(3)
+        before = self.names()
+        with unittest.mock.patch("ndex_common.session.latest_from_settings", side_effect=PermissionError("busy")):
+            self.assertEqual(prune_manifests(keep=1), [])
+        self.assertEqual(self.names(), before)
+
     def test_keeps_the_newest_and_deletes_the_rest_of_that_type(self) -> None:
         self.stamps(5)
 

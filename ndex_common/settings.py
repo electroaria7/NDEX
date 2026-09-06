@@ -43,8 +43,8 @@ def settings_path() -> Path:
     return _config_dir() / "settings.json"
 
 
-def load_all() -> dict:
-    return migrate(_read_unlocked(settings_path()))
+def load_all(*, strict_io: bool = False) -> dict:
+    return migrate(_read_unlocked(settings_path(), strict_io=strict_io))
 
 
 def get_section(section: str, defaults: dict | None = None) -> dict:
@@ -151,13 +151,17 @@ def _schema_version(data: dict) -> int:
         return 0
 
 
-def _read_unlocked(path: Path) -> dict:
+def _read_unlocked(path: Path, *, strict_io: bool = False) -> dict:
     if not path.exists():
         return {}
     try:
         with path.open("r", encoding="utf-8") as handle:
             data = json.load(handle)
-    except (json.JSONDecodeError, OSError):
+    except (json.JSONDecodeError, FileNotFoundError):
+        return {}
+    except OSError:
+        if strict_io:
+            raise
         return {}
     return data if isinstance(data, dict) else {}
 
