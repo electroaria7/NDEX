@@ -1,5 +1,16 @@
 # NDEX Patch Notes
 
+## Unreleased — Icon and UI review
+
+- Give Windows icons transparent outer corners and dedicated 16/24px artwork. Keep reproducible PNG/ICO generation and source provenance in `build/generate_branding.py` and `assets/branding/icon_sources.json`.
+- Use compact shared headers with a visible app name. Launcher adapts its cards to the available width and font size, reduces empty card space, and improves result-text contrast.
+- Keep One and Auto Selector's main actions and progress visible while their options scroll. One supports a 600px minimum height and wraps file-type options to fit.
+- Expose Image Manager's Pick, Maybe, Reject, Clear, export, and handoff actions in the toolbar, retaining existing busy states and confirmation dialogs.
+- Make Auto Selector's match statuses shorter and fully reachable, with font-measured status columns, horizontal scrolling, and clearer XMP option layout.
+- Prevent long Frame output paths from expanding the window. Separate output selection from export actions, keep full paths in tooltips, and distinguish settings for all photos from adjustments to the selected photo.
+
+Validation: **568 source tests passed** (shared/One 250, Manager 46, Auto Selector 73, Launcher 25, Frame 174), plus compilation and diff checks. Native Windows spot checks covered all five apps using isolated synthetic fixtures. Layout regressions include small windows and simulated 100%/150% Tk font scaling; these do not replace packaged or multi-monitor DPI validation.
+
 ## 0.9.5 Beta — 2026-10-10
 
 This release makes the backup, culling, and RAW extraction workflow easier to follow and includes four integration-review fixes. Packages: `NDEX_v0.9.5.zip` and `NDEX_Setup_0.9.5.exe`. The channel remains `beta`; previous releases remain available separately.

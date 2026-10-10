@@ -29,6 +29,7 @@ from ndex_common.theme import (
     STAR,
     TEXT_MUTED,
     TEXT_PRIMARY,
+    Tooltip,
     apply_tk_theme,
     apply_window_icon,
     build_app_header,
@@ -398,9 +399,11 @@ class ImageManagerApp(tk.Tk):
         )
         header.pack(fill=tk.X)
         info = ttk.Frame(header, style="Header.TFrame")
-        info.pack(side=tk.RIGHT)
-        ttk.Label(info, textvariable=self.folder_status, style="Muted.TLabel").pack(anchor=tk.E)
-        ttk.Label(info, textvariable=self.catalog_status, style="Muted.TLabel").pack(anchor=tk.E)
+        info.grid(row=0, column=2, rowspan=2, sticky="e", padx=(12, 0))
+        folder_label = ttk.Label(info, textvariable=self.folder_status, style="Muted.TLabel", width=26, anchor="e")
+        folder_label.pack(anchor=tk.E)
+        Tooltip(folder_label, lambda: str(self.source_dir) if self.source_dir else self.folder_status.get())
+        ttk.Label(info, textvariable=self.catalog_status, style="Muted.TLabel", width=26, anchor="e").pack(anchor=tk.E)
 
         toolbar_outer = ttk.Frame(self, padding=(16, 0, 16, 10))
         toolbar_outer.pack(fill=tk.X)
@@ -443,6 +446,8 @@ class ImageManagerApp(tk.Tk):
         rating_filter.pack(side=tk.LEFT, padx=(0, 14))
         rating_filter.bind("<<ComboboxSelected>>", lambda event: self._on_filter_chosen(self.rating_filter, RATING_FILTER_LABELS, rating_filter))
         self.rating_filter_widget = rating_filter
+
+        self._build_culling_actions(toolbar_outer)
 
         self.paned = ttk.PanedWindow(self, orient=tk.HORIZONTAL)
         self.paned.pack(fill=tk.BOTH, expand=True, padx=16, pady=(0, 10))
@@ -604,6 +609,65 @@ class ImageManagerApp(tk.Tk):
         bottom.bind("<Configure>", self._layout_footer_hint)
         self.after(100, self.apply_layout_preset)
         self.after(120, self.apply_preview_background)
+        self._update_culling_actions()
+
+    def _build_culling_actions(self, parent: ttk.Frame) -> None:
+        self.actions_toolbar = ttk.Frame(parent, padding=(12, 0, 12, 8), style="Toolbar.TFrame")
+        self.actions_toolbar.pack(fill=tk.X)
+        self.actions_toolbar.columnconfigure(1, weight=1)
+        self.mark_actions = ttk.Frame(self.actions_toolbar, style="CardInner.TFrame")
+        self.mark_actions.grid(row=0, column=0, sticky="w")
+        self.mark_buttons: dict[str, ttk.Button] = {}
+        for status, text in (("Pick", "Pick (P)"), ("Maybe", "Maybe (M)"),
+                             ("Reject", "Reject (X)"), ("Unrated", "Clear (U)")):
+            button = ttk.Button(
+                self.mark_actions, text=text, width=0,
+                command=lambda mark=status: self.set_pick(mark),
+            )
+            button.pack(side=tk.LEFT, padx=(0, 6))
+            self.mark_buttons[status] = button
+        Tooltip(self.mark_buttons["Unrated"], "Clear the pick flag for the selected photos; keep their star ratings.")
+
+        self.workflow_actions = ttk.Frame(self.actions_toolbar, style="CardInner.TFrame")
+        self.workflow_actions.grid(row=0, column=1, sticky="e")
+        self.export_button = ttk.Button(
+            self.workflow_actions, text="Export Selected\u2026", width=0, command=self.open_export_dialog)
+        self.export_button.pack(side=tk.LEFT, padx=(0, 14))
+        ttk.Label(self.workflow_actions, text="Send picks to", style="Toolbar.TLabel").pack(side=tk.LEFT, padx=(0, 6))
+        self.send_selector_button = ttk.Button(
+            self.workflow_actions, text="Auto Selector", width=0, command=self.send_to_auto_selector)
+        self.send_selector_button.pack(side=tk.LEFT, padx=(0, 6))
+        self.send_frame_button = ttk.Button(
+            self.workflow_actions, text="Frame", width=0, command=self.send_picks_to_frame)
+        self.send_frame_button.pack(side=tk.LEFT)
+        for button, label in (
+            (self.export_button, "Export Selected\u2026"),
+            (self.send_selector_button, "Send Picks to Auto Selector"),
+            (self.send_frame_button, "Send Picks to Frame"),
+        ):
+            Tooltip(button, MENU_HINTS[label])
+        self._actions_stacked = False
+        self.actions_toolbar.bind("<Configure>", self._layout_culling_actions)
+
+    def _layout_culling_actions(self, event=None) -> None:
+        width = event.width if event is not None else self.actions_toolbar.winfo_width()
+        needed = self.mark_actions.winfo_reqwidth() + self.workflow_actions.winfo_reqwidth() + 40
+        stacked = width < needed
+        if stacked != self._actions_stacked:
+            self._actions_stacked = stacked
+            self.workflow_actions.grid_configure(
+                row=1 if stacked else 0, column=0 if stacked else 1,
+                columnspan=2 if stacked else 1, sticky="w" if stacked else "e",
+                pady=(6, 0) if stacked else 0,
+            )
+
+    def _update_culling_actions(self) -> None:
+        idle = self._active_job is None and not self._closing
+        has_selection = self.catalog is not None and bool(self.tree.selection())
+        for button in (*self.mark_buttons.values(), self.export_button):
+            button.configure(state=tk.NORMAL if idle and has_selection else tk.DISABLED)
+        for button in (self.send_selector_button, self.send_frame_button):
+            button.configure(state=tk.NORMAL if idle and self.catalog is not None else tk.DISABLED)
 
     def _bind_shortcuts(self) -> None:
         for key, status in (("p", "Pick"), ("m", "Maybe"), ("x", "Reject"), ("u", "Unrated")):
@@ -882,6 +946,8 @@ class ImageManagerApp(tk.Tk):
             self.work_progress.stop()
             self.work_progress.configure(mode="determinate", value=0)
         self._update_empty_state()
+
+        self._update_culling_actions()
 
     def _start_worker(self, kind: str, work) -> None:
         self._active_job = kind
@@ -1191,6 +1257,7 @@ class ImageManagerApp(tk.Tk):
     def update_selection_status(self) -> None:
         selected_count = len(self.tree.selection())
         self.selection_status.set(selection_status_text(selected_count, len(self.records)))
+        self._update_culling_actions()
 
     def show_shortcuts(self) -> None:
         messagebox.showinfo(

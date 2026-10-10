@@ -19,7 +19,10 @@ NDEX_FRAME_TITLE = "NDEX Frame"
 
 BRANDING_DIR = Path("assets") / "branding"
 APP_ICON_ICO = BRANDING_DIR / "ndex_icon.ico"
+APP_ICON_16 = BRANDING_DIR / "ndex_icon_16.png"
+APP_ICON_24 = BRANDING_DIR / "ndex_icon_24.png"
 APP_ICON_32 = BRANDING_DIR / "ndex_icon_32.png"
+APP_ICON_48 = BRANDING_DIR / "ndex_icon_48.png"
 APP_ICON_64 = BRANDING_DIR / "ndex_icon_64.png"
 APP_WORDMARK_HEADER = BRANDING_DIR / "ndex_wordmark_header.png"
 

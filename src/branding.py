@@ -7,7 +7,10 @@ as a re-export so existing imports and PyInstaller builds keep working.
 from __future__ import annotations
 
 from ndex_common.branding import (  # noqa: F401
+    APP_ICON_16,
+    APP_ICON_24,
     APP_ICON_32,
+    APP_ICON_48,
     APP_ICON_64,
     APP_ICON_ICO,
     APP_NAME,

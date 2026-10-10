@@ -12,7 +12,10 @@ from typing import Any, Callable
 import tkinter as tk
 from tkinter import ttk
 
-from ndex_common.branding import APP_ICON_32, APP_WORDMARK_HEADER, get_branding_asset_path
+from ndex_common.branding import (
+    APP_ICON_16, APP_ICON_24, APP_ICON_32, APP_ICON_48, APP_ICON_64,
+    APP_WORDMARK_HEADER, get_branding_asset_path,
+)
 
 # Canvas and surfaces
 APP_BG = "#F3F5F9"
@@ -57,8 +60,8 @@ SPACE_SM = 8
 SPACE_MD = 12
 SPACE_LG = 16
 SPACE_XL = 20
-HEADER_PAD = (20, 16, 20, 12)
-HEADER_PAD_COMPACT = (20, 8, 20, 2)
+HEADER_PAD = (20, 12, 20, 10)
+HEADER_PAD_COMPACT = (20, 8, 20, 8)
 BODY_PAD = 16
 
 _TK_THEME_APPLIED = "ndex.tk.theme.applied"
@@ -78,10 +81,13 @@ def load_brand_image(root: tk.Misc, relative_path: Path, holder: list[tk.PhotoIm
 
 
 def apply_window_icon(root: tk.Tk, holder: list[tk.PhotoImage]) -> None:
-    icon = load_brand_image(root, APP_ICON_32, holder)
-    if icon is not None:
+    icons = [
+        icon for path in (APP_ICON_16, APP_ICON_24, APP_ICON_32, APP_ICON_48, APP_ICON_64)
+        if (icon := load_brand_image(root, path, holder)) is not None
+    ]
+    if icons:
         try:
-            root.iconphoto(True, icon)
+            root.iconphoto(True, *icons)
         except tk.TclError:
             pass
 
@@ -94,22 +100,107 @@ def build_app_header(
     holder: list[tk.PhotoImage],
     compact: bool = False,
 ) -> ttk.Frame:
-    """Wordmark (or title) plus a muted tagline — same header in every Tk app.
-
-    ``compact`` shrinks the wordmark to two thirds and trims the padding, for
-    windows that need the vertical room.
-    """
+    """A small wordmark beside the app name, with the task description below."""
     header = ttk.Frame(parent, padding=HEADER_PAD_COMPACT if compact else HEADER_PAD, style="Header.TFrame")
+    header.columnconfigure(1, weight=1)
     wordmark = load_brand_image(parent, APP_WORDMARK_HEADER, holder)
-    if wordmark is not None and compact:
-        wordmark = wordmark.zoom(2, 2).subsample(3, 3)
-        holder.append(wordmark)
     if wordmark is not None:
-        ttk.Label(header, image=wordmark, style="Header.TLabel").pack(side=tk.LEFT)
-    else:
-        ttk.Label(header, text=title, style="Title.TLabel").pack(side=tk.LEFT)
-    ttk.Label(header, text=tagline, style="Tagline.TLabel").pack(side=tk.LEFT, padx=(14, 0), pady=(8, 0))
+        wordmark = wordmark.subsample(3, 3) if compact else wordmark.zoom(2, 2).subsample(5, 5)
+        holder.append(wordmark)
+        ttk.Label(header, image=wordmark, style="Header.TLabel").grid(row=0, column=0, padx=(0, 14))
+    title_label = ttk.Label(header, text=title, style="Title.TLabel")
+    title_label.grid(row=0, column=1, sticky="w")
+    description = ttk.Label(header, text=tagline, style="Tagline.TLabel", justify="left", wraplength=600)
+    description.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(2, 0))
+
+    def wrap_description(event: tk.Event) -> None:
+        description.configure(wraplength=max(120, event.width))
+
+    description.bind("<Configure>", wrap_description, add="+")
     return header
+
+
+class ScrollableFrame(ttk.Frame):
+    """A vertically scrolling form with keyboard focus and local wheel support.
+
+    Add widgets to ``content``. The surrounding frame can reserve space for
+    actions outside the scroll area, even when display scaling makes a form tall.
+    """
+
+    def __init__(
+        self,
+        parent: tk.Misc,
+        *,
+        style: str = "TFrame",
+        content_style: str = "TFrame",
+        background: str = APP_BG,
+    ) -> None:
+        super().__init__(parent, style=style)
+        self.columnconfigure(0, weight=1)
+        self.rowconfigure(0, weight=1)
+        self.canvas = tk.Canvas(self, background=background, highlightthickness=0, width=1, height=1)
+        self.canvas.grid(row=0, column=0, sticky="nsew")
+        self.scrollbar = ttk.Scrollbar(self, orient=tk.VERTICAL, command=self.canvas.yview)
+        self.scrollbar.grid(row=0, column=1, sticky="ns")
+        self.canvas.configure(yscrollcommand=self.scrollbar.set)
+        self.content = ttk.Frame(self.canvas, style=content_style)
+        self._window = self.canvas.create_window(0, 0, anchor="nw", window=self.content)
+        self.canvas.bind("<Configure>", self._fit_content)
+        self.content.bind("<Configure>", self._fit_content)
+        self._toplevel = self.winfo_toplevel()
+        self._bindings = {
+            "<MouseWheel>": self._toplevel.bind("<MouseWheel>", self._scroll, add="+"),
+            "<FocusIn>": self._toplevel.bind("<FocusIn>", self.reveal_focused_control, add="+"),
+        }
+        self.bind("<Destroy>", self._cleanup_bindings, add="+")
+
+    def _fit_content(self, _event: tk.Event | None = None) -> None:
+        width = self.canvas.winfo_width()
+        height = self.canvas.winfo_height()
+        needed = self.content.winfo_reqheight()
+        self.canvas.itemconfigure(self._window, width=width)
+        self.canvas.configure(scrollregion=(0, 0, width, max(needed, height)))
+        if needed > height > 1:
+            self.scrollbar.grid()
+        else:
+            self.scrollbar.grid_remove()
+
+    def _contains(self, widget: tk.Misc) -> bool:
+        return str(widget).startswith(str(self.content) + ".") or widget is self.content or widget is self.canvas
+
+    def _scroll(self, event: tk.Event) -> str | None:
+        if not self._contains(event.widget) or self.content.winfo_reqheight() <= self.canvas.winfo_height():
+            return None
+        if event.widget.winfo_class() in {"Text", "Treeview", "TCombobox", "TSpinbox"}:
+            return None
+        if event.delta:
+            direction = -1 if event.delta > 0 else 1
+            self.canvas.yview_scroll(direction * max(1, abs(int(event.delta / 120))), "units")
+            return "break"
+        return None
+
+    def reveal_focused_control(self, event: tk.Event) -> None:
+        widget = event.widget
+        if not self._contains(widget):
+            return
+        top = widget.winfo_rooty() - self.content.winfo_rooty()
+        bottom = top + widget.winfo_height()
+        visible_top = self.canvas.canvasy(0)
+        height = self.canvas.winfo_height()
+        # A canvas window can still report its previous height while a resize
+        # is pending; yview fractions always refer to the current scrollregion.
+        bounds = tuple(float(value) for value in self.canvas.cget("scrollregion").split())
+        total = max(1, bounds[3] - bounds[1]) if bounds else 1
+        if top < visible_top:
+            self.canvas.yview_moveto(top / total)
+        elif bottom > visible_top + height:
+            self.canvas.yview_moveto((bottom - height) / total)
+
+    def _cleanup_bindings(self, event: tk.Event) -> None:
+        if event.widget is self:
+            for sequence, binding in self._bindings.items():
+                if binding:
+                    self._toplevel.unbind(sequence, binding)
 
 
 class Tooltip:

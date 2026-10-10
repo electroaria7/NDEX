@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QListWidget,
@@ -22,6 +23,8 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QProgressBar,
     QPushButton,
+    QScrollArea,
+    QSizePolicy,
     QSlider,
     QSpinBox,
     QSplitter,
@@ -38,6 +41,7 @@ from ndex_frame.core.geometry import resolve_canvas
 from ndex_frame.core.models import AspectRatio, FramePreset, OutputProfile, RenderPlan, SourceItem
 from ndex_frame.services.export_job import ExportRequest, ExportResult, plan_export
 from ndex_frame.services.presets import PresetStore
+from ndex_frame.ui.elided_label import ElidedLabel
 from ndex_frame.ui.preset_dialog import (
     ExportCompletionDialog,
     ExportPreflightDialog,
@@ -170,13 +174,15 @@ class MainWindow(QMainWindow):
         left_layout = QVBoxLayout(left)
         left_layout.setContentsMargins(14, 16, 12, 16)
         left_layout.setSpacing(8)
-        images_label = QLabel("Images")
-        images_label.setObjectName("sectionLabel")
+        self.images_label = QLabel("Images")
+        self.images_label.setObjectName("sectionLabel")
         self.thumbnail_view = QListWidget()
-        images_label.setBuddy(self.thumbnail_view)
+        self.images_label.setBuddy(self.thumbnail_view)
         self.thumbnail_view.setAccessibleName("Source Images")
         self.thumbnail_view.setMinimumWidth(190)
-        left_layout.addWidget(images_label)
+        self.thumbnail_view.setTextElideMode(Qt.TextElideMode.ElideMiddle)
+        self.thumbnail_view.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        left_layout.addWidget(self.images_label)
         left_layout.addWidget(self.thumbnail_view)
 
         self.preview_widget = PreviewWidget()
@@ -191,8 +197,9 @@ class MainWindow(QMainWindow):
         frame_layout.setVerticalSpacing(10)
         frame_layout.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
         frame_layout.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
-        frame_heading = QLabel("Frame")
+        frame_heading = QLabel("All photos")
         frame_heading.setObjectName("sectionLabel")
+        frame_heading.setToolTip("Ratio and background apply to every photo.")
         frame_layout.addRow(frame_heading)
         ratio_row = QWidget()
         ratio_layout = QHBoxLayout(ratio_row)
@@ -219,6 +226,11 @@ class MainWindow(QMainWindow):
         # Keep the label readable and give swatches + Custom a full-width row.
         frame_layout.addRow("Background", self.background_label)
         frame_layout.addRow("", background_presets)
+        selected_heading = QLabel("Selected photo")
+        selected_heading.setObjectName("sectionLabel")
+        selected_heading.setContentsMargins(0, 12, 0, 0)
+        selected_heading.setToolTip("Photo size and position apply only to the selected photo.")
+        frame_layout.addRow(selected_heading)
         scale_row = QWidget()
         scale_layout = QHBoxLayout(scale_row)
         scale_layout.setContentsMargins(0, 0, 0, 0)
@@ -241,52 +253,72 @@ class MainWindow(QMainWindow):
             spin.setRange(-1.0, 1.0)
             spin.setSingleStep(0.05)
             spin.setDecimals(2)
-        frame_layout.addRow("X", self.x_spin)
-        frame_layout.addRow("Y", self.y_spin)
-        self.reset_override_button = QPushButton("Reset Override")
-        self.apply_all_button = QPushButton("Apply Current Framing to All")
+        self.x_spin.setAccessibleName("Horizontal position of selected photo")
+        self.y_spin.setAccessibleName("Vertical position of selected photo")
+        frame_layout.addRow("Horizontal", self.x_spin)
+        frame_layout.addRow("Vertical", self.y_spin)
+        self.reset_override_button = QPushButton("Reset Photo Framing")
+        self.reset_override_button.setToolTip("Restore this photo's size and position to the current frame defaults.")
+        self.apply_all_button = QPushButton("Apply Framing to All")
+        self.apply_all_button.setToolTip("Use this photo's size and position for every photo, replacing individual adjustments.")
         self.save_frame_button = QPushButton("Save as Frame Preset")
         frame_layout.addRow(self.reset_override_button)
         frame_layout.addRow(self.apply_all_button)
         frame_layout.addRow(self.save_frame_button)
 
+        self.frame_scroll = QScrollArea()
+        self.frame_scroll.setWidgetResizable(True)
+        self.frame_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.frame_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.frame_scroll.setMinimumWidth(290)
+        self.frame_scroll.setWidget(self.frame_panel)
+
         splitter.addWidget(left)
         splitter.addWidget(self.preview_widget)
-        splitter.addWidget(self.frame_panel)
+        splitter.addWidget(self.frame_scroll)
+        splitter.setChildrenCollapsible(False)
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
         splitter.setStretchFactor(2, 0)
-        splitter.setSizes([210, 690, 280])
+        splitter.setSizes([216, 664, 300])
         root_layout.addWidget(splitter, 1)
 
         footer = QWidget()
         footer.setObjectName("footerBar")
         footer.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        bottom = QHBoxLayout(footer)
+        bottom = QVBoxLayout(footer)
         bottom.setContentsMargins(16, 10, 16, 12)
-        bottom.setSpacing(10)
+        bottom.setSpacing(8)
+        output_row = QHBoxLayout()
+        output_row.setSpacing(10)
+        actions_row = QHBoxLayout()
+        actions_row.setSpacing(10)
         self.output_folder_button = QPushButton("Output Folder")
-        self.output_folder_label = QLabel("Not selected")
+        self.output_folder_label = ElidedLabel("Not selected")
         self.output_folder_label.setObjectName("mutedLabel")
-        self.result_summary_label = QLabel()
+        self.output_folder_label.setAccessibleName("Output folder")
+        self.result_summary_label = ElidedLabel()
         self.result_summary_label.setObjectName("mutedLabel")
         self.export_progress_bar = QProgressBar()
         self.export_progress_bar.setAccessibleName("Export progress")
         self.export_progress_bar.setTextVisible(True)
         self.export_progress_bar.setMinimumWidth(180)
+        self.export_progress_bar.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
         self.export_progress_bar.hide()
         self.export_selected_button = QPushButton("Export Selected")
         self.export_all_button = QPushButton("Export All")
         self.export_all_button.setObjectName("primaryButton")
         self.cancel_button = QPushButton("Cancel")
         self.cancel_button.hide()
-        bottom.addWidget(self.output_folder_button)
-        bottom.addWidget(self.output_folder_label, 1)
-        bottom.addWidget(self.result_summary_label)
-        bottom.addWidget(self.export_progress_bar, 1)
-        bottom.addWidget(self.export_selected_button)
-        bottom.addWidget(self.export_all_button)
-        bottom.addWidget(self.cancel_button)
+        output_row.addWidget(self.output_folder_button)
+        output_row.addWidget(self.output_folder_label, 1)
+        actions_row.addWidget(self.result_summary_label, 1)
+        actions_row.addWidget(self.export_progress_bar, 1)
+        actions_row.addWidget(self.export_selected_button)
+        actions_row.addWidget(self.export_all_button)
+        actions_row.addWidget(self.cancel_button)
+        bottom.addLayout(output_row)
+        bottom.addLayout(actions_row)
         root_layout.addWidget(footer)
         self.setCentralWidget(root)
 
@@ -597,10 +629,12 @@ class MainWindow(QMainWindow):
     @Slot()
     def _refresh_sources(self) -> None:
         selected = self.controller.state.selected_path
+        self.images_label.setText(f"Images ({len(self.controller.state.sources)})")
         with QSignalBlocker(self.thumbnail_view):
             self.thumbnail_view.clear()
             for source in self.controller.state.sources:
                 item = QListWidgetItem(f"{source.path.name}\n{self._status_for(source.path)}")
+                item.setToolTip(str(source.path))
                 item.setData(Qt.ItemDataRole.UserRole, source.path)
                 self.thumbnail_view.addItem(item)
                 if source.path == selected:
@@ -652,8 +686,22 @@ class MainWindow(QMainWindow):
             self.output_profile_combo,
             self.manage_presets_button,
             self.save_frame_button,
+            self.ratio_width_spin,
+            self.ratio_height_spin,
+            self.custom_background_button,
+            *self.ratio_preset_buttons,
+            *self.background_preset_buttons,
         ):
             control.setEnabled(not exporting)
+        has_selection = state.selected_path is not None and not exporting
+        for control in (
+            self.scale_slider, self.scale_spin, self.x_spin, self.y_spin,
+            self.apply_all_button, *self.photo_size_preset_buttons,
+        ):
+            control.setEnabled(has_selection)
+        self.reset_override_button.setEnabled(
+            has_selection and state.is_modified(state.selected_path)
+        )
         self.export_all_button.setEnabled(can_export)
         self.export_selected_button.setEnabled(can_export and state.selected_path is not None)
 
@@ -829,7 +877,8 @@ class MainWindow(QMainWindow):
         name = getattr(getattr(progress, "source", None), "name", "")
         self.export_progress_bar.setRange(0, total)
         self.export_progress_bar.setValue(index)
-        self.export_progress_bar.setFormat(f"{name} · %v / %m" if name else "%v / %m")
+        self.export_progress_bar.setFormat("%v / %m")
+        self.export_progress_bar.setToolTip(name)
         self.export_progress_bar.show()
         self.statusBar().showMessage(f"{name} · {index} / {total}".strip(" ·"))
 

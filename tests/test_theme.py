@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import tkinter as tk
+from tkinter import ttk
+from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 
 from ndex_common import theme
 from ndex_launcher.main import COMPACT_LAYOUT_WIDTH, LauncherApp
@@ -29,16 +32,82 @@ class ThemeTokenTests(unittest.TestCase):
         self.assertIn("18", font)
         self.assertIn("bold", font)
 
-    def test_build_app_header_falls_back_to_title_text(self) -> None:
+    def test_header_identifies_the_app_with_or_without_the_wordmark(self) -> None:
         root = tk.Tk()
         self.addCleanup(root.destroy)
         theme.apply_tk_theme(root)
-        holder: list[tk.PhotoImage] = []
-        header = theme.build_app_header(root, title="NDEX One", tagline="Backup", holder=holder)
-        header.pack()
-        root.update_idletasks()
-        labels = [child for child in header.winfo_children() if isinstance(child, tk.Widget)]
-        self.assertGreaterEqual(len(labels), 1)
+        for image in (None, tk.PhotoImage(master=root, width=305, height=58)):
+            with self.subTest(has_image=image is not None), patch.object(theme, "load_brand_image", return_value=image):
+                holder: list[tk.PhotoImage] = []
+                header = theme.build_app_header(root, title="NDEX One", tagline="Backup", holder=holder)
+                header.pack()
+                root.update_idletasks()
+                labels = [child for child in header.winfo_children() if isinstance(child, ttk.Label)]
+                self.assertIn("NDEX One", [label.cget("text") for label in labels])
+                if image is not None:
+                    self.assertLessEqual(holder[-1].height(), 24)
+                    self.assertLessEqual(holder[-1].width(), 122)
+                header.destroy()
+
+    def test_window_icon_supplies_multiple_sizes(self) -> None:
+        root = tk.Tk()
+        self.addCleanup(root.destroy)
+        holder = []
+        with patch.object(root, "iconphoto") as iconphoto:
+            theme.apply_window_icon(root, holder)
+        self.assertEqual([icon.width() for icon in holder], [16, 24, 32, 48, 64])
+        iconphoto.assert_called_once_with(True, *holder)
+
+    def test_header_tagline_uses_its_allocated_width_and_respects_side_info(self) -> None:
+        root = tk.Tk()
+        self.addCleanup(root.destroy)
+        theme.apply_tk_theme(root)
+        root.geometry("880x520")
+        header = theme.build_app_header(
+            root, title="NDEX Launcher",
+            tagline="Start with 01 Backup. Each step hands its folder to the next.",
+            holder=[], compact=True,
+        )
+        header.pack(fill="x")
+        root.update()
+        description = next(label for label in header.winfo_children()
+                           if isinstance(label, ttk.Label) and str(label.cget("style")) == "Tagline.TLabel")
+        reference = ttk.Label(root, text="One line", style="Tagline.TLabel")
+        self.assertEqual(description.winfo_height(), reference.winfo_reqheight())
+        self.assertGreater(description.winfo_width(), 600)
+        info = ttk.Label(header, text="Folder status", width=28)
+        info.grid(row=0, column=2, rowspan=2, sticky="e", padx=(12, 0))
+        root.update()
+        self.assertLessEqual(description.winfo_x() + description.winfo_width(), info.winfo_x())
+        self.assertEqual(int(description.cget("wraplength")), description.winfo_width())
+
+
+class ScrollableFormTests(unittest.TestCase):
+    def test_focus_reveals_options_without_moving_fixed_actions(self) -> None:
+        root = tk.Tk()
+        self.addCleanup(root.destroy)
+        theme.apply_tk_theme(root)
+        root.geometry("360x240")
+        root.columnconfigure(0, weight=1)
+        root.rowconfigure(0, weight=1)
+        viewport = theme.ScrollableFrame(root)
+        viewport.grid(row=0, column=0, sticky="nsew")
+        for index in range(20):
+            option = ttk.Entry(viewport.content)
+            option.pack(pady=3)
+        action = ttk.Button(root, text="Start")
+        action.grid(row=1, column=0)
+        root.update()
+        action_y = action.winfo_rooty()
+        self.assertTrue(viewport.scrollbar.winfo_manager())
+        viewport.reveal_focused_control(SimpleNamespace(widget=option))
+        root.update()
+        self.assertGreaterEqual(option.winfo_rooty(), viewport.canvas.winfo_rooty())
+        self.assertLessEqual(option.winfo_rooty() + option.winfo_height(), action_y)
+        self.assertEqual(action.winfo_rooty(), action_y)
+        root.geometry("360x1800")
+        root.update()
+        self.assertFalse(viewport.scrollbar.winfo_manager())
 
 
 class ThemedLauncherTests(unittest.TestCase):
