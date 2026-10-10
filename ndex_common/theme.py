@@ -7,7 +7,7 @@ dark on purpose so images read clearly.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import tkinter as tk
 from tkinter import ttk
@@ -20,6 +20,11 @@ CARD_BG = "#FFFFFF"
 SURFACE_SUNKEN = "#E8EDF4"
 BORDER = "#D5DCE6"
 BORDER_STRONG = "#C3CDDB"
+# Secondary buttons: a tinted face and a firmer edge so they read as buttons
+# on both the app canvas and white cards.
+BUTTON_BG = "#EDF1F7"
+BUTTON_HOVER_BG = "#DCE5F2"
+BUTTON_BORDER = "#9AA9BF"
 
 # Text
 TEXT_PRIMARY = "#1B2433"
@@ -53,6 +58,7 @@ SPACE_MD = 12
 SPACE_LG = 16
 SPACE_XL = 20
 HEADER_PAD = (20, 16, 20, 12)
+HEADER_PAD_COMPACT = (20, 8, 20, 2)
 BODY_PAD = 16
 
 _TK_THEME_APPLIED = "ndex.tk.theme.applied"
@@ -64,7 +70,7 @@ def load_brand_image(root: tk.Misc, relative_path: Path, holder: list[tk.PhotoIm
     if not path.exists():
         return None
     try:
-        image = tk.PhotoImage(file=str(path))
+        image = tk.PhotoImage(master=root, file=str(path))
     except tk.TclError:
         return None
     holder.append(image)
@@ -86,16 +92,97 @@ def build_app_header(
     title: str,
     tagline: str,
     holder: list[tk.PhotoImage],
+    compact: bool = False,
 ) -> ttk.Frame:
-    """Wordmark (or title) plus a muted tagline — same header in every Tk app."""
-    header = ttk.Frame(parent, padding=HEADER_PAD, style="Header.TFrame")
+    """Wordmark (or title) plus a muted tagline — same header in every Tk app.
+
+    ``compact`` shrinks the wordmark to two thirds and trims the padding, for
+    windows that need the vertical room.
+    """
+    header = ttk.Frame(parent, padding=HEADER_PAD_COMPACT if compact else HEADER_PAD, style="Header.TFrame")
     wordmark = load_brand_image(parent, APP_WORDMARK_HEADER, holder)
+    if wordmark is not None and compact:
+        wordmark = wordmark.zoom(2, 2).subsample(3, 3)
+        holder.append(wordmark)
     if wordmark is not None:
         ttk.Label(header, image=wordmark, style="Header.TLabel").pack(side=tk.LEFT)
     else:
         ttk.Label(header, text=title, style="Title.TLabel").pack(side=tk.LEFT)
     ttk.Label(header, text=tagline, style="Tagline.TLabel").pack(side=tk.LEFT, padx=(14, 0), pady=(8, 0))
     return header
+
+
+class Tooltip:
+    """A small hover tooltip. ``text`` may be a string or a callable returning one."""
+
+    DELAY_MS = 450
+
+    def __init__(self, widget: tk.Misc, text: "str | Callable[[], str]") -> None:
+        self.widget = widget
+        self.text = text
+        self._tip: tk.Toplevel | None = None
+        self._after: str | None = None
+        widget.bind("<Enter>", self._schedule, add="+")
+        widget.bind("<Leave>", self._hide, add="+")
+        widget.bind("<ButtonPress>", self._hide, add="+")
+        widget.bind("<Destroy>", self._hide, add="+")
+
+    def current_text(self) -> str:
+        return self.text() if callable(self.text) else str(self.text)
+
+    def _schedule(self, _event: object = None) -> None:
+        self._cancel()
+        try:
+            self._after = self.widget.after(self.DELAY_MS, self._show)
+        except tk.TclError:
+            self._after = None
+
+    def _cancel(self) -> None:
+        if self._after is not None:
+            try:
+                self.widget.after_cancel(self._after)
+            except tk.TclError:
+                pass
+            self._after = None
+
+    def _show(self) -> None:
+        self._after = None
+        text = self.current_text()
+        if not text or self._tip is not None:
+            return
+        try:
+            tip = tk.Toplevel(self.widget)
+            tip.wm_overrideredirect(True)
+            x = self.widget.winfo_rootx() + 12
+            y = self.widget.winfo_rooty() + self.widget.winfo_height() + 4
+            tip.wm_geometry(f"+{x}+{y}")
+            tk.Label(
+                tip,
+                text=text,
+                justify="left",
+                wraplength=520,
+                background=TEXT_PRIMARY,
+                foreground=CARD_BG,
+                font=(FONT_FAMILY, FONT_SIZE),
+                padx=8,
+                pady=4,
+            ).pack()
+        except tk.TclError:
+            return
+        self._tip = tip
+
+    def _hide(self, _event: object = None) -> None:
+        self._cancel()
+        if self._tip is not None:
+            try:
+                self._tip.destroy()
+            except tk.TclError:
+                pass
+            self._tip = None
+
+
+def add_tooltip(widget: tk.Misc, text: "str | Callable[[], str]") -> Tooltip:
+    return Tooltip(widget, text)
 
 
 def style_text_widget(widget: tk.Text, *, card: bool = True) -> None:
@@ -130,7 +217,7 @@ def apply_tk_theme(root: tk.Misc) -> ttk.Style:
     font_title = (FONT_FAMILY, FONT_TITLE_SIZE, "bold")
     font_section = (FONT_FAMILY, FONT_SECTION_SIZE, "bold")
     font_card_title = (FONT_FAMILY, 12, "bold")
-    font_step = (FONT_FAMILY, 20, "bold")
+    font_step = (FONT_FAMILY, 18, "bold")
     font_tagline = (FONT_FAMILY, FONT_SIZE)
 
     style.configure("TFrame", background=APP_BG)
@@ -153,16 +240,19 @@ def apply_tk_theme(root: tk.Misc) -> ttk.Style:
     style.configure("CardTitle.TLabel", background=CARD_BG, foreground=TEXT_PRIMARY, font=font_card_title)
     style.configure("CardSection.TLabel", background=CARD_BG, foreground=TEXT_PRIMARY, font=font_section)
     style.configure("Toolbar.TLabel", background=CARD_BG, foreground=TEXT_MUTED, font=font_ui_bold)
+    style.configure("CardDanger.TLabel", background=CARD_BG, foreground=DANGER, font=font_ui)
+    style.configure("Danger.TLabel", background=APP_BG, foreground=DANGER, font=font_ui)
+    style.configure("Small.Muted.TLabel", background=APP_BG, foreground=TEXT_MUTED, font=(FONT_FAMILY, FONT_SIZE - 1))
     style.configure("StepNumber.TLabel", background=CARD_BG, foreground=ACCENT, font=font_step)
     style.configure("Arrow.TLabel", background=APP_BG, foreground=BORDER_STRONG, font=(FONT_FAMILY, 16))
 
     style.configure(
         "TButton",
-        background=CARD_BG,
+        background=BUTTON_BG,
         foreground=TEXT_PRIMARY,
-        bordercolor=BORDER,
-        darkcolor=CARD_BG,
-        lightcolor=CARD_BG,
+        bordercolor=BUTTON_BORDER,
+        darkcolor=BUTTON_BORDER,
+        lightcolor=BUTTON_BG,
         padding=(12, 7),
         font=font_ui,
         relief="flat",
@@ -170,9 +260,11 @@ def apply_tk_theme(root: tk.Misc) -> ttk.Style:
     )
     style.map(
         "TButton",
-        background=[("active", SURFACE_SUNKEN), ("disabled", SURFACE_SUNKEN)],
+        background=[("pressed", BUTTON_BORDER), ("active", BUTTON_HOVER_BG), ("disabled", APP_BG)],
         foreground=[("disabled", TEXT_FAINT)],
-        bordercolor=[("active", BORDER_STRONG), ("disabled", BORDER)],
+        bordercolor=[("active", ACCENT), ("disabled", BORDER)],
+        lightcolor=[("pressed", BUTTON_BORDER), ("active", BUTTON_HOVER_BG), ("disabled", APP_BG)],
+        darkcolor=[("active", ACCENT), ("disabled", BORDER)],
     )
     style.configure(
         "Accent.TButton",

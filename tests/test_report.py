@@ -317,5 +317,46 @@ class LatestByAppTests(unittest.TestCase):
 
 
 
+
+class DisplayHelperTests(unittest.TestCase):
+    def _report(self, **overrides):
+        fields = {
+            "manifest_path": Path("backup-1.json"),
+            "type": "backup",
+            "app": "ndex_one",
+            "created_at": "2026-10-10T08:00:00Z",
+            "counts": {"copied": 3},
+        }
+        fields.update(overrides)
+        return report.JobReport(**fields)
+
+    def test_problem_line_is_name_dash_reason_with_folder_apart(self) -> None:
+        item = report.JobItem(path="E:\\DCIM\\100CANON\\IMG_1.JPG", status="failed", detail="Access is denied")
+        self.assertEqual(item.name, "IMG_1.JPG")
+        self.assertEqual(item.folder, "E:\\DCIM\\100CANON")
+        self.assertEqual(item.problem_line, "IMG_1.JPG \u2014 Access is denied")
+        self.assertEqual(report.JobItem(path="a/b.CR3", status="failed").problem_line, "b.CR3")
+
+    def test_list_label_marks_problem_jobs(self) -> None:
+        bad = self._report(counts={"copied": 3, "failed": 2})
+        good = self._report()
+        self.assertTrue(bad.list_label.startswith("\u26a0 Backup - 2 failed"))
+        self.assertFalse(good.list_label.startswith("\u26a0"))
+        self.assertIn("3 copied", good.list_label)
+
+    def test_default_index_prefers_the_newest_job_with_problems(self) -> None:
+        clean_new = self._report(manifest_path=Path("c-new.json"))
+        bad = self._report(manifest_path=Path("bad.json"), counts={"failed": 1})
+        bad_old = self._report(manifest_path=Path("bad-old.json"), counts={"failed": 4})
+        self.assertEqual(report.default_index([clean_new, bad, bad_old]), 1)
+
+    def test_default_index_falls_back_to_newest_and_honours_a_named_job(self) -> None:
+        clean = [self._report(manifest_path=Path("a.json")), self._report(manifest_path=Path("b.json"))]
+        self.assertEqual(report.default_index(clean), 0)
+        self.assertEqual(report.default_index(clean, Path("b.json")), 1)
+        bad = self._report(manifest_path=Path("bad.json"), counts={"failed": 1})
+        self.assertEqual(report.default_index([clean[0], bad], Path("a.json")), 0)
+
+
 if __name__ == "__main__":
     unittest.main()
