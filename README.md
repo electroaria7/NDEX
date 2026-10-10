@@ -23,7 +23,7 @@ This is a **public beta**, not a 1.0 product. EXEs are unsigned, so Windows Smar
 - Launcher fits its four workflow cards in one row, shows shorter folder names, and highlights problem jobs. Job Results keeps per-file reasons visible and makes retry/folder actions easier to reach.
 - One explains backup options, shows total size and free space, confirms the analyzed destination, and offers completion actions that use the actual destination of a retried job.
 - Image Manager adds clearer filters and pick/star indicators, single-step arrow navigation, optional advance after marking, and improved preview/fullscreen feedback. Typing in a filter no longer changes photo marks.
-- Auto Selector adds **Choose RAW?** for ambiguous matches, matching explanations, a persistent picked-file handoff, clearer duplicate/XMP controls, and completion actions for the exact finished job.
+- Auto Selector adds **Choose RAW…** for ambiguous matches, matching explanations, a persistent picked-file handoff, clearer duplicate/XMP controls, and completion actions for the exact finished job.
 - The 0.9.4 background jobs, cancellation, safe closing, duplicate RAW reuse, and file-preservation fixes remain included. Frame is rebuilt with the suite version; its application behavior is unchanged in this patch.
 
 Cancellation takes effect after the current file's copy, verification, or render, or the current metadata batch. One waits for analysis to finish when closing during analysis.

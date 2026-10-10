@@ -1,7 +1,7 @@
 # Shared Assets and Build
 
 type: architecture-note
-updated: 2026-09-02
+updated: 2026-10-10
 
 ## Shared Branding
 
@@ -15,10 +15,10 @@ NDEX_LAUNCHER_TITLE = "NDEX Launcher"
 NDEX_FRAME_TITLE = "NDEX Frame"
 ```
 
-버전 값도 같은 모듈에 있다.
+버전 값의 원본은 `ndex_common/version.py`이며 브랜딩 모듈에서 가져온다.
 
 ```text
-NDEX_VERSION = "0.9.3"
+NDEX_VERSION = "0.9.5"
 NDEX_CHANNEL = "beta"
 ```
 
