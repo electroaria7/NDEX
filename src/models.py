@@ -37,6 +37,12 @@ class ScanSummary:
     date_range: tuple[datetime | None, datetime | None]
     preview_rows: list[PreviewRow]
     folder_tree_lines: list[str]
+    # Bytes of all files to copy, and free bytes where the backup goes
+    # (None when the destination's disk cannot be read).
+    total_size: int = 0
+    free_space: int | None = None
+    # Files with no capture date in their metadata (modified date was used).
+    fallback_count: int = 0
 
 
 @dataclass(slots=True)
