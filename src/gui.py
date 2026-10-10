@@ -14,7 +14,7 @@ from .config import ConfigManager
 from .file_types import FILE_TYPE_ORDER, RAW_BRANDS, get_file_type_definitions, get_file_type_label, get_visible_file_types
 from .logger import AppLogger
 from .metadata import MetadataExtractor
-from .scanner import analyze_source, build_scan_items
+from .scanner import analyze_source, build_scan_items, same_folder
 
 from ndex_common.launch import launch_app
 from ndex_common.theme import apply_tk_theme, apply_window_icon, build_app_header, style_text_widget
@@ -62,6 +62,7 @@ class DSBApp(tk.Tk):
         self.worker_thread: threading.Thread | None = None
         self.cancel_event = threading.Event()
         self.is_busy = False
+        self.is_analyzing = False
         self.pending_analysis: dict | None = None
         self.pending_backup: dict | None = None
 
@@ -350,6 +351,12 @@ class DSBApp(tk.Tk):
             return
         if not self._destination_usable(destination):
             return
+        if same_folder(source, destination):
+            messagebox.showerror(
+                "Invalid Destination",
+                "The backup destination must be different from the source folder.",
+            )
+            return
         selected_types = self._selected_types()
         if not selected_types:
             messagebox.showwarning("No File Types", "Select at least one file type to scan.")
@@ -362,6 +369,8 @@ class DSBApp(tk.Tk):
             "backup_root": destination,
             "enabled_types": selected_types,
         }
+        # The analysis loop has no cancellation point, so Cancel stays disabled.
+        self.is_analyzing = True
         self._set_busy(True, "Analyzing files...")
         self._run_worker(self._analyze_worker)
 
@@ -433,7 +442,7 @@ class DSBApp(tk.Tk):
         self.ui_queue.put(("backup_done", result))
 
     def _cancel_task(self) -> None:
-        if self.is_busy:
+        if self.is_busy and not self.is_analyzing:
             self.cancel_event.set()
             self.status_var.set("Cancel requested. Waiting for current file to finish...")
 
@@ -567,6 +576,9 @@ class DSBApp(tk.Tk):
                         f"Skipped: {result.skipped}, "
                         f"Errors: {result.errors}"
                     )
+                if not result.dry_run:
+                    # Cancelled runs are recorded too: the files already copied
+                    # must show in Job Results and the rest must be retryable.
                     self._record_backup_session(result)
                 self._render_backup_result(result)
                 self._set_busy(False, status)
@@ -664,6 +676,7 @@ class DSBApp(tk.Tk):
         self.is_busy = busy
         self.status_var.set(status)
         if not busy:
+            self.is_analyzing = False
             self.progress_var.set(0.0)
         self._update_button_states()
 
@@ -674,7 +687,9 @@ class DSBApp(tk.Tk):
         self.analyze_button.config(state="disabled" if self.is_busy or not has_paths else "normal")
         self.preview_button.config(state="disabled" if self.is_busy or not has_analysis else "normal")
         self.backup_button.config(state="disabled" if self.is_busy or not has_analysis else "normal")
-        self.cancel_button.config(state="normal" if self.is_busy else "disabled")
+        self.cancel_button.config(
+            state="normal" if self.is_busy and not self.is_analyzing else "disabled"
+        )
         destination_ready = (
             "disabled" if self.is_busy or not self.destination_var.get().strip() else "normal"
         )
