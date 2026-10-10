@@ -1,5 +1,21 @@
 # NDEX Patch Notes
 
+## Unreleased — 2026-10-09 audit fixes
+
+- Read ExifTool output as UTF-8 so RAW capture dates are correct for Korean (non-ASCII) folder and file names; these files were previously dated from file modification time. Image Manager metadata reads use the same fix.
+- Send to Auto Selector hands off only the JPGs picked in Image Manager (`--handoff`), excluding `.dsb_cache` thumbnails, so rejected RAWs can no longer be selected.
+- Auto Selector prefers an exact same-name RAW over suffixed copies and ignores `._` AppleDouble files; camera-ID matching now requires a boundary, so `IMG_1234.jpg` no longer matches `IMG_12345.CR3` or `Trip_IMG_1234.CR3`.
+- Auto Selector copies each RAW at most once per run, and under the rename policy skips a destination that is already an identical copy (writing an XMP there only if it has no sidecar yet). The working folder is excluded when it sits inside the RAW source.
+- Count an Auto Selector XMP write failure once as a failure, not as both a copy and a failure, so re-runs do not duplicate RAWs.
+- Read settings files with a UTF-8 BOM correctly; an unreadable `settings.json` is preserved as `settings.json.corrupt-<timestamp>` and recovered from `.bak` instead of being overwritten with empty settings.
+- Frame converts CMYK JPEG/TIFF with embedded ICC from their source profile, falling back to default conversion with a warning; 16-bit grayscale no longer clips to white; a non-UTF-8 user preset no longer prevents startup; a bad background preset no longer fails every file.
+- Frame export records the output folder and preset captured at job start, and locks related controls while exporting.
+- Image Manager pairs RAW and JPG by folder plus file name; thumbnail cache keys include modification time and size and are written atomically; backup completion resets only when a file has actually changed.
+- Image Manager XMP export removes previous NDEX labels and keywords before writing the current pick state, including for images that were un-picked.
+- Image Manager removes catalog rows for deleted files, keeps overlapping scans from mixing results, and applies multi-selection Pick to every selected image.
+- Record cancelled NDEX One backups in Job Results; files that did not run are listed as "not run: cancelled" so they can be retried. Target folders inside the source are excluded, and a target equal to the source is rejected.
+- Behaviour change: RAW files with a prefix before the camera ID (e.g. `20240101_IMG_1234.CR3`) are no longer matched by camera ID and match only the exact file name. Send to Auto Selector shows a message instead of opening Auto Selector when no JPGs are picked.
+
 ## 0.9.3 Beta — 2026-09-06
 
 - Mark Image Manager backup completion only for files successfully copied, and record per-file failures in Job Results.
