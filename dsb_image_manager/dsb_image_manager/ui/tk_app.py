@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import queue
 import threading
 import time
@@ -7,6 +8,7 @@ import tkinter as tk
 from dataclasses import replace
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
+from tkinter import font as tkfont
 
 from PIL import Image, ImageOps, ImageTk
 
@@ -45,12 +47,156 @@ PREVIEW_BACKGROUNDS = {
     "Light Gray": "#d1d5db",
 }
 TREE_COLUMNS = {
-    "name": {"label": "File", "sort_key": "file_name", "width": 260},
-    "type": {"label": "Type", "sort_key": "media_type", "width": 58},
-    "pick": {"label": "Pick", "sort_key": "pick_status", "width": 82},
-    "rating": {"label": "Rating", "sort_key": "rating", "width": 70},
-    "date": {"label": "Capture Date", "sort_key": "capture_datetime", "width": 158},
+    "state": {"label": "", "sort_key": "pick_status", "width": 24, "minwidth": 24, "stretch": False,
+              "anchor": "center", "indicator": False},
+    "name": {"label": "File", "sort_key": "file_name", "width": 120, "minwidth": 84, "stretch": True},
+    "type": {"label": "Type", "sort_key": "media_type", "width": 42, "minwidth": 42, "stretch": False},
+    "pick": {"label": "Pick", "sort_key": "pick_status", "width": 48, "minwidth": 48, "stretch": False},
+    "rating": {"label": "\u2605", "sort_key": "rating", "width": 64, "minwidth": 64, "stretch": False},
+    "date": {"label": "Date", "sort_key": "capture_datetime", "width": 64, "minwidth": 64, "stretch": False},
 }
+# Tints are a second cue only; the first column carries the pick glyph.
+PICK_TINTS = {"Pick": "#d2efd5", "Maybe": "#ffeeb0", "Reject": "#f8cfcf"}
+PICK_BADGES = {
+    "Pick": ("\u2713 PICK", "#15803d"),
+    "Maybe": ("? MAYBE", "#b45309"),
+    "Reject": ("\u2715 REJECT", "#b91c1c"),
+    "Unrated": ("UNRATED", "#4b5563"),
+}
+FILE_FILTER_LABELS = (
+    ("all", "All files"),
+    ("paired", "Pairs (RAW+JPG)"),
+    ("raw", "RAW only"),
+    ("jpg", "JPG only"),
+    ("raw_only", "Unpaired RAW"),
+    ("jpg_only", "Unpaired JPG"),
+    ("proxy_failed", "Preview failed"),
+)
+PICK_FILTER_LABELS = (
+    ("all", "Any pick state"),
+    ("Unrated", "Unrated"),
+    ("Pick", "Pick"),
+    ("Maybe", "Maybe"),
+    ("Reject", "Reject"),
+)
+RATING_FILTER_LABELS = (
+    ("0", "Any rating"),
+    ("1", "1\u2605+"),
+    ("3", "3\u2605+"),
+    ("5", "5\u2605"),
+)
+# Sorting by these columns changes row order when a mark changes.
+RESORT_KEYS = ("pick_status", "rating")
+KIND_NAMES = {"scan": "Scan", "backup": "Backup", "export": "Export", "xmp": "XMP sidecars"}
+PROGRESS_VERBS = {"scan": "Scanning", "backup": "Backing up", "export": "Exporting", "xmp": "Writing XMP"}
+SHORTCUT_HINT = (
+    "P Pick \u00b7 X Reject \u00b7 M Maybe \u00b7 U Clear \u00b7 0\u20135 Stars \u00b7 "
+    "\u2190/\u2192 Move \u00b7 F Full screen \u00b7 Ctrl+O Open"
+)
+# Keys must stay editable/usable inside these widgets, so arrows are not hijacked.
+TEXT_INPUT_CLASSES = frozenset({"TCombobox", "TEntry", "Entry", "TSpinbox", "Spinbox", "Text"})
+MENU_HINTS = {
+    "Backup Picked\u2026": "Copy every picked photo (RAW and JPG) to a backup folder and verify the copies.",
+    "Export Selected\u2026": "Copy the selected photos to a folder with a rename pattern.",
+    "Write XMP Sidecars (for Lightroom/Evoto)": "Write .xmp files next to the photos with their star ratings and pick flags.",
+    "Send Picks to Auto Selector": "Open the picked JPGs in Auto Selector.",
+    "Send Picks to Frame": "Open the picked JPG/PNG/TIFF files in Frame.",
+}
+
+
+def label_for(options, value: str) -> str:
+    return next((label for key, label in options if key == value), options[0][1])
+
+
+def value_for(options, label: str) -> str:
+    return next((key for key, text in options if text == label), options[0][0])
+
+
+def plural(count: int, word: str, suffix: str = "s") -> str:
+    return f"{count} {word}{'' if count == 1 else suffix}"
+
+
+def record_matches_filters(record: ImageRecord, pick_filter: str, min_rating: int) -> bool:
+    """Pick and rating part of the list filters (file-type filters never change on a mark)."""
+    if pick_filter != "all" and record.pick_status != pick_filter:
+        return False
+    return record.rating >= min_rating
+
+
+def progress_text(kind: str, index: int, total: int, name: str) -> str:
+    return f"{PROGRESS_VERBS.get(kind, kind.title())} {index}/{total} \u2014 {name}"
+
+
+def ready_status_text(total_files: int, shot_count: int) -> str:
+    return f"Ready. {plural(total_files, 'file')} ({plural(shot_count, 'shot')})"
+
+
+def selection_status_text(selected: int, shown: int) -> str:
+    text = f"{selected} selected / {shown} shown"
+    if selected > 1:
+        text += f" \u2014 marks apply to all {selected}"
+    return text
+
+
+def position_text(index: int, total: int) -> str:
+    return f"{index + 1} / {total}"
+
+
+def preview_unavailable_text(record: ImageRecord) -> str:
+    if record.media_type == "raw":
+        if record.pair_status == "raw_jpg_pair":
+            return "No embedded preview \u2014 view the JPG of this pair instead."
+        return "No embedded preview in this RAW file."
+    return "Preview unavailable"
+
+
+def empty_state_kind(has_catalog: bool, scanning: bool, record_count: int, filters_active: bool) -> str | None:
+    if scanning:
+        return None
+    if not has_catalog:
+        return "start"
+    if record_count:
+        return None
+    return "filtered" if filters_active else "empty"
+
+
+def send_confirm_text(count: int, noun: str, target: str) -> str:
+    return f"Send {plural(count, 'picked ' + noun)} to {target}?"
+
+
+def backup_confirm_text(records, destination) -> str:
+    raw = sum(1 for record in records if record.media_type == "raw")
+    jpg = sum(1 for record in records if record.media_type == "jpg")
+    other = len(records) - raw - jpg
+    parts = [f"{raw} RAW"] if raw else []
+    parts += [f"{jpg} JPG"] if jpg else []
+    parts += [f"{other} other"] if other else []
+    return f"Back up {plural(len(records), 'picked file')} ({', '.join(parts)}) to:\n{destination}?"
+
+
+def operation_summary_text(kind: str, summary, destination) -> str:
+    where = f" to {destination}" if destination else ""
+    if kind == "backup":
+        done, noun = getattr(summary, "copied", 0), "file"
+    elif kind == "export":
+        done, noun = getattr(summary, "exported", 0), "file"
+    else:
+        done, noun = getattr(summary, "written", 0), "XMP sidecar"
+        where = f" next to the photos in {destination}" if destination else ""
+    tail = f"({summary.skipped} skipped, {plural(summary.errors, 'error')})"
+    if summary.cancelled:
+        verb = {"backup": "Backup", "export": "Export", "xmp": "XMP export"}.get(kind, kind.title())
+        return (f"{verb} cancelled after {plural(done, noun)}{where} "
+                f"({summary.skipped} skipped, {summary.errors} not run or failed)")
+    verb = {"backup": "Backed up", "export": "Exported", "xmp": "Wrote"}.get(kind, "Completed")
+    return f"{verb} {plural(done, noun)}{where} {tail}"
+
+
+def _open_folder(path) -> None:
+    try:
+        os.startfile(str(path))  # type: ignore[attr-defined]
+    except (AttributeError, OSError):
+        pass
 
 
 class ImageManagerApp(tk.Tk):
@@ -79,18 +225,33 @@ class ImageManagerApp(tk.Tk):
         self._preview_resize_job: str | None = None
         self.ui_queue: queue.Queue = queue.Queue()
         self._last_progress_emit = 0.0
+        self._stale_ids: set[int] = set()
+        self._job_destination: Path | None = None
+        self._menu_hint_active = False
 
         self.file_filter = tk.StringVar(value="all")
         self.pick_filter = tk.StringVar(value="all")
+        self.rating_filter = tk.StringVar(value="0")
+        self.file_filter_label = tk.StringVar()
+        self.pick_filter_label = tk.StringVar()
+        self.rating_filter_label = tk.StringVar()
+        for variable in (self.file_filter, self.pick_filter, self.rating_filter):
+            variable.trace_add("write", self._sync_filter_labels)
+        self._sync_filter_labels()
+        try:
+            stored_advance = get_section(SETTINGS_SECTION).get("advance_after_mark", True)
+        except OSError:
+            stored_advance = True
+        self.advance_after_mark = tk.BooleanVar(value=bool(stored_advance))
         self.sort_key = tk.StringVar(value="capture_datetime")
         self.sort_descending = tk.BooleanVar(value=False)
         self.detail_mode = tk.StringVar(value="Simple")
         self.image_layout = tk.StringVar(value="50%")
         self.preview_background = tk.StringVar(value="Dark Gray")
-        self.status = tk.StringVar(value="Choose a shooting folder to begin.")
+        self.status = tk.StringVar(value="Choose a shooting folder to start culling.")
         self.selection_status = tk.StringVar(value="0 selected")
         self.folder_status = tk.StringVar(value="No folder selected")
-        self.catalog_status = tk.StringVar(value="0 images")
+        self.catalog_status = tk.StringVar(value="0 shown")
         self.summary_text = tk.StringVar(value="Select an image to see EXIF summary.")
 
         apply_tk_theme(self)
@@ -121,51 +282,69 @@ class ImageManagerApp(tk.Tk):
         menu_bar = tk.Menu(self)
 
         file_menu = tk.Menu(menu_bar, tearoff=0)
-        file_menu.add_command(label="Choose Folder...", accelerator="Ctrl+O", command=self.choose_folder)
-        file_menu.add_command(label="Reopen Last Folder", command=self.reopen_last_folder)
-        file_menu.add_command(label="Rescan", accelerator="F5", command=self.rescan)
+        busy_actions: list[int] = []
+
+        def add_action(label: str, command, accelerator: str | None = None, busy_sensitive: bool = True) -> None:
+            options = {"label": label, "command": command}
+            if accelerator:
+                options["accelerator"] = accelerator
+            file_menu.add_command(**options)
+            if busy_sensitive:
+                busy_actions.append(file_menu.index("end"))
+
+        add_action("Choose Folder\u2026", self.choose_folder, "Ctrl+O")
+        add_action("Reopen Last Folder", self.reopen_last_folder)
+        add_action("Rescan", self.rescan, "F5")
         file_menu.add_separator()
-        file_menu.add_command(label="Export Selected...", accelerator="Ctrl+E", command=self.open_export_dialog)
-        file_menu.add_command(label="Backup Picked...", command=self.backup_picked)
-        file_menu.add_command(label="Export XMP Sidecars (Picked/Rated)", command=self.export_xmp_sidecars)
-        file_menu.add_command(label="Send to Auto Selector...", command=self.send_to_auto_selector)
-        file_menu.add_command(label="Send Picks to Frame...", command=self.send_picks_to_frame)
+        add_action("Export Selected\u2026", self.open_export_dialog, "Ctrl+E")
+        add_action("Backup Picked\u2026", self.backup_picked)
+        add_action("Write XMP Sidecars (for Lightroom/Evoto)", self.export_xmp_sidecars)
+        add_action("Send Picks to Auto Selector", self.send_to_auto_selector)
+        add_action("Send Picks to Frame", self.send_picks_to_frame)
         file_menu.add_separator()
-        file_menu.add_command(label="Job Results...", command=self.open_job_results)
+        add_action("Job Results\u2026", self.open_job_results, busy_sensitive=False)
         file_menu.add_separator()
-        file_menu.add_command(label="Exit", command=self.destroy)
+        add_action("Exit", self.destroy, busy_sensitive=False)
         self.file_menu = file_menu
-        self._file_action_indices = [
-            index for index in range(file_menu.index("end") + 1)
-            if file_menu.type(index) == "command"
-            and file_menu.entrycget(index, "label") not in {"Exit", "Job Results..."}
-        ]
+        self._file_action_indices = busy_actions
+        file_menu.bind("<<MenuSelect>>", self._on_file_menu_select)
         menu_bar.add_cascade(label="File", menu=file_menu)
 
         selection_menu = tk.Menu(menu_bar, tearoff=0)
         selection_menu.add_command(label="Select All Visible", accelerator="Ctrl+A", command=self.select_all_visible)
-        selection_menu.add_command(label="Fullscreen Preview", accelerator="F", command=self.open_fullscreen_viewer)
+        selection_menu.add_command(label="Full Screen Preview", accelerator="F", command=self.open_fullscreen_viewer)
         menu_bar.add_cascade(label="Selection", menu=selection_menu)
 
         filter_menu = tk.Menu(menu_bar, tearoff=0)
         type_menu = tk.Menu(filter_menu, tearoff=0)
-        for value in ("all", "jpg", "raw", "paired", "raw_only", "jpg_only", "proxy_failed"):
+        for value, label in FILE_FILTER_LABELS:
             type_menu.add_radiobutton(
-                label=value,
+                label=label,
                 variable=self.file_filter,
                 value=value,
                 command=self.refresh_records,
             )
         pick_menu = tk.Menu(filter_menu, tearoff=0)
-        for value in ("all", "Unrated", "Pick", "Maybe", "Reject"):
+        for value, label in PICK_FILTER_LABELS:
             pick_menu.add_radiobutton(
-                label=value,
+                label=label,
                 variable=self.pick_filter,
+                value=value,
+                command=self.refresh_records,
+            )
+        rating_menu = tk.Menu(filter_menu, tearoff=0)
+        for value, label in RATING_FILTER_LABELS:
+            rating_menu.add_radiobutton(
+                label=label,
+                variable=self.rating_filter,
                 value=value,
                 command=self.refresh_records,
             )
         filter_menu.add_cascade(label="Type", menu=type_menu)
         filter_menu.add_cascade(label="Pick", menu=pick_menu)
+        filter_menu.add_cascade(label="Rating", menu=rating_menu)
+        filter_menu.add_separator()
+        filter_menu.add_command(label="Clear Filters", command=self.clear_filters)
         menu_bar.add_cascade(label="Filter", menu=filter_menu)
 
         view_menu = tk.Menu(menu_bar, tearoff=0)
@@ -196,6 +375,12 @@ class ImageManagerApp(tk.Tk):
         view_menu.add_cascade(label="EXIF Detail", menu=exif_menu)
         view_menu.add_cascade(label="Image Layout", menu=layout_menu)
         view_menu.add_cascade(label="Preview Background", menu=background_menu)
+        view_menu.add_separator()
+        view_menu.add_checkbutton(
+            label="Advance after Pick/Reject/Rating",
+            variable=self.advance_after_mark,
+            command=self._save_advance_setting,
+        )
         menu_bar.add_cascade(label="View", menu=view_menu)
 
         help_menu = tk.Menu(menu_bar, tearoff=0)
@@ -222,38 +407,42 @@ class ImageManagerApp(tk.Tk):
         toolbar = ttk.Frame(toolbar_outer, padding=(12, 8), style="Toolbar.TFrame")
         toolbar.pack(fill=tk.X)
 
-        self.choose_button = ttk.Button(toolbar, text="Choose Folder", command=self.choose_folder)
+        self.choose_button = ttk.Button(toolbar, text="Choose Folder\u2026", command=self.choose_folder)
         self.choose_button.pack(side=tk.LEFT, padx=(0, 12))
 
-        ttk.Label(toolbar, text="Type", style="Toolbar.TLabel").pack(side=tk.LEFT)
+        ttk.Label(toolbar, text="Show", style="Toolbar.TLabel").pack(side=tk.LEFT)
         file_filter = ttk.Combobox(
             toolbar,
-            textvariable=self.file_filter,
-            values=("all", "jpg", "raw", "paired", "raw_only", "jpg_only", "proxy_failed"),
+            textvariable=self.file_filter_label,
+            values=[label for _value, label in FILE_FILTER_LABELS],
+            width=16,
+            state="readonly",
+        )
+        file_filter.pack(side=tk.LEFT, padx=(6, 12))
+        file_filter.bind("<<ComboboxSelected>>", lambda event: self._on_filter_chosen(self.file_filter, FILE_FILTER_LABELS, file_filter))
+        self.file_filter_widget = file_filter
+
+        pick_filter = ttk.Combobox(
+            toolbar,
+            textvariable=self.pick_filter_label,
+            values=[label for _value, label in PICK_FILTER_LABELS],
             width=14,
             state="readonly",
         )
-        file_filter.pack(side=tk.LEFT, padx=(6, 14))
-        file_filter.bind("<<ComboboxSelected>>", lambda event: self.refresh_records())
-        self.file_filter_widget = file_filter
-
-        ttk.Label(toolbar, text="Pick", style="Toolbar.TLabel").pack(side=tk.LEFT)
-        pick_filter = ttk.Combobox(
-            toolbar,
-            textvariable=self.pick_filter,
-            values=("all", "Unrated", "Pick", "Maybe", "Reject"),
-            width=10,
-            state="readonly",
-        )
-        pick_filter.pack(side=tk.LEFT, padx=(6, 14))
-        pick_filter.bind("<<ComboboxSelected>>", lambda event: self.refresh_records())
+        pick_filter.pack(side=tk.LEFT, padx=(0, 12))
+        pick_filter.bind("<<ComboboxSelected>>", lambda event: self._on_filter_chosen(self.pick_filter, PICK_FILTER_LABELS, pick_filter))
         self.pick_filter_widget = pick_filter
 
-        ttk.Label(
+        rating_filter = ttk.Combobox(
             toolbar,
-            text="File menu: exports and backup | Click columns to sort",
-            style="CardMuted.TLabel",
-        ).pack(side=tk.LEFT, padx=(8, 0))
+            textvariable=self.rating_filter_label,
+            values=[label for _value, label in RATING_FILTER_LABELS],
+            width=11,
+            state="readonly",
+        )
+        rating_filter.pack(side=tk.LEFT, padx=(0, 14))
+        rating_filter.bind("<<ComboboxSelected>>", lambda event: self._on_filter_chosen(self.rating_filter, RATING_FILTER_LABELS, rating_filter))
+        self.rating_filter_widget = rating_filter
 
         self.paned = ttk.PanedWindow(self, orient=tk.HORIZONTAL)
         self.paned.pack(fill=tk.BOTH, expand=True, padx=16, pady=(0, 10))
@@ -265,19 +454,41 @@ class ImageManagerApp(tk.Tk):
 
         columns = tuple(TREE_COLUMNS.keys())
         self.tree = ttk.Treeview(self.left_pane, columns=columns, show="headings", selectmode="extended")
+        self._col_widths = self._measure_columns()
         for column in columns:
-            self.tree.heading(column, text=TREE_COLUMNS[column]["label"], command=lambda name=column: self.sort_by_column(name))
-            self.tree.column(column, width=TREE_COLUMNS[column]["width"], anchor=tk.W)
+            config = TREE_COLUMNS[column]
+            self.tree.heading(column, text=config["label"], command=lambda name=column: self.sort_by_column(name))
+            self.tree.column(
+                column,
+                width=self._col_widths[column][0],
+                minwidth=self._col_widths[column][1],
+                stretch=config["stretch"],
+                anchor=config.get("anchor", tk.W),
+            )
         self.tree.pack(fill=tk.BOTH, expand=True, side=tk.LEFT, padx=(0, 1), pady=0)
         scrollbar = ttk.Scrollbar(self.left_pane, orient=tk.VERTICAL, command=self.tree.yview)
         scrollbar.pack(fill=tk.Y, side=tk.LEFT)
         self.tree.configure(yscrollcommand=scrollbar.set)
         self.tree.bind("<<TreeviewSelect>>", self.on_select)
-        self.tree.tag_configure("Pick", background="#e7f7e8")
-        self.tree.tag_configure("Maybe", background="#fff7df")
-        self.tree.tag_configure("Reject", background="#fde7e7")
+        for pick_status, tint in PICK_TINTS.items():
+            self.tree.tag_configure(pick_status, background=tint)
+        # Tree-level bindings stop the Treeview class binding from moving a
+        # second row; the root binding handles focus elsewhere.
+        for key, offset in (("Up", -1), ("Down", 1), ("Left", -1), ("Right", 1)):
+            self.tree.bind(f"<{key}>", lambda event, step=offset: self._on_arrow(event, step))
+        self.tree.bind("<Configure>", self._fit_name_column, add="+")
+        self.paned.bind("<Configure>", self._ensure_list_width, add="+")
+        self._build_empty_state()
 
-        preview_frame = tk.Frame(self.right_pane, bg=self._preview_background_color(), bd=0, highlightthickness=0)
+        # The details block is packed first (bottom) so a small window shrinks the
+        # preview before it clips the stars or EXIF text.
+        self.details_frame = tk.Frame(self.right_pane, bg=CARD_BG, bd=0, highlightthickness=0)
+
+        preview_frame = tk.Frame(
+            self.right_pane, bg=self._preview_background_color(), bd=0, highlightthickness=0,
+            width=200, height=self._scaled(72),
+        )
+        preview_frame.pack_propagate(False)
         preview_frame.pack(fill=tk.BOTH, expand=True)
         self.preview_frame = preview_frame
         self.preview_label = tk.Label(
@@ -289,13 +500,14 @@ class ImageManagerApp(tk.Tk):
             bd=0,
             highlightthickness=0,
             font=("Segoe UI", 10),
+            wraplength=360,
         )
         self.preview_label.pack(fill=tk.BOTH, expand=True)
         self.preview_label.bind("<Double-Button-1>", lambda event: self.open_fullscreen_viewer())
         self.preview_label.bind("<Configure>", lambda event: self._schedule_preview_refresh())
-
-        self.details_frame = tk.Frame(self.right_pane, bg=CARD_BG, bd=0, highlightthickness=0)
-        self.details_frame.pack(fill=tk.X, pady=(1, 0))
+        # Preview keeps its minimum height; the details block gives way (its text
+        # area is the bottom-most part and clips first).
+        self.details_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=(1, 0))
 
         details_header = tk.Frame(self.details_frame, bg=CARD_BG, bd=0, highlightthickness=0)
         details_header.pack(fill=tk.X, padx=12, pady=(10, 4))
@@ -319,40 +531,38 @@ class ImageManagerApp(tk.Tk):
             justify=tk.LEFT,
             bd=0,
             highlightthickness=0,
+            wraplength=400,
         )
         self.summary_label.pack(fill=tk.X, padx=12, pady=(0, 8))
+        self.details_frame.bind(
+            "<Configure>",
+            lambda event: self.summary_label.configure(wraplength=max(event.width - 28, 120)),
+        )
 
         rating_row = tk.Frame(self.details_frame, bg=CARD_BG, bd=0, highlightthickness=0)
         rating_row.pack(fill=tk.X, padx=12, pady=(0, 8))
-        tk.Label(
-            rating_row,
-            text="Rating",
-            bg=CARD_BG,
-            fg=TEXT_MUTED,
-            bd=0,
-            highlightthickness=0,
-            font=("Segoe UI", 9),
-        ).pack(side=tk.LEFT, padx=(0, 8))
         for rating in range(1, 6):
             star = tk.Label(
                 rating_row,
                 text=STAR_EMPTY,
-                font=("Segoe UI Symbol", 18),
+                font=("Segoe UI Symbol", 15),
                 cursor="hand2",
-                padx=2,
+                padx=0,
                 bg=CARD_BG,
                 fg="#6b7280",
                 bd=0,
                 highlightthickness=0,
             )
             star.pack(side=tk.LEFT)
-            star.bind("<Button-1>", lambda event, value=rating: self.set_rating(value))
+            star.bind("<Button-1>", lambda event, value=rating: self.set_rating(value, advance=False))
             self.star_labels.append(star)
-        ttk.Button(rating_row, text="Clear", command=lambda: self.set_rating(0)).pack(side=tk.LEFT, padx=(10, 0))
+        ttk.Button(rating_row, text="Clear", command=lambda: self.set_rating(0, advance=False)).pack(side=tk.LEFT, padx=(8, 0))
 
+        text_row = tk.Frame(self.details_frame, bg=CARD_BG, bd=0, highlightthickness=0)
+        text_row.pack(fill=tk.X, pady=(0, 10))
         self.detail_text = tk.Text(
-            self.details_frame,
-            height=8,
+            text_row,
+            height=6,
             wrap=tk.WORD,
             bg=CARD_BG,
             fg=TEXT_PRIMARY,
@@ -363,25 +573,35 @@ class ImageManagerApp(tk.Tk):
             padx=12,
             pady=4,
         )
-        self.detail_text.pack(fill=tk.X, padx=0, pady=(0, 10))
+        detail_scroll = ttk.Scrollbar(text_row, orient=tk.VERTICAL, command=self.detail_text.yview)
+        self.detail_text.configure(yscrollcommand=detail_scroll.set)
+        detail_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self.detail_text.pack(side=tk.LEFT, fill=tk.X, expand=True)
         style_text_widget(self.detail_text)
         self.detail_text.configure(state=tk.DISABLED)
 
         bottom = ttk.Frame(self, padding=(16, 0, 16, 12), style="Footer.TFrame")
-        bottom.pack(fill=tk.X)
+        # Packed ahead of the paned window so a short window shrinks the panes,
+        # never the status footer.
+        bottom.pack(side=tk.BOTTOM, fill=tk.X, before=self.paned)
         status_row = ttk.Frame(bottom, style="Footer.TFrame")
         status_row.pack(fill=tk.X, pady=(0, 4))
         self.cancel_button = ttk.Button(status_row, text="Cancel", command=self.cancel_work, state=tk.DISABLED)
         self.cancel_button.pack(side=tk.RIGHT, padx=(8, 0))
-        self.work_progress = ttk.Progressbar(status_row, length=130, mode="determinate")
+        self.work_progress = ttk.Progressbar(status_row, length=170, mode="determinate")
         self.work_progress.pack(side=tk.RIGHT, padx=(8, 0))
         ttk.Label(status_row, textvariable=self.status, style="Muted.TLabel", anchor=tk.W).pack(side=tk.LEFT, fill=tk.X, expand=True)
-        ttk.Label(bottom, textvariable=self.selection_status, style="Muted.TLabel").pack(side=tk.LEFT)
-        ttk.Label(
-            bottom,
-            text="F fullscreen | P/M/X/U pick | 0-5 rating",
-            style="Muted.TLabel",
-        ).pack(side=tk.RIGHT)
+        self.footer = bottom
+        self.footer_info_row = ttk.Frame(bottom, style="Footer.TFrame")
+        self.footer_info_row.pack(fill=tk.X)
+        self.footer_hint_row = ttk.Frame(bottom, style="Footer.TFrame")
+        self.selection_label = ttk.Label(self.footer_info_row, textvariable=self.selection_status, style="Muted.TLabel")
+        self.selection_label.pack(side=tk.LEFT)
+        # Parent is the footer itself so it can be packed into either row.
+        self.hint_label = ttk.Label(bottom, text=SHORTCUT_HINT, style="Muted.TLabel")
+        self.hint_label.pack(in_=self.footer_info_row, side=tk.RIGHT)
+        self._hint_below = False
+        bottom.bind("<Configure>", self._layout_footer_hint)
         self.after(100, self.apply_layout_preset)
         self.after(120, self.apply_preview_background)
 
@@ -396,16 +616,183 @@ class ImageManagerApp(tk.Tk):
         self.bind("<U>", lambda event: self.set_pick("Unrated"))
         for value in range(0, 6):
             self.bind(str(value), lambda event, rating=value: self.set_rating(rating))
-        self.bind("<Down>", lambda event: self.move_selection(1))
-        self.bind("<Right>", lambda event: self.move_selection(1))
-        self.bind("<Up>", lambda event: self.move_selection(-1))
-        self.bind("<Left>", lambda event: self.move_selection(-1))
+        self.bind("<Down>", lambda event: self._on_arrow(event, 1))
+        self.bind("<Right>", lambda event: self._on_arrow(event, 1))
+        self.bind("<Up>", lambda event: self._on_arrow(event, -1))
+        self.bind("<Left>", lambda event: self._on_arrow(event, -1))
         self.bind("<f>", lambda event: self.open_fullscreen_viewer())
         self.bind("<F>", lambda event: self.open_fullscreen_viewer())
         self.bind("<Control-a>", lambda event: self.select_all_visible())
         self.bind("<Control-o>", lambda event: self.choose_folder())
         self.bind("<Control-e>", lambda event: self.open_export_dialog())
         self.bind("<F5>", lambda event: self.rescan())
+
+    # ---- filters, arrows, menu hints, empty state ----
+
+    def _measure_columns(self) -> dict[str, tuple[int, int]]:
+        """(width, minwidth) per column, measured from the real fonts so text never clips."""
+        style = ttk.Style(self)
+        body = tkfont.Font(self, font=style.lookup("Treeview", "font") or "TkDefaultFont")
+        head = tkfont.Font(self, font=style.lookup("Treeview.Heading", "font") or "TkDefaultFont")
+        pad = self._scaled(8)
+
+        def fit(sample: str, header: str = "") -> int:
+            # Only the sorted column carries an arrow; give Date room for it.
+            arrow = " \u2191" if header == "Date" else ""
+            header_width = head.measure(header + arrow) + pad if header else 0
+            return max(body.measure(sample) + pad, header_width)
+
+        fixed = {
+            "state": body.measure("\u2715") + pad,
+            "type": fit("RAW", "Type"),
+            "pick": fit("Unrated", "Pick"),
+            "rating": fit(STAR_FILLED * 5, STAR_FILLED),
+            "date": fit("00-00 00:00", "Date"),
+        }
+        widths = {key: (value, value) for key, value in fixed.items()}
+        name_min = body.measure("IMG_0000.CR3") + pad
+        widths["name"] = (int(name_min * 1.3), name_min)
+        return widths
+
+    def _scaled(self, pixels: int) -> int:
+        """Column widths are pixels while fonts follow Windows display scaling."""
+        try:
+            factor = float(self.tk.call("tk", "scaling")) * 72.0 / 96.0
+        except (tk.TclError, ValueError):
+            factor = 1.0
+        return int(round(pixels * max(factor, 1.0)))
+
+    def _list_needed_width(self) -> int:
+        return sum(minimum for _width, minimum in self._col_widths.values()) + self._scaled(16)
+
+    def _layout_footer_hint(self, _event=None) -> None:
+        """Keep the shortcut hint beside the selection count, or below it if too narrow."""
+        needed = self.selection_label.winfo_reqwidth() + self.hint_label.winfo_reqwidth() + 40
+        fits = self.footer.winfo_width() >= needed
+        if fits and self._hint_below:
+            self._hint_below = False
+            self.hint_label.pack_forget()
+            self.footer_hint_row.pack_forget()
+            self.hint_label.pack(in_=self.footer_info_row, side=tk.RIGHT)
+        elif not fits and not self._hint_below:
+            self._hint_below = True
+            self.hint_label.pack_forget()
+            self.footer_hint_row.pack(fill=tk.X)
+            self.hint_label.pack(in_=self.footer_hint_row, side=tk.LEFT)
+
+    def _ensure_list_width(self, _event=None) -> None:
+        if self.image_layout.get() != "50%" or len(self.paned.panes()) < 2:
+            return
+        width = self.paned.winfo_width()
+        needed = min(self._list_needed_width(), int(width * 0.72))
+        try:
+            if width > 1 and self.paned.sashpos(0) < needed:
+                self.paned.sashpos(0, needed)
+        except tk.TclError:
+            pass
+
+    def _fit_name_column(self, _event=None) -> None:
+        """Let the File column take whatever the fixed columns leave over."""
+        others = sum(width for key, (width, _minimum) in self._col_widths.items() if key != "name")
+        available = self.tree.winfo_width() - others - 4
+        self.tree.column("name", width=max(self._col_widths["name"][1], available))
+
+    def _sync_filter_labels(self, *_args) -> None:
+        self.file_filter_label.set(label_for(FILE_FILTER_LABELS, self.file_filter.get()))
+        self.pick_filter_label.set(label_for(PICK_FILTER_LABELS, self.pick_filter.get()))
+        self.rating_filter_label.set(label_for(RATING_FILTER_LABELS, self.rating_filter.get()))
+
+    def _on_filter_chosen(self, variable: tk.StringVar, options, widget) -> None:
+        variable.set(value_for(options, widget.get()))
+        self.refresh_records()
+
+    def _min_rating(self) -> int:
+        try:
+            return max(0, int(self.rating_filter.get()))
+        except ValueError:
+            return 0
+
+    def _filters_active(self) -> bool:
+        return (
+            self.file_filter.get() != "all"
+            or self.pick_filter.get() != "all"
+            or self._min_rating() > 0
+        )
+
+    def clear_filters(self) -> None:
+        self.file_filter.set("all")
+        self.pick_filter.set("all")
+        self.rating_filter.set("0")
+        self.refresh_records()
+
+    def _on_arrow(self, event, offset: int):
+        """Move exactly one row, unless a text-input widget owns the key."""
+        widget_class = ""
+        try:
+            widget_class = event.widget.winfo_class()
+        except (AttributeError, tk.TclError):
+            pass
+        # Shift/Ctrl+arrow keep their native Treeview behaviour (range select).
+        if widget_class in TEXT_INPUT_CLASSES or getattr(event, "state", 0) & 0x5:
+            return None
+        self.move_selection(offset)
+        return "break"
+
+    def _save_advance_setting(self) -> None:
+        try:
+            update_section(SETTINGS_SECTION, {"advance_after_mark": bool(self.advance_after_mark.get())})
+        except OSError:
+            pass
+
+    def _on_file_menu_select(self, _event=None) -> None:
+        try:
+            index = self.file_menu.index("active")
+            label = self.file_menu.entrycget(index, "label") if isinstance(index, int) else ""
+        except tk.TclError:
+            label = ""
+        hint = MENU_HINTS.get(label)
+        if hint:
+            if not self._menu_hint_active:
+                self._status_before_menu = self.status.get()
+            self._menu_hint_active = True
+            self.status.set(hint)
+        elif self._menu_hint_active:
+            self._menu_hint_active = False
+            self.status.set(getattr(self, "_status_before_menu", ""))
+
+    def _build_empty_state(self) -> None:
+        self.empty_overlay = tk.Frame(self.left_pane, bg=CARD_BG, bd=0, highlightthickness=0)
+        inner = tk.Frame(self.empty_overlay, bg=CARD_BG, bd=0, highlightthickness=0)
+        inner.place(relx=0.5, rely=0.42, anchor=tk.CENTER)
+        self.empty_label = tk.Label(
+            inner, text="", bg=CARD_BG, fg=TEXT_PRIMARY, font=("Segoe UI", 12),
+            wraplength=300, justify=tk.CENTER, bd=0, highlightthickness=0,
+        )
+        self.empty_label.pack(pady=(0, 14))
+        self.empty_button = ttk.Button(inner, text="", command=self.choose_folder, style="Accent.TButton")
+        self.empty_button.pack()
+        self._update_empty_state()
+
+    def _update_empty_state(self) -> None:
+        kind = empty_state_kind(
+            has_catalog=self.catalog is not None,
+            scanning=self._active_job == "scan",
+            record_count=len(self.records),
+            filters_active=self._filters_active(),
+        )
+        if kind is None:
+            self.empty_overlay.place_forget()
+            return
+        if kind == "start":
+            text, button, command = "Choose a shooting folder to start culling", "Choose Folder\u2026 (Ctrl+O)", self.choose_folder
+        elif kind == "filtered":
+            text, button, command = "No photos match these filters.", "Clear Filters", self.clear_filters
+        else:
+            text, button, command = "No supported photos were found in this folder.", "Choose Another Folder\u2026", self.choose_folder
+        self.empty_label.configure(text=text)
+        self.empty_button.configure(text=button, command=command)
+        self.empty_overlay.place(in_=self.tree, x=0, y=0, relwidth=1, relheight=1)
+        self.empty_overlay.lift()
 
     def choose_folder(self) -> None:
         if not self._can_start_work():
@@ -453,7 +840,8 @@ class ImageManagerApp(tk.Tk):
         if self.catalog:
             self.catalog.close()
             self.catalog = None
-        self.status.set(f"Scanning {self.source_dir} ...")
+        self.status.set(f"Scanning {self.source_dir.name}\u2026")
+        self._stale_ids.clear()
         self.tree.delete(*self.tree.get_children())
         self.records = []
         self.current_record = None
@@ -482,6 +870,7 @@ class ImageManagerApp(tk.Tk):
         self.choose_button.configure(state=state)
         self.file_filter_widget.configure(state=tk.DISABLED if busy else "readonly")
         self.pick_filter_widget.configure(state=tk.DISABLED if busy else "readonly")
+        self.rating_filter_widget.configure(state=tk.DISABLED if busy else "readonly")
         self.cancel_button.configure(state=tk.NORMAL if busy else tk.DISABLED)
         if busy:
             self.work_progress.configure(mode="indeterminate", value=0)
@@ -489,6 +878,7 @@ class ImageManagerApp(tk.Tk):
         else:
             self.work_progress.stop()
             self.work_progress.configure(mode="determinate", value=0)
+        self._update_empty_state()
 
     def _start_worker(self, kind: str, work) -> None:
         self._active_job = kind
@@ -572,7 +962,7 @@ class ImageManagerApp(tk.Tk):
                 self.work_progress.stop()
                 self.work_progress.configure(mode="determinate", maximum=max(total, 1), value=index)
             if not self._cancel_event.is_set():
-                self.status.set(f"{self._active_job.title()} {index}/{total}: {name}")
+                self.status.set(progress_text(self._active_job or "scan", index, total, name))
         elif kind == "work_done":
             _, _generation, task, result, error, cancelled = event
             # A completion is queued only after file I/O and report saving.
@@ -595,8 +985,8 @@ class ImageManagerApp(tk.Tk):
                 self.destroy()
                 return False
             if error:
-                self.status.set(f"{task.title()} failed.")
-                messagebox.showerror(f"{task.title()} failed", error)
+                self.status.set(f"{KIND_NAMES.get(task, task.title())} failed.")
+                messagebox.showerror(f"{KIND_NAMES.get(task, task.title())} failed", error)
             elif task == "scan":
                 if cancelled:
                     self.status.set("Scan cancelled. Previous catalog was preserved; rescan to reload.")
@@ -610,32 +1000,42 @@ class ImageManagerApp(tk.Tk):
         if self.catalog:
             self.catalog.close()
         self.catalog = Catalog(catalog_path)
+        everything = self.catalog.list_images()
+        shots = len({record.pair_group_id for record in everything})
         self.refresh_records()
-        self.status.set(f"Ready. Catalog: {catalog_path}")
+        self.status.set(ready_status_text(len(everything), shots))
+
+    def _row_values(self, record: ImageRecord) -> tuple:
+        return (
+            record.pick_glyph,
+            record.display_name,
+            record.type_label,
+            record.pick_status,
+            STAR_FILLED * record.rating if record.rating > 0 else "",
+            record.short_datetime,
+        )
 
     def refresh_records(self) -> None:
         if not self.catalog:
             return
         selection = self.tree.selection()
         focus = self.tree.focus()
-        self.records = self.catalog.list_images(
+        records = self.catalog.list_images(
             file_filter=self.file_filter.get(),
             pick_filter=self.pick_filter.get(),
             sort_key=self.sort_key.get(),
             descending=self.sort_descending.get(),
         )
+        minimum = self._min_rating()
+        if minimum:
+            records = [record for record in records if record.rating >= minimum]
+        self.records = records
+        self._stale_ids.clear()
         self.tree.delete(*self.tree.get_children())
         self.current_record = None
         self._update_column_headings()
         for record in self.records:
-            values = (
-                record.display_name,
-                record.file_ext.upper(),
-                record.pick_status,
-                _rating_text(record.rating),
-                record.effective_datetime.strftime("%Y-%m-%d %H:%M:%S"),
-            )
-            self.tree.insert("", tk.END, iid=str(record.id), values=values, tags=(record.pick_status,))
+            self.tree.insert("", tk.END, iid=str(record.id), values=self._row_values(record), tags=(record.pick_status,))
         if self.records:
             first = self.tree.get_children()[0]
             surviving = [iid for iid in selection if self.tree.exists(iid)]
@@ -645,12 +1045,13 @@ class ImageManagerApp(tk.Tk):
             self.tree.see(focused)
             self.on_select()
         else:
-            self.status.set("No images match the current filters.")
+            self.status.set("No photos match these filters." if self._filters_active() else "No photos to show.")
             self._show_preview(None)
             self._show_details(None)
             self._refresh_rating_widgets(0)
         self.update_selection_status()
         self.update_catalog_status()
+        self._update_empty_state()
 
     def sort_by_column(self, column: str) -> None:
         sort_key = TREE_COLUMNS[column]["sort_key"]
@@ -665,16 +1066,17 @@ class ImageManagerApp(tk.Tk):
         current_sort = self.sort_key.get()
         for column, config in TREE_COLUMNS.items():
             label = config["label"]
-            if config["sort_key"] == current_sort:
+            if config.get("indicator", True) and config["sort_key"] == current_sort:
                 label = f"{label} {SORT_DESC if self.sort_descending.get() else SORT_ASC}"
             self.tree.heading(column, text=label, command=lambda name=column: self.sort_by_column(name))
 
     def update_catalog_status(self) -> None:
         folder = self.source_dir.name if self.source_dir else "No folder selected"
         self.folder_status.set(folder)
-        self.catalog_status.set(
-            f"{len(self.records)} visible | filter: {self.file_filter.get()} / {self.pick_filter.get()}"
-        )
+        text = f"{len(self.records)} shown"
+        if self._filters_active():
+            text += " (filtered)"
+        self.catalog_status.set(text)
 
     def on_select(self, _event=None) -> None:
         selected = self.tree.selection()
@@ -685,29 +1087,79 @@ class ImageManagerApp(tk.Tk):
         image_id = int(focused if focused in selected else selected[-1])
         record = next((item for item in self.records if item.id == image_id), None)
         self.current_record = record
+        self._prune_stale(selected)
         self._show_preview(record)
         self._show_details(record)
         self._refresh_rating_widgets(record.rating if record else 0)
         self.update_selection_status()
 
-    def set_pick(self, pick_status: str) -> None:
-        if not self._can_start_work():
+    def _prune_stale(self, selected=()) -> None:
+        """Drop rows that stopped matching the filters once the user navigates away."""
+        if not self._stale_ids:
             return
-        if not self.catalog or not self.current_record or self.current_record.id is None:
+        keep = {int(iid) for iid in selected}
+        gone = {image_id for image_id in self._stale_ids if image_id not in keep}
+        if not gone:
             return
-        targets = [record for record in self.selected_records() if record.id is not None]
-        self.catalog.update_selections((record.id for record in targets), pick_status=pick_status)
-        self.refresh_records()
+        for image_id in gone:
+            if self.tree.exists(str(image_id)):
+                self.tree.delete(str(image_id))
+        self.records = [record for record in self.records if record.id not in gone]
+        self._stale_ids -= gone
+        self.update_catalog_status()
 
-    def set_rating(self, rating: int) -> None:
+    def set_pick(self, pick_status: str, advance: bool = True) -> None:
+        self._apply_marks(pick_status=pick_status, advance=advance)
+
+    def set_rating(self, rating: int, advance: bool = True) -> None:
+        self._apply_marks(rating=rating, advance=advance)
+
+    def _apply_marks(self, *, pick_status: str | None = None, rating: int | None = None, advance: bool = True) -> None:
         if not self._can_start_work():
             return
         if not self.catalog or not self.current_record or self.current_record.id is None:
             return
         targets = [record for record in self.selected_records() if record.id is not None]
-        self.catalog.update_selections((record.id for record in targets), rating=rating)
-        self._refresh_rating_widgets(rating)
-        self.refresh_records()
+        if not targets:
+            return
+        single = len(self.tree.selection()) == 1
+        self.catalog.update_selections((record.id for record in targets), pick_status=pick_status, rating=rating)
+        for record in targets:
+            if pick_status is not None:
+                record.pick_status = pick_status  # type: ignore[assignment]
+            if rating is not None:
+                record.rating = rating
+        next_iid = ""
+        if advance and single and self.advance_after_mark.get():
+            next_iid = self.tree.next(str(targets[0].id))
+        if self.sort_key.get() in RESORT_KEYS:
+            # Row order depends on the changed field, so rebuild.
+            self.refresh_records()
+            if next_iid and self.tree.exists(next_iid):
+                self._select_only(next_iid)
+            return
+        minimum = self._min_rating()
+        for record in targets:
+            iid = str(record.id)
+            if self.tree.exists(iid):
+                self.tree.item(iid, values=self._row_values(record), tags=(record.pick_status,))
+            # A row that no longer matches stays until the user moves away.
+            if record_matches_filters(record, self.pick_filter.get(), minimum):
+                self._stale_ids.discard(record.id)
+            else:
+                self._stale_ids.add(record.id)
+        if next_iid:
+            self._select_only(next_iid)
+            return
+        self._show_details(self.current_record)
+        self._refresh_rating_widgets(self.current_record.rating)
+        self.update_selection_status()
+
+    def _select_only(self, iid: str) -> None:
+        self.tree.selection_set(iid)
+        self.tree.focus(iid)
+        self.tree.see(iid)
+        self.on_select()
 
     def move_selection(self, offset: int) -> None:
         children = list(self.tree.get_children())
@@ -716,11 +1168,7 @@ class ImageManagerApp(tk.Tk):
         selected = self.tree.selection()
         index = children.index(selected[0]) if selected else 0
         next_index = max(0, min(len(children) - 1, index + offset))
-        next_item = children[next_index]
-        self.tree.selection_set(next_item)
-        self.tree.focus(next_item)
-        self.tree.see(next_item)
-        self.on_select()
+        self._select_only(children[next_index])
 
     def select_all_visible(self) -> str:
         children = self.tree.get_children()
@@ -739,20 +1187,25 @@ class ImageManagerApp(tk.Tk):
 
     def update_selection_status(self) -> None:
         selected_count = len(self.tree.selection())
-        total_count = len(self.records)
-        self.selection_status.set(f"{selected_count} selected / {total_count} visible")
+        self.selection_status.set(selection_status_text(selected_count, len(self.records)))
 
     def show_shortcuts(self) -> None:
         messagebox.showinfo(
             "Shortcuts",
-            "Arrows: move selection\n"
-            "F: fullscreen\n"
-            "P/M/X/U: Pick / Maybe / Reject / Unrated\n"
-            "0-5: rating\n"
-            "Ctrl+A: select all visible\n"
-            "Ctrl+O: choose folder\n"
-            "Ctrl+E: export selected\n"
-            "F5: rescan",
+            "P  Pick\n"
+            "X  Reject\n"
+            "M  Maybe\n"
+            "U  Clear pick (Unrated)\n"
+            "0\u20135  Star rating (0 clears)\n"
+            "\u2190 / \u2192 or \u2191 / \u2193  Move one photo\n"
+            "F  Full screen (Esc to close)\n"
+            "Ctrl+A  Select all shown\n"
+            "Ctrl+O  Choose folder\n"
+            "Ctrl+E  Export selected\n"
+            "F5  Rescan\n\n"
+            "Pick, reject and rating apply to all selected rows. With one row "
+            "selected they advance to the next photo (View > Advance after "
+            "Pick/Reject/Rating).",
         )
 
     def backup_picked(self) -> None:
@@ -767,6 +1220,8 @@ class ImageManagerApp(tk.Tk):
             return
         destination = filedialog.askdirectory(title="Choose NDEX backup destination")
         if not destination:
+            return
+        if not messagebox.askyesno("Backup Picked", backup_confirm_text(records, destination)):
             return
         self._start_operation("backup", records, Path(destination))
 
@@ -794,7 +1249,8 @@ class ImageManagerApp(tk.Tk):
         snapshots = [replace(record) for record in records]
         source = str(self.source_dir or "")
         catalog_path = self.catalog.db_path if self.catalog else None
-        self.status.set(f"Starting {kind} for {len(snapshots)} image(s)...")
+        self._job_destination = destination
+        self.status.set(f"Starting {KIND_NAMES.get(kind, kind).lower()} for {plural(len(snapshots), 'image')}\u2026")
 
         def work(cancel, progress):
             from ndex_common.workflow import record_job
@@ -846,9 +1302,10 @@ class ImageManagerApp(tk.Tk):
         if kind == "backup":
             self.refresh_records()
         finished = "cancelled" if summary.cancelled else "complete"
-        count = getattr(summary, "copied", getattr(summary, "exported", getattr(summary, "written", 0)))
-        message = f"Completed {count} / skipped {summary.skipped} / failed or not run {summary.errors}"
-        self.status.set(f"{kind.title()} {finished}. {message}")
+        destination = getattr(self, "_job_destination", None)
+        message = operation_summary_text(kind, summary, destination)
+        title = f"{KIND_NAMES.get(kind, kind.title())} {finished}"
+        self.status.set(message)
         details = [message]
         if summary.cancelled:
             details.append("The active file finished safely. Unprocessed files are listed in Job Results.")
@@ -856,8 +1313,15 @@ class ImageManagerApp(tk.Tk):
             details.append("No picked or rated images found. Set pick status or rating first.")
         details.extend(summary.messages[:10])
         details.extend(warnings)
-        show = messagebox.showwarning if summary.errors or warnings else messagebox.showinfo
-        show(f"{kind.title()} {finished}", "\n\n".join(details))
+        problem = bool(summary.errors or warnings)
+        produced = getattr(summary, "copied", getattr(summary, "exported", getattr(summary, "written", 0)))
+        if not summary.cancelled and produced and destination is not None and Path(destination).is_dir():
+            details.append("Open the destination folder?")
+            if messagebox.askyesno(title, "\n\n".join(details), icon="warning" if problem else "info"):
+                _open_folder(destination)
+            return
+        show = messagebox.showwarning if problem else messagebox.showinfo
+        show(title, "\n\n".join(details))
 
     def send_to_auto_selector(self) -> None:
         if not self._can_start_work():
@@ -878,6 +1342,8 @@ class ImageManagerApp(tk.Tk):
         )
         if not files:
             messagebox.showinfo(NDEX_IMAGE_MANAGER_TITLE, "No picked JPG files to send to Auto Selector.")
+            return
+        if not messagebox.askyesno("Send Picks to Auto Selector", send_confirm_text(len(files), "JPG", "Auto Selector")):
             return
         handoff = record_select_handoff(
             self.source_dir or files[0].parent, files, target="auto_selector"
@@ -917,6 +1383,9 @@ class ImageManagerApp(tk.Tk):
                 NDEX_IMAGE_MANAGER_TITLE,
                 "No picked JPG/PNG/TIFF files to send. Frame does not import RAW.",
             )
+            return
+        noun = "JPG" if all(Path(path).suffix.casefold() in (".jpg", ".jpeg") for path in files) else "file"
+        if not messagebox.askyesno("Send Picks to Frame", send_confirm_text(len(files), noun, "Frame")):
             return
         handoff = record_select_handoff(self.source_dir or files[0].parent, files)
         if handoff is None:
@@ -1081,7 +1550,7 @@ class ImageManagerApp(tk.Tk):
             if not left_present:
                 self.paned.insert(0, self.left_pane, weight=1)
             if not self.details_frame.winfo_manager():
-                self.details_frame.pack(fill=tk.X, pady=(8, 0))
+                self.details_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=(1, 0))
             self.after(50, self._position_sash_for_layout)
 
         self.after(80, lambda: self._show_preview(self.current_record))
@@ -1101,6 +1570,9 @@ class ImageManagerApp(tk.Tk):
         width = max(self.paned.winfo_width(), 1)
         image_fraction = 0.8 if self.image_layout.get() == "80%" else 0.5
         left_width = int(width * (1 - image_fraction))
+        if self.image_layout.get() == "50%":
+            # Never clip the list columns; the preview gives way instead.
+            left_width = max(left_width, min(self._list_needed_width(), int(width * 0.72)))
         self.paned.sashpos(0, max(220, left_width))
 
     def open_fullscreen_viewer(self) -> None:
@@ -1115,6 +1587,19 @@ class ImageManagerApp(tk.Tk):
         fullscreen_muted = "#374151" if self.preview_background.get() == "Light Gray" else "#9fb0c4"
         viewer.configure(bg=fullscreen_bg)
         viewer.attributes("-fullscreen", True)
+
+        top_bar = tk.Frame(viewer, bg=fullscreen_bg, bd=0, highlightthickness=0)
+        top_bar.pack(fill=tk.X, padx=14, pady=(8, 0))
+        counter_label = tk.Label(
+            top_bar, bg=fullscreen_bg, fg=fullscreen_fg, font=("Segoe UI", 12, "bold"),
+            bd=0, highlightthickness=0,
+        )
+        counter_label.pack(side=tk.LEFT)
+        badge_label = tk.Label(
+            top_bar, font=("Segoe UI", 12, "bold"), fg="#ffffff", padx=12, pady=3,
+            bd=0, highlightthickness=0,
+        )
+        badge_label.pack(side=tk.RIGHT)
 
         image_label = tk.Label(
             viewer,
@@ -1169,13 +1654,13 @@ class ImageManagerApp(tk.Tk):
                 padx=2,
             )
             star.pack(side=tk.LEFT)
-            star.bind("<Button-1>", lambda event, value=rating: set_fullscreen_rating(value))
+            star.bind("<Button-1>", lambda event, value=rating: set_fullscreen_rating(value, False))
             fullscreen_stars.append(star)
 
-        tk.Button(controls, text="Clear", command=lambda: set_fullscreen_rating(0), width=8).pack(side=tk.LEFT, padx=(8, 18))
+        tk.Button(controls, text="Clear", command=lambda: set_fullscreen_rating(0, False), width=8).pack(side=tk.LEFT, padx=(8, 18))
         tk.Label(
             controls,
-            text="Left/Right: move   0-5: rating   P/M/X/U: pick   Esc/F/double-click: close",
+            text="\u2190/\u2192 move   0\u20135 rating   P/M/X/U pick   Esc/F/double-click close",
             bg=fullscreen_bg,
             fg=fullscreen_muted,
             anchor=tk.W,
@@ -1191,18 +1676,22 @@ class ImageManagerApp(tk.Tk):
             viewer.title(current.display_name)
             metadata_label.configure(text=self._fullscreen_detail_text(current))
             _refresh_star_labels(fullscreen_stars, current.rating)
+            position = next((i for i, item in enumerate(self.records) if item.id == current.id), 0)
+            counter_label.configure(text=position_text(position, len(self.records)))
+            badge_text, badge_color = PICK_BADGES.get(current.pick_status, PICK_BADGES["Unrated"])
+            badge_label.configure(text=badge_text, bg=badge_color)
             if not image_path or not image_path.exists():
-                image_label.configure(image="", text="Preview unavailable")
+                image_label.configure(image="", text=preview_unavailable_text(current))
                 return
             try:
                 with Image.open(image_path) as image:
                     image = ImageOps.exif_transpose(image)
-                    max_size = (max(viewer.winfo_width(), 640), max(viewer.winfo_height() - 104, 480))
-                    image.thumbnail(max_size)
+                    max_size = (max(viewer.winfo_width(), 64), max(viewer.winfo_height() - 140, 64))
+                    image.thumbnail(max_size, Image.Resampling.LANCZOS)
                     self.fullscreen_image = ImageTk.PhotoImage(image)
                     image_label.configure(image=self.fullscreen_image, text=current.display_name)
             except OSError:
-                image_label.configure(image="", text="Preview unavailable")
+                image_label.configure(image="", text=preview_unavailable_text(current))
 
         def navigate(offset: int) -> None:
             if not self.records or not self.current_record:
@@ -1219,8 +1708,8 @@ class ImageManagerApp(tk.Tk):
             self._restore_selection(next_record.id)
             render()
 
-        def set_fullscreen_rating(rating: int) -> None:
-            self.set_rating(rating)
+        def set_fullscreen_rating(rating: int, advance: bool = True) -> None:
+            self.set_rating(rating, advance=advance)
             render()
 
         def set_fullscreen_pick(pick_status: str) -> None:
@@ -1261,22 +1750,22 @@ class ImageManagerApp(tk.Tk):
             return
         image_path = record.display_source or record.thumbnail_path
         if not image_path or not image_path.exists():
-            self.preview_label.configure(image="", text="Preview unavailable")
+            self.preview_label.configure(image="", text=preview_unavailable_text(record))
             self.preview_image = None
             return
         try:
             with Image.open(image_path) as image:
                 image = ImageOps.exif_transpose(image)
-                image.thumbnail(self._preview_max_size())
+                image.thumbnail(self._preview_max_size(), Image.Resampling.LANCZOS)
                 self.preview_image = ImageTk.PhotoImage(image)
                 self.preview_label.configure(image=self.preview_image, text="")
         except OSError:
-            self.preview_label.configure(image="", text="Preview unavailable")
+            self.preview_label.configure(image="", text=preview_unavailable_text(record))
             self.preview_image = None
 
     def _preview_max_size(self) -> tuple[int, int]:
-        width = max(self.preview_label.winfo_width() - 24, 640)
-        height = max(self.preview_label.winfo_height() - 24, 420)
+        width = max(self.preview_label.winfo_width() - 24, 64)
+        height = max(self.preview_label.winfo_height() - 24, 64)
         return width, height
 
     def _schedule_preview_refresh(self) -> None:
@@ -1348,7 +1837,7 @@ class ImageManagerApp(tk.Tk):
 
 
 def _rating_text(rating: int) -> str:
-    return STAR_EMPTY if rating <= 0 else STAR_FILLED * rating
+    return "none" if rating <= 0 else STAR_FILLED * rating
 
 
 def _resolution_text(record: ImageRecord) -> str:

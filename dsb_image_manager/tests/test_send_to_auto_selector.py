@@ -28,9 +28,11 @@ class SendToAutoSelectorTests(unittest.TestCase):
             ]
             app = self._app(root, records)
             with patch("ndex_common.workflow.record_select_handoff", return_value=root / "h.json") as record, \
+                    patch.object(tk_app.messagebox, "askyesno", return_value=True) as confirm, \
                     patch.object(tk_app, "launch_app", return_value=True) as launch:
                 ImageManagerApp.send_to_auto_selector(app)
         self.assertEqual(record.call_args.args[1], [pick])
+        self.assertIn("Send 1 picked JPG to Auto Selector?", confirm.call_args.args[1])
         self.assertEqual(
             launch.call_args.args,
             ("auto_selector", ["--open", "--handoff", str(root / "h.json"), "--raw-source", str(root)]),

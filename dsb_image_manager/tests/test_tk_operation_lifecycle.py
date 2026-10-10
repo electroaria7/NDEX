@@ -51,6 +51,8 @@ class TkOperationLifecycleTests(unittest.TestCase):
         self.info = patch.object(tk_app.messagebox, "showinfo").start()
         self.warning = patch.object(tk_app.messagebox, "showwarning").start()
         self.error = patch.object(tk_app.messagebox, "showerror").start()
+        self.ask = patch.object(tk_app.messagebox, "askyesno", return_value=True).start()
+        self.opened = patch.object(tk_app, "_open_folder").start()
         self.addCleanup(patch.stopall)
 
     def _on_destroy(self, event):
