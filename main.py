@@ -12,7 +12,7 @@ from src.file_types import FILE_TYPE_ORDER, get_file_type_definitions, get_visib
 from src.gui import run_app
 from src.logger import AppLogger
 from src.metadata import MetadataExtractor
-from src.scanner import analyze_source
+from src.scanner import analyze_source, same_folder
 
 from ndex_common.crashlog import install_crash_logging
 
@@ -85,6 +85,9 @@ def print_summary(summary) -> None:
 def run_cli(args: argparse.Namespace) -> int:
     if not args.source or not args.destination:
         raise SystemExit("--source and --destination are required for CLI mode.")
+
+    if same_folder(args.source, args.destination):
+        raise SystemExit("--destination must be different from --source.")
 
     root_dir = get_user_data_dir()
     config = ConfigManager()

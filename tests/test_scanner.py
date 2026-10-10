@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import os
 import tempfile
 import unittest
 from datetime import datetime
 from pathlib import Path
 
-from src.scanner import analyze_source, build_scan_items
+from src.scanner import analyze_source, build_scan_items, collect_supported_files, same_folder
 
 
 class FakeMetadataExtractor:
@@ -54,6 +55,42 @@ class ScannerTests(unittest.TestCase):
             self.assertEqual(len(summary.items), 5)
             self.assertEqual(len(summary.preview_rows), 1)
             self.assertTrue(extractor.batch_used)
+
+class DestinationInsideSourceTests(unittest.TestCase):
+    def test_destination_inside_source_is_not_rescanned(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            source = Path(temp_dir)
+            backup = source / "backup"
+            (backup / "2026" / "cr3").mkdir(parents=True)
+            (source / "IMG_0001.CR3").write_text("cr3", encoding="utf-8")
+            (backup / "2026" / "cr3" / "IMG_0001.CR3").write_text("cr3", encoding="utf-8")
+
+            files = collect_supported_files(source, ["cr3"], exclude_dir=backup)
+            summary = analyze_source(source, backup, FakeMetadataExtractor(), ["cr3"])
+
+        self.assertEqual([path.name for path in files], ["IMG_0001.CR3"])
+        self.assertEqual(files[0].parent, source)
+        self.assertEqual(len(summary.items), 1)
+
+    def test_same_folder_ignores_case_and_slashes(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            self.assertTrue(same_folder(root, str(root).upper() + os.sep))
+            self.assertFalse(same_folder(root, root / "backup"))
+
+    def test_file_missing_from_metadata_is_skipped(self):
+        class Skipping(FakeMetadataExtractor):
+            def get_capture_datetimes(self, file_paths, logger=None):
+                return {}
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            raw = root / "IMG_0001.CR3"
+            raw.write_text("cr3", encoding="utf-8")
+            items, _counts = build_scan_items([raw], root / "backup", Skipping())
+
+        self.assertEqual(items, [])
+
 
 class BuildScanItemsTests(unittest.TestCase):
     """A retry hands in a file list instead of scanning a folder."""
