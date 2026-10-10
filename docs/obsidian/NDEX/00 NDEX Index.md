@@ -1,7 +1,7 @@
 # NDEX Index
 
 created: 2026-05-25
-updated: 2026-09-02
+updated: 2026-10-10
 type: project-index
 status: active
 
@@ -21,6 +21,7 @@ NDEX는 사진 작업 흐름을 중심으로 만든 로컬 데스크톱 유틸�
 
 ## Project Notes
 
+- [[12_UIUX_효율_안정성_패치노트_2026-10-10]] — 미배포 소스 개선
 - [[01 Development Progress]]
 - [[02 Program Map]]
 - [[Architecture/Shared Assets and Build]]

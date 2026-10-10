@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import datetime
+import os
 from pathlib import Path
+from threading import Event
 from typing import Callable
 
 from ..core.file_types import is_supported_image, media_type_for_path
@@ -14,6 +16,15 @@ from .metadata import MetadataReader
 ProgressCallback = Callable[[int, int, Path], None]
 
 
+class ScanCancelled(Exception):
+    """A scan stopped before replacing the catalog contents."""
+
+
+def _check_cancelled(cancel_event: Event | None) -> None:
+    if cancel_event is not None and cancel_event.is_set():
+        raise ScanCancelled()
+
+
 class ImageScanner:
     def __init__(self, metadata_reader: MetadataReader | None = None):
         self.metadata_reader = metadata_reader or MetadataReader()
@@ -23,18 +34,27 @@ class ImageScanner:
         source_dir: Path,
         recursive: bool = True,
         progress_callback: ProgressCallback | None = None,
+        cancel_event: Event | None = None,
     ) -> ScanResult:
         source_dir = Path(source_dir).resolve()
         cache_dir = source_dir / ".dsb_cache"
-        catalog = Catalog(cache_dir / "catalog.sqlite")
+        _check_cancelled(cancel_event)
         cache = CacheManager(cache_dir, self.metadata_reader)
 
-        paths = self._find_images(source_dir, recursive)
-        metadata_by_path = self.metadata_reader.read_batch(paths)
+        paths = self._find_images(source_dir, recursive, cancel_event)
+        metadata_by_path = {}
+        # ExifTool already batches at 100 files. Check cancellation between
+        # batches instead of waiting for all metadata in a large folder.
+        for offset in range(0, len(paths), 100):
+            _check_cancelled(cancel_event)
+            if progress_callback:
+                progress_callback(0, len(paths), paths[offset])
+            metadata_by_path.update(self.metadata_reader.read_batch(paths[offset:offset + 100]))
         pair_status = self._pair_status_by_path(paths)
 
         records: list[ImageRecord] = []
         for index, path in enumerate(paths, start=1):
+            _check_cancelled(cancel_event)
             if progress_callback:
                 progress_callback(index, len(paths), path)
 
@@ -73,22 +93,32 @@ class ImageScanner:
             )
             records.append(record)
 
-        saved = catalog.upsert_images(records)
-        catalog.remove_missing_under(source_dir, {record.file_path for record in records}, recursive=recursive)
-        catalog.set_setting("last_opened_folder", str(source_dir))
-        catalog.close()
+        _check_cancelled(cancel_event)
+        # Do not touch the previous catalog until a complete scan is ready.
+        catalog = Catalog(cache_dir / "catalog.sqlite")
+        try:
+            saved = catalog.upsert_images(records)
+            catalog.remove_missing_under(source_dir, {record.file_path for record in records}, recursive=recursive)
+            catalog.set_setting("last_opened_folder", str(source_dir))
+        finally:
+            catalog.close()
         return ScanResult(source_dir=source_dir, catalog_path=cache_dir / "catalog.sqlite", records=saved)
 
     @staticmethod
-    def _find_images(source_dir: Path, recursive: bool) -> list[Path]:
-        iterator = source_dir.rglob("*") if recursive else source_dir.glob("*")
-        paths = [
-            path.resolve()
-            for path in iterator
-            if path.is_file()
-            and ".dsb_cache" not in path.parts
-            and is_supported_image(path)
-        ]
+    def _find_images(source_dir: Path, recursive: bool, cancel_event: Event | None = None) -> list[Path]:
+        paths = []
+        def walk_error(error: OSError) -> None:
+            # An incomplete traversal must never remove unseen catalog rows.
+            raise error
+
+        for directory, subdirs, names in os.walk(source_dir, onerror=walk_error):
+            _check_cancelled(cancel_event)
+            subdirs[:] = [name for name in subdirs if name.casefold() != ".dsb_cache"] if recursive else []
+            for name in names:
+                _check_cancelled(cancel_event)
+                path = Path(directory) / name
+                if is_supported_image(path) and path.is_file():
+                    paths.append(path.resolve())
         return sorted(paths, key=lambda path: str(path).lower())
 
     @staticmethod

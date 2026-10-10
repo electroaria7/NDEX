@@ -251,6 +251,22 @@ class Catalog:
         self.connection.execute("UPDATE images SET backup_status = ? WHERE id = ?", (status, image_id))
         self.connection.commit()
 
+    def update_backup_statuses(self, image_ids: Iterable[int], status: str) -> None:
+        with self.connection:
+            self.connection.executemany(
+                "UPDATE images SET backup_status = ? WHERE id = ?",
+                ((status, image_id) for image_id in image_ids),
+            )
+
+    def update_selections(
+        self, image_ids: Iterable[int], *, pick_status: str | None = None, rating: int | None = None,
+    ) -> None:
+        with self.connection:
+            self.connection.executemany(
+                "UPDATE selection SET pick_status = COALESCE(?, pick_status), rating = COALESCE(?, rating) WHERE image_id = ?",
+                ((pick_status, rating, image_id) for image_id in image_ids),
+            )
+
     def set_setting(self, key: str, value: str) -> None:
         self.connection.execute(
             "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",

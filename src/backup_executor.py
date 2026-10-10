@@ -93,9 +93,16 @@ def execute_backup(
                             item.source_path, temp_path, verify_mode
                         )
                         if verified:
-                            if overwriting_existing:
-                                _make_writable(final_path)
-                            os.replace(temp_path, final_path)
+                            if duplicate_policy == "overwrite":
+                                if overwriting_existing:
+                                    _make_writable(final_path)
+                                os.replace(temp_path, final_path)
+                            elif os.name == "nt":
+                                # A concurrent backup may have claimed this name
+                                # while we copied. Only overwrite may replace it.
+                                os.rename(temp_path, final_path)
+                            else:
+                                os.link(temp_path, final_path)
                             result.copied += 1
                             if overwriting_existing:
                                 result.overwritten += 1

@@ -241,7 +241,12 @@ class AppFlowTests(unittest.TestCase):
             stored = shared_settings.get_section("frame")
         self.assertEqual(stored.get("last_source"), str(source_dir.resolve()))
 
-    def test_closing_window_cancels_export_and_waits_for_thread(self) -> None:
+    def test_closing_window_waits_without_blocking_and_delivers_result(self) -> None:
+        from ndex_common.report import read_report
+        from ndex_common.retry import plan_retry
+        from ndex_common.workflow import record_export
+        from ndex_frame.services.export_job import run_export
+
         source_dir = self.root / "close-masters"
         output_dir = self.root / "close-output"
         source_dir.mkdir()
@@ -254,21 +259,45 @@ class AppFlowTests(unittest.TestCase):
         self.window.sync_output_folder_label()
 
         started = threading.Event()
+        release = threading.Event()
+        recorded = []
+        manifests = []
+        self.controller.exportFinished.connect(recorded.append)
+        self.controller.exportFinished.connect(
+            lambda result: manifests.append(record_export(result.source_dir, result.output_dir, result))
+        )
 
         def blocking_export(snapshot, progress, cancel):
             started.set()
             while not cancel.is_cancelled():
                 time.sleep(0.02)
-            return ExportResult(0, 0, 0, True, ())
+            release.wait(5)
+            return run_export(snapshot, progress, cancel)
 
-        with patch("ndex_frame.ui.workspace.run_export", side_effect=blocking_export):
+        with patch.dict(os.environ, {"LOCALAPPDATA": str(self.root / "appdata")}), \
+                patch("ndex_frame.ui.workspace.run_export", side_effect=blocking_export):
             self.window.confirm_export(collision_policy="rename")
             self._wait_until(started.is_set)
             thread = self.controller._export_thread
             self.assertIsNotNone(thread)
             self.assertTrue(thread.isRunning())
-            self.window.close()
-            self.assertFalse(thread.isRunning())
+            self.window.show()
+            before = time.monotonic()
+            try:
+                self.window.close()
+                self.assertLess(time.monotonic() - before, 0.5)
+                self.assertTrue(self.window.isVisible())
+                self.assertTrue(thread.isRunning())
+            finally:
+                release.set()
+            self._wait_until(lambda: not self.window.isVisible())
+            self.assertEqual(len(recorded), 1)
+            self.assertTrue(recorded[0].cancelled)
+            self.assertIsNone(self.controller._export_thread)
+            self.assertTrue(manifests[0].is_file())
+            report = read_report(manifests[0])
+            self.assertTrue(report.cancelled)
+            self.assertEqual(plan_retry(report).paths, (source_dir / "one.jpg",))
 
     def test_completion_dialog_lists_counts_and_open_folder(self) -> None:
         dialog = ExportCompletionDialog(ExportResult(2, 1, 3, True, ()), 4, self.root / "output")
@@ -278,6 +307,26 @@ class AppFlowTests(unittest.TestCase):
             "Exported 2 · Skipped 1 · Failed 3 · Cancelled 4",
         )
         self.assertEqual(dialog.open_folder_button.text(), "Open Output Folder")
+
+    def test_export_worker_exception_releases_thread_and_reports_failure(self) -> None:
+        self.controller.state.sources = [SourceItem(self.root / "a.jpg", 20, 20, True)]
+        self.controller.state.output_directory = self.root
+        failures = []
+        self.controller.exportAborted.connect(failures.append)
+        with patch("ndex_frame.ui.workspace.run_export", side_effect=RuntimeError("worker interrupted")):
+            self.controller.start_export()
+            self._wait_until(lambda: self.controller._export_thread is None)
+        self.assertEqual(failures, ["worker interrupted"])
+
+    def test_cancelled_files_are_not_counted_twice_in_completion_summary(self) -> None:
+        result = ExportResult(0, 0, 1, True, (
+            ExportItemResult(self.root / "a.jpg", self.root / "output.jpg", "failed", "not run: cancelled"),
+        ))
+        self.window._export_finished(result)
+        self.assertEqual(self.window._last_completion_dialog.summary_label.text(),
+                         "Exported 0 · Skipped 0 · Failed 0 · Cancelled 1")
+        self.assertEqual(self.window._source_export_status[self.root / "a.jpg"], "Cancelled")
+        self.assertEqual(self.window._status_for(self.root / "a.jpg"), "Cancelled")
 
 
 if __name__ == "__main__":

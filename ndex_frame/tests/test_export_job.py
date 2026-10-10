@@ -152,8 +152,22 @@ class ExportJobTests(unittest.TestCase):
 
         self.assertEqual(result.exported, 1)
         self.assertTrue(result.cancelled)
+        self.assertEqual(len(result.items), 3)
+        self.assertEqual(result.failed, 2)
+        self.assertEqual(result.cancelled_count, 2)
+        self.assertEqual([item.message for item in result.items[1:]], ["not run: cancelled"] * 2)
         self.assertEqual(len(list(self.output.glob("*.jpg"))), 1)
         self.assertEqual(list(self.output.glob("*.ndex_tmp")), [])
+
+    def test_cancel_before_start_preserves_every_source_for_retry(self) -> None:
+        token = CancelToken()
+        token.cancel()
+        result = run_export(plan_export(self.request()), lambda _event: None, token)
+        self.assertTrue(result.cancelled)
+        self.assertEqual(result.failed, 1)
+        self.assertEqual(result.items[0].source, self.source_path)
+        self.assertEqual(result.items[0].message, "not run: cancelled")
+        self.assertEqual(list(self.output.glob("*.jpg")), [])
 
     def test_skip_items_are_counted_without_decoding_sources(self) -> None:
         (self.output / "IMG_001.jpg").write_bytes(b"existing")

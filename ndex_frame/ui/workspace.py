@@ -8,7 +8,7 @@ from pathlib import Path
 
 from PIL import Image
 from PIL.ImageQt import ImageQt
-from PySide6.QtCore import QObject, QRunnable, Qt, QThread, QThreadPool, Signal, Slot
+from PySide6.QtCore import QObject, QRunnable, Qt, QThread, QThreadPool, QTimer, Signal, Slot
 from PySide6.QtGui import QImage
 
 from ndex_common import settings
@@ -98,6 +98,7 @@ class _ImportRunnable(QRunnable):
         super().__init__()
         self.paths = paths
         self.recursive = recursive
+        self.cancel = CancelToken()
         self.signals = _ImportSignals()
         self.source_folder = next((path.resolve() for path in paths if path.is_dir()), None)
 
@@ -113,6 +114,9 @@ class _ImportRunnable(QRunnable):
             self.signals.failed.emit(self, str(error) or error.__class__.__name__)
             return
         for path in files:
+            if self.cancel.is_cancelled():
+                self.signals.completed.emit(self, [], "")
+                return
             try:
                 sources.append(analyze_source(path))
             except Exception as error:
@@ -164,6 +168,7 @@ class _PreviewRunnable(QRunnable):
 class _ExportWorker(QObject):
     progress = Signal(object)
     completed = Signal(object)
+    failed = Signal(str)
 
     def __init__(self, snapshot: object, cancel: CancelToken) -> None:
         super().__init__()
@@ -172,8 +177,12 @@ class _ExportWorker(QObject):
 
     @Slot()
     def run(self) -> None:
-        result = run_export(self.snapshot, self.progress.emit, self.cancel)
-        self.completed.emit(result)
+        try:
+            result = run_export(self.snapshot, self.progress.emit, self.cancel)
+        except Exception as error:
+            self.failed.emit(str(error) or error.__class__.__name__)
+        else:
+            self.completed.emit(result)
 
 
 class WorkspaceController(QObject):
@@ -190,6 +199,7 @@ class WorkspaceController(QObject):
     exportProgress = Signal(object)
     exportFinished = Signal(object)
     busyChanged = Signal(bool)
+    shutdownFinished = Signal()
 
     def __init__(
         self,
@@ -202,16 +212,30 @@ class WorkspaceController(QObject):
         super().__init__()
         self.state = state
         self.preview_cache = preview_cache or PreviewCache(Path.home() / ".ndex" / "frame" / "cache")
-        self.thread_pool = thread_pool or QThreadPool.globalInstance()
+        self.thread_pool = thread_pool or QThreadPool(self)
         self._settings_writer = settings_writer or settings.update_section
         self._jobs: set[QRunnable] = set()
         self._export_thread: QThread | None = None
         self._export_worker: _ExportWorker | None = None
         self._cancel_token: CancelToken | None = None
         self._pending_export_result: ExportResult | None = None
+        self._current_import: _ImportRunnable | None = None
+        self._preview_jobs: dict[tuple, _PreviewRunnable] = {}
+        self._requested_preview_key: tuple | None = None
+        self._preview_image: tuple[tuple, QImage] | None = None
+        self._shutting_down = False
+        self._shutdown_timer = QTimer(self)
+        self._shutdown_timer.setInterval(20)
+        self._shutdown_timer.timeout.connect(self._poll_shutdown)
+        self._export_error = ""
 
     def import_paths(self, paths: list[Path], *, recursive: bool = False) -> None:
+        if self._shutting_down:
+            return
+        if self._current_import is not None:
+            self._current_import.cancel.cancel()
         job = _ImportRunnable(paths, recursive)
+        self._current_import = job
         self._jobs.add(job)
         job.signals.completed.connect(self._finish_import, Qt.ConnectionType.QueuedConnection)
         job.signals.failed.connect(self._fail_job, Qt.ConnectionType.QueuedConnection)
@@ -221,6 +245,10 @@ class WorkspaceController(QObject):
     @Slot(object, object, str)
     def _finish_import(self, job: QRunnable, sources: list[SourceItem], warning: str = "") -> None:
         self._jobs.discard(job)
+        if job is not self._current_import or self._shutting_down:
+            return
+        self._current_import = None
+        self._requested_preview_key = None
         if warning:
             self.errorOccurred.emit(warning)
         self.state.replace_sources(sources)
@@ -231,7 +259,7 @@ class WorkspaceController(QObject):
             except OSError:
                 pass
         self.sourcesChanged.emit()
-        self.busyChanged.emit(False)
+        self._emit_busy()
         if self.state.selected_path is not None:
             self.selectionChanged.emit(self.state.selected_path)
             self.request_preview(self.state.selected_path)
@@ -239,10 +267,19 @@ class WorkspaceController(QObject):
     @Slot(object, str)
     def _fail_job(self, job: QRunnable, message: str) -> None:
         self._jobs.discard(job)
-        self.busyChanged.emit(False)
+        self._forget_preview_job(job)
+        if self._shutting_down:
+            return
         if isinstance(job, _ImportRunnable):
+            if job is not self._current_import:
+                return
+            self._current_import = None
+            self._emit_busy()
             self.importFailed.emit(message)
         self.errorOccurred.emit(message)
+
+    def _emit_busy(self) -> None:
+        self.busyChanged.emit(self._current_import is not None or self._export_thread is not None)
 
     def select(self, path: Path) -> None:
         self.state.select(path)
@@ -274,8 +311,19 @@ class WorkspaceController(QObject):
             self.request_preview(self.state.selected_path)
 
     def request_preview(self, path: Path, max_edge: int = 1600) -> None:
+        if self._shutting_down:
+            return
         source = self.state.source(path)
+        key = self._preview_key(path, max_edge)
+        self._requested_preview_key = key
+        if self._preview_image is not None and self._preview_image[0] == key:
+            self._emit_preview(path, self._preview_image[1])
+            return
+        if key in self._preview_jobs:
+            return
         job = _PreviewRunnable(source, self.preview_cache, max_edge)
+        job.preview_key = key
+        self._preview_jobs[key] = job
         self._jobs.add(job)
         job.signals.completed.connect(self._finish_preview, Qt.ConnectionType.QueuedConnection)
         job.signals.failed.connect(self._fail_job, Qt.ConnectionType.QueuedConnection)
@@ -284,18 +332,42 @@ class WorkspaceController(QObject):
     @Slot(object, object, object, str)
     def _finish_preview(self, job: QRunnable, path: Path, image: QImage, warning: str) -> None:
         self._jobs.discard(job)
-        if path != self.state.selected_path:
+        self._forget_preview_job(job)
+        if self._shutting_down or path != self.state.selected_path:
             return
+        key = getattr(job, "preview_key", None)
+        if key is not None:
+            if key != self._requested_preview_key or key != self._preview_key(path, job.max_edge):
+                return
+            self._preview_image = (key, image)
+        self._emit_preview(path, image)
+        if warning:
+            self.errorOccurred.emit(warning)
+
+    @staticmethod
+    def _preview_key(path: Path, max_edge: int) -> tuple:
+        try:
+            stat = path.stat()
+            return path, max_edge, stat.st_size, stat.st_mtime_ns
+        except OSError:
+            return path, max_edge, None, None
+
+    def _forget_preview_job(self, job: QRunnable) -> None:
+        key = getattr(job, "preview_key", None)
+        if self._preview_jobs.get(key) is job:
+            self._preview_jobs.pop(key, None)
+
+    def _emit_preview(self, path: Path, image: QImage) -> None:
         source = self.state.source(path)
         scale, x, y = self.state.effective_framing(path)
         canvas = resolve_canvas(self.state.output_profile.sizing, self.state.working_frame.ratio)
         # This is the exact export plan. PreviewWidget only projects this plan.
         plan = build_render_plan((source.oriented_width, source.oriented_height), canvas, scale, x, y)
         self.previewReady.emit(path, image, plan, self.state.working_frame.background)
-        if warning:
-            self.errorOccurred.emit(warning)
 
     def start_export(self, sources: list[SourceItem] | None = None, collision_policy: str = "rename") -> None:
+        if self._shutting_down:
+            raise RuntimeError("The workspace is closing.")
         if self._export_thread is not None:
             raise RuntimeError("An export job is already running.")
         selected_sources = tuple(sources if sources is not None else self.state.sources)
@@ -319,9 +391,13 @@ class WorkspaceController(QObject):
         worker.completed.connect(self._record_export_result, Qt.ConnectionType.QueuedConnection)
         worker.completed.connect(worker.deleteLater)
         worker.completed.connect(thread.quit)
+        worker.failed.connect(self._record_export_error, Qt.ConnectionType.QueuedConnection)
+        worker.failed.connect(worker.deleteLater)
+        worker.failed.connect(thread.quit)
         thread.finished.connect(self._export_thread_finished, Qt.ConnectionType.QueuedConnection)
         thread.finished.connect(thread.deleteLater)
         self._pending_export_result = None
+        self._export_error = ""
         self._export_thread, self._export_worker, self._cancel_token = thread, worker, cancel
         self.busyChanged.emit(True)
         thread.start()
@@ -330,13 +406,26 @@ class WorkspaceController(QObject):
         if self._cancel_token is not None:
             self._cancel_token.cancel()
 
-    def shutdown(self, timeout_ms: int = 30_000) -> None:
+    def shutdown(self) -> bool:
+        """Begin cooperative shutdown; keep the event loop available for results."""
+        self._shutting_down = True
         self.cancel_export()
-        thread = self._export_thread
-        if thread is not None:
-            thread.quit()
-            thread.wait(timeout_ms)
-        self.thread_pool.waitForDone(timeout_ms)
+        for job in self._jobs:
+            if isinstance(job, _ImportRunnable):
+                job.cancel.cancel()
+        if self._shutdown_complete():
+            return True
+        self._shutdown_timer.start()
+        return False
+
+    def _shutdown_complete(self) -> bool:
+        return self._export_thread is None and not self._jobs and self.thread_pool.activeThreadCount() == 0
+
+    @Slot()
+    def _poll_shutdown(self) -> None:
+        if self._shutdown_complete():
+            self._shutdown_timer.stop()
+            self.shutdownFinished.emit()
 
     @Slot(object)
     def _relay_export_progress(self, progress: ExportProgress) -> None:
@@ -346,6 +435,10 @@ class WorkspaceController(QObject):
     def _record_export_result(self, result: ExportResult) -> None:
         self._pending_export_result = result
 
+    @Slot(str)
+    def _record_export_error(self, message: str) -> None:
+        self._export_error = message
+
     @Slot()
     def _export_thread_finished(self) -> None:
         result = self._pending_export_result
@@ -353,9 +446,10 @@ class WorkspaceController(QObject):
         self._export_worker = None
         self._cancel_token = None
         self._pending_export_result = None
-        self.busyChanged.emit(False)
+        self._emit_busy()
         if result is not None:
             self.exportFinished.emit(result)
         else:
-            self.exportAborted.emit("Export worker stopped without a result.")
-            self.errorOccurred.emit("Export worker stopped without a result.")
+            message = self._export_error or "Export worker stopped without a result."
+            self.exportAborted.emit(message)
+            self.errorOccurred.emit(message)

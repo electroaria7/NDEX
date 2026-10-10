@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from pathlib import Path
+from threading import Event
 
 from ndex_common.filecopy import copy_verified
 
 from ..core.file_types import backup_type_folder
 from ..core.models import BackupSummary, DuplicatePolicy, ImageRecord
+from .operations import ProgressCallback, operation_records
 
 
 class BackupService:
@@ -14,11 +16,15 @@ class BackupService:
         records: list[ImageRecord],
         destination_root: Path,
         duplicate_policy: DuplicatePolicy = "rename",
+        *,
+        cancel_event: Event | None = None,
+        progress_callback: ProgressCallback | None = None,
     ) -> BackupSummary:
         summary = BackupSummary(total=len(records))
         destination_root = Path(destination_root)
 
-        for record in sorted(records, key=lambda item: (item.effective_datetime, item.file_path.name.lower())):
+        ordered = sorted(records, key=lambda item: (item.effective_datetime, item.file_path.name.lower()))
+        for record in operation_records(ordered, summary, cancel_event, progress_callback):
             try:
                 destination_dir = self.destination_dir(destination_root, record)
                 destination_dir.mkdir(parents=True, exist_ok=True)

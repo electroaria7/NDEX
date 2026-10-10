@@ -29,16 +29,22 @@ def collect_supported_files(
     enabled_extensions = get_extensions_for_types(enabled_types)
     excluded = Path(os.path.normcase(os.path.abspath(exclude_dir))) if exclude_dir else None
 
-    files = [
-        path
-        for path in source_dir.rglob("*")
-        if path.suffix.lower() in enabled_extensions
-        and not (
-            excluded is not None
-            and _is_within(Path(os.path.normcase(os.path.abspath(path))), excluded)
+    def excluded_path(path: Path) -> bool:
+        return excluded is not None and _is_within(
+            Path(os.path.normcase(os.path.abspath(path))), excluded
         )
-        and path.is_file()
-    ]
+
+    if excluded_path(source_dir):
+        return []
+    files = []
+    for directory, dirs, names in os.walk(source_dir):
+        root = Path(directory)
+        # Prune before descending: an existing backup can dwarf the source.
+        dirs[:] = [name for name in dirs if not excluded_path(root / name)]
+        for name in names:
+            path = root / name
+            if path.suffix.lower() in enabled_extensions and path.is_file():
+                files.append(path)
     return sorted(files, key=lambda path: str(path).lower())
 
 

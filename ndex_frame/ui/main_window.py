@@ -77,6 +77,8 @@ class MainWindow(QMainWindow):
         self._known_source_paths: set[Path] = set()
         self._export_total = 0
         self._busy = False
+        self._close_pending = False
+        self._close_ready = False
         self.handoff_path: Path | None = None
         self.setWindowTitle(NDEX_FRAME_TITLE)
         self.resize(1180, 760)
@@ -92,10 +94,25 @@ class MainWindow(QMainWindow):
         self._refresh_sources()
 
     def closeEvent(self, event: QCloseEvent) -> None:
+        if self._close_ready:
+            super().closeEvent(event)
+            return
         self._interactive_dialogs = False
+        self._close_pending = True
         self.request_cancel()
-        self.controller.shutdown()
-        super().closeEvent(event)
+        if self.controller.shutdown():
+            self._close_ready = True
+            super().closeEvent(event)
+        else:
+            self.setEnabled(False)
+            self.statusBar().showMessage("Closing after the current file finishes…")
+            event.ignore()
+
+    @Slot()
+    def _finish_close(self) -> None:
+        if self._close_pending:
+            self._close_ready = True
+            self.close()
 
     def set_interactive_dialogs(self, enabled: bool) -> None:
         self._interactive_dialogs = enabled
@@ -305,6 +322,7 @@ class MainWindow(QMainWindow):
         self.controller.exportFinished.connect(self._export_finished)
         self.controller.importFailed.connect(self._retry_import_failed)
         self.controller.exportAborted.connect(self._retry_export_aborted)
+        self.controller.shutdownFinished.connect(self._finish_close)
 
     def _reload_preset_combos(self) -> None:
         frames: list[FramePreset]
@@ -570,10 +588,8 @@ class MainWindow(QMainWindow):
 
     def _status_for(self, path: Path) -> str:
         export_status = self._source_export_status.get(path)
-        if export_status == "Error":
-            return "Error"
-        if export_status == "Exported":
-            return "Exported"
+        if export_status in {"Error", "Exported", "Cancelled"}:
+            return export_status
         if self.controller.state.is_modified(path):
             return "Modified"
         return "Default"
@@ -828,10 +844,12 @@ class MainWindow(QMainWindow):
             if item.state == "exported":
                 self._source_export_status[item.source] = "Exported"
             elif item.state == "failed":
-                self._source_export_status[item.source] = "Error"
+                self._source_export_status[item.source] = (
+                    "Cancelled" if item.message == "not run: cancelled" else "Error"
+                )
         cancelled = 0
         if getattr(result, "cancelled", False):
-            cancelled = max(
+            cancelled = getattr(result, "cancelled_count", 0) or max(
                 0,
                 self._export_total - result.exported - result.skipped - result.failed,
             )

@@ -227,6 +227,22 @@ class RecentReportTests(unittest.TestCase):
                 report.latest_report("frame", "nope", root=Path(tmp))
 
 class LatestByAppTests(unittest.TestCase):
+    def test_manager_latest_includes_backup_and_xmp_export(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write(root, "latest-image_manager-select_handoff.json", _manifest(
+                type="select_handoff", app="image_manager", created_at="2026-10-10T10:00:00Z"))
+            _write(root, "latest-image_manager-backup.json", _manifest(
+                type="backup", app="image_manager", created_at="2026-10-10T11:00:00Z"))
+            latest = report.latest_reports_by_app(("image_manager",), root=root)
+            self.assertEqual(latest["image_manager"].type, "backup")
+            _write(root, "latest-image_manager-export.json", _manifest(
+                type="export", app="image_manager", created_at="2026-10-10T12:00:00Z",
+                context={"operation": "xmp"}, counts={"written": 12}))
+            latest = report.latest_reports_by_app(("image_manager",), root=root)
+            self.assertEqual(latest["image_manager"].type_label, "XMP Export")
+            self.assertEqual(latest["image_manager"].count_summary, "12 written")
+
     def test_newest_job_per_app_comes_from_the_pointer_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

@@ -1,6 +1,20 @@
 # NDEX Patch Notes
 
-## Unreleased — 2026-10-09 audit fixes
+## 0.9.4 Beta — 2026-10-10
+
+Release scope: the October 9 audit fixes and October 10 UI/UX and task-safety changes below. `NDEX_VERSION` is `0.9.4`; the channel remains `beta`. Package names: `NDEX_v0.9.4.zip` and `NDEX_Setup_0.9.4.exe`. Existing 0.9.3 downloads are retained separately.
+
+### 2026-10-10 UI/UX and task safety
+
+- Image Manager runs backup, file export, and XMP export in a background worker with progress, cancellation, and saved job results. Folder scans and file jobs run one at a time; changing folders detaches the old catalog. Selection and backup status updates use batch transactions.
+- Auto Selector adds cancellation and safe closing, locks job inputs, and rejects stale matching results. Re-running a rename job reuses an identical numbered RAW copy instead of creating another one.
+- Frame preserves unprocessed photos in cancelled export results for Retry Failed, closes without blocking the Qt event loop, and ignores superseded imports. Repeated framing changes reuse the same decoded preview.
+- NDEX One invalidates analysis when folders or file types change, locks running job inputs, and waits for the worker to save results before closing. Non-overwrite backups preserve a destination claimed by another writer during copying.
+- One and Auto Selector keep the window open with a warning if saving results or completing a worker fails during a close request. Image Manager reports closing-time errors before exiting.
+- Excluded backup/work/cache directories are pruned before traversal. The Launcher can display Image Manager backup/export results, including XMP write counts.
+- Cancellation takes effect at file or metadata-batch boundaries; the current copy, verification, or render is allowed to finish. Closing One during analysis waits for that analysis to finish. Manager keeps cancelled items in Job Results but does not add a Manager-specific Retry Failed action.
+
+### 2026-10-09 audit fixes
 
 - Read ExifTool output as UTF-8 so RAW capture dates are correct for Korean (non-ASCII) folder and file names; these files were previously dated from file modification time. Image Manager metadata reads use the same fix.
 - Send to Auto Selector hands off only the JPGs picked in Image Manager (`--handoff`), excluding `.dsb_cache` thumbnails, so rejected RAWs can no longer be selected.
@@ -212,6 +226,6 @@ See `ndex_frame/PATCH_NOTES.md` (copied to `Docs\FRAME_PATCH_NOTES.md`): ratio/c
 
 ### Installer
 
-- GitHub first shipped the suite installer as `NDEX_Setup_1.0.0.exe`. Current builds produce `NDEX_Setup_0.9.3.exe` into `C:\Program Files\NDEX`.
+- GitHub first shipped the suite installer as `NDEX_Setup_1.0.0.exe`; later beta installers included `NDEX_Setup_0.9.3.exe`. The default installation folder is `C:\Program Files\NDEX`.
 - Desktop icon and post-install run launch **NDEX Launcher**.
 - MIT `LICENSE` plus English/Korean user agreement (`TERMS.md`, `TERMS.ko.md`). The installer shows the agreement before install. Copies go in `Docs\`. NDEX stays free of charge.

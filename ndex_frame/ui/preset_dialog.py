@@ -273,7 +273,8 @@ class ExportCompletionDialog(QDialog):
         self.setWindowTitle("Export Complete")
         layout = QVBoxLayout(self)
         self.summary_label = QLabel(
-            f"Exported {result.exported} · Skipped {result.skipped} · Failed {result.failed} · Cancelled {cancelled_count}"
+            f"Exported {result.exported} · Skipped {result.skipped} · "
+            f"Failed {result.failed - getattr(result, 'cancelled_count', 0)} · Cancelled {cancelled_count}"
         )
         layout.addWidget(self.summary_label)
         self.open_folder_button = QPushButton("Open Output Folder")

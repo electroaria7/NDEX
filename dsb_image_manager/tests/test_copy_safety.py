@@ -1,6 +1,7 @@
 from datetime import datetime
 from pathlib import Path
 import tempfile
+import threading
 from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
@@ -8,6 +9,7 @@ from unittest.mock import Mock, patch
 from dsb_image_manager.dsb_image_manager.core.models import ImageRecord, ExportOptions
 from dsb_image_manager.dsb_image_manager.services.backup import BackupService
 from dsb_image_manager.dsb_image_manager.services.exporter import ExportService
+from dsb_image_manager.dsb_image_manager.services.catalog import Catalog
 from dsb_image_manager.dsb_image_manager.ui.tk_app import ImageManagerApp
 
 
@@ -22,15 +24,21 @@ class CopySafetyTests(unittest.TestCase):
             root = Path(tmp)
             good, missing = record(root / "good.jpg", 1), record(root / "missing.jpg", 2)
             good.file_path.write_bytes(b"photo")
-            catalog = Mock()
-            catalog.list_images.return_value = [good, missing]
-            app = SimpleNamespace(catalog=catalog, source_dir=root, refresh_records=Mock())
+            catalog = Catalog(root / "catalog.sqlite")
+            catalog.upsert_images([good, missing])
+            catalog.update_selections([good.id, missing.id], pick_status="Pick")
+            app = SimpleNamespace(catalog=catalog, source_dir=root, status=Mock(),
+                                  _can_start_work=lambda: True,
+                                  _start_worker=lambda kind, work: work(threading.Event(), None))
+            app._start_operation = lambda *args: ImageManagerApp._start_operation(app, *args)
             with patch("dsb_image_manager.dsb_image_manager.ui.tk_app.filedialog.askdirectory",
                        return_value=str(root / "backup")), \
                  patch("dsb_image_manager.dsb_image_manager.ui.tk_app.messagebox.showinfo"), \
                  patch("ndex_common.workflow.record_job") as recorded:
                 ImageManagerApp.backup_picked(app)
-            catalog.update_backup_status.assert_called_once_with(1, "backed_up")
+            statuses = {record.file_path.name: record.backup_status for record in catalog.list_images()}
+            catalog.close()
+            self.assertEqual(statuses, {"good.jpg": "backed_up", "missing.jpg": "not_backed_up"})
             self.assertEqual(recorded.call_args.kwargs["counts"]["failed"], 1)
             failed = [item for item in recorded.call_args.kwargs["items"] if item["status"] == "failed"]
             self.assertEqual(failed[0]["path"], str(missing.file_path))

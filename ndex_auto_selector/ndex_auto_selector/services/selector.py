@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 from pathlib import Path
+from threading import Event
 
 from ndex_common.filecopy import copy_verified
 
@@ -70,6 +72,36 @@ def _is_within(path: Path, folder: Path) -> bool:
 SELECTED_LABEL = "NDEX Selected"
 
 
+class AnalysisCancelled(Exception):
+    """A matching analysis was stopped before a complete result existed."""
+
+
+def _check_cancelled(cancel_event: Event | None) -> None:
+    if cancel_event is not None and cancel_event.is_set():
+        raise AnalysisCancelled()
+
+
+def _walk_files(root: Path, recursive: bool, *, exclude: Path | None = None,
+                skip_cache: bool = False, cancel_event: Event | None = None):
+    """Prune excluded directories before entering them, including large caches."""
+    excluded = _resolved(exclude) if exclude is not None else None
+    if excluded is not None and _is_within(root, excluded):
+        return
+
+    def failed(error):
+        raise error
+
+    for folder, dirs, names in os.walk(root, topdown=True, onerror=failed):
+        _check_cancelled(cancel_event)
+        parent = Path(folder)
+        dirs[:] = [name for name in dirs if recursive
+                   and not (skip_cache and name.casefold() == CACHE_DIR_NAME)
+                   and not (excluded is not None and _is_within(parent / name, excluded))]
+        for name in names:
+            _check_cancelled(cancel_event)
+            yield parent / name
+
+
 class AutoSelectorService:
     def analyze(
         self,
@@ -78,6 +110,7 @@ class AutoSelectorService:
         recursive: bool = True,
         exclude: Path | None = None,
         jpg_files: list[Path] | None = None,
+        cancel_event: Event | None = None,
     ) -> AnalysisSummary:
         """Match selected JPGs to RAWs.
 
@@ -91,9 +124,12 @@ class AutoSelectorService:
         self._require_dir(raw_source_dir, "CR3 source folder")
         self._require_dir(selected_jpg_dir, "selected JPG folder")
 
-        raw_by_stem = self._index_cr3_files(raw_source_dir, recursive=recursive, exclude=exclude)
+        _check_cancelled(cancel_event)
+        raw_by_stem = self._index_cr3_files(
+            raw_source_dir, recursive=recursive, exclude=exclude, cancel_event=cancel_event
+        )
         if jpg_files is None:
-            jpg_files = self._list_jpg_files(selected_jpg_dir, recursive=recursive)
+            jpg_files = self._list_jpg_files(selected_jpg_dir, recursive=recursive, cancel_event=cancel_event)
         else:
             jpg_files = sorted(
                 (
@@ -107,6 +143,7 @@ class AutoSelectorService:
             )
         matches = []
         for jpg_path in jpg_files:
+            _check_cancelled(cancel_event)
             raw_path, status = self._find_matching_raw(raw_by_stem, jpg_path.stem)
             matches.append(
                 SelectionMatch(
@@ -131,6 +168,7 @@ class AutoSelectorService:
         xmp_label: str = SELECTED_LABEL,
         rating_from_jpg: bool = False,
         progress_callback=None,
+        cancel_event: Event | None = None,
     ) -> CopyResult:
         work_folder = Path(work_folder)
         work_folder.mkdir(parents=True, exist_ok=True)
@@ -138,6 +176,14 @@ class AutoSelectorService:
         copied_sources: set[str] = set()
 
         for index, match in enumerate(matches, start=1):
+            if cancel_event is not None and cancel_event.is_set():
+                result.cancelled = True
+                for pending in matches[index - 1:]:
+                    result.errors += 1
+                    result.items.append({"path": str(pending.jpg_path), "status": "failed",
+                                         "detail": "not run: cancelled"})
+                result.messages.append(f"Cancelled: {len(matches) - index + 1} JPG(s) not processed")
+                break
             try:
                 if match.status == "ambiguous":
                     result.ambiguous += 1
@@ -174,18 +220,17 @@ class AutoSelectorService:
                         effective_rating = jpg_rating
 
                 destination_path = work_folder / match.raw_path.name
-                if (
-                    duplicate_policy == "rename"
-                    and destination_path.exists()
-                    and _identical_files(match.raw_path, destination_path)
-                ):
+                final_path, action = self._resolve_duplicate(
+                    destination_path, duplicate_policy, source_path=match.raw_path
+                )
+                if action == "identical":
                     # A re-run (or a retry after an XMP failure) must not clone
                     # the RAW as _001. Existing sidecars stay untouched; only a
                     # missing one is created, so a failed XMP write can recover.
                     detail = "identical copy already in work folder"
-                    if write_xmp and not any(p.exists() for p in sidecar_paths_for_read(destination_path)):
+                    if write_xmp and not any(p.exists() for p in sidecar_paths_for_read(final_path)):
                         try:
-                            self._write_selected_xmp(destination_path, effective_rating, xmp_label)
+                            self._write_selected_xmp(final_path, effective_rating, xmp_label)
                             result.xmp_written += 1
                             detail += "; XMP written"
                         except Exception as exc:
@@ -195,17 +240,18 @@ class AutoSelectorService:
                                 {
                                     "path": str(match.jpg_path),
                                     "status": "failed",
-                                    "detail": f"RAW already at {destination_path}; XMP write failed: {exc}",
+                                    "detail": f"RAW already at {final_path}; XMP write failed: {exc}",
                                 }
                             )
                             continue
                     result.skipped += 1
-                    result.messages.append(f"skipped existing {destination_path.name}: {detail}")
-                    result.items.append({"path": str(destination_path), "status": "skipped", "detail": detail})
+                    copied_sources.add(source_key)
+                    result.messages.append(f"skipped existing {final_path.name}: {detail}")
+                    result.items.append({"path": str(final_path), "status": "skipped", "detail": detail})
                     continue
-                final_path, action = self._resolve_duplicate(destination_path, duplicate_policy)
                 if action == "skip":
                     result.skipped += 1
+                    copied_sources.add(source_key)
                     result.messages.append(f"skipped existing {destination_path.name}")
                     result.items.append(
                         {"path": str(destination_path), "status": "skipped", "detail": "already exists; RAW and XMP preserved"}
@@ -280,9 +326,9 @@ class AutoSelectorService:
             result.items.append({"path": str(path), "status": "missing", "detail": detail})
 
     @staticmethod
-    def _index_cr3_files(root: Path, recursive: bool, exclude: Path | None = None) -> dict[str, list[Path]]:
-        files = root.rglob("*") if recursive else root.glob("*")
-        excluded = _resolved(exclude) if exclude is not None else None
+    def _index_cr3_files(root: Path, recursive: bool, exclude: Path | None = None,
+                         cancel_event: Event | None = None) -> dict[str, list[Path]]:
+        files = _walk_files(root, recursive, exclude=exclude, cancel_event=cancel_event)
         raw_files = sorted(
             (
                 path
@@ -290,12 +336,12 @@ class AutoSelectorService:
                 if path.suffix.casefold() in RAW_EXTENSIONS
                 and not path.name.startswith("._")
                 and path.is_file()
-                and not (excluded is not None and _is_within(path, excluded))
             ),
             key=lambda path: (path.stem.casefold(), len(path.parts), str(path).casefold()),
         )
         index: dict[str, list[Path]] = {}
         for path in raw_files:
+            _check_cancelled(cancel_event)
             for key in AutoSelectorService._match_keys(path.stem, anchored=True):
                 bucket = index.setdefault(key, [])
                 if path not in bucket:
@@ -340,8 +386,8 @@ class AutoSelectorService:
         return list(dict.fromkeys(keys))
 
     @staticmethod
-    def _list_jpg_files(root: Path, recursive: bool) -> list[Path]:
-        files = root.rglob("*") if recursive else root.glob("*")
+    def _list_jpg_files(root: Path, recursive: bool, cancel_event: Event | None = None) -> list[Path]:
+        files = _walk_files(root, recursive, skip_cache=True, cancel_event=cancel_event)
         return sorted(
             (
                 path
@@ -355,7 +401,8 @@ class AutoSelectorService:
         )
 
     @staticmethod
-    def _resolve_duplicate(destination_path: Path, duplicate_policy: DuplicatePolicy) -> tuple[Path, str]:
+    def _resolve_duplicate(destination_path: Path, duplicate_policy: DuplicatePolicy,
+                           source_path: Path | None = None) -> tuple[Path, str]:
         if not destination_path.exists():
             return destination_path, "copy"
         if duplicate_policy == "skip":
@@ -363,11 +410,26 @@ class AutoSelectorService:
         if duplicate_policy == "overwrite":
             return destination_path, "overwrite"
 
+        if source_path is not None and _identical_files(source_path, destination_path):
+            return destination_path, "identical"
+
         stem = destination_path.stem
         suffix = destination_path.suffix
+        # Check existing renamed copies even when an earlier numbered file was
+        # removed. A retry after XMP failure must find the RAW already copied.
+        pattern = re.compile(rf"{re.escape(stem)}_(\d{{3,4}}){re.escape(suffix)}", re.IGNORECASE)
+        occupied: set[int] = set()
+        for candidate in sorted(destination_path.parent.iterdir(), key=lambda path: path.name.casefold()):
+            match = pattern.fullmatch(candidate.name)
+            if match is None:
+                continue
+            number = int(match.group(1))
+            occupied.add(number)
+            if source_path is not None and _identical_files(source_path, candidate):
+                return candidate, "identical"
         for index in range(1, 10000):
             candidate = destination_path.with_name(f"{stem}_{index:03d}{suffix}")
-            if not candidate.exists():
+            if index not in occupied and not candidate.exists():
                 return candidate, "copy"
         raise RuntimeError(f"Could not resolve duplicate name for {destination_path}")
 

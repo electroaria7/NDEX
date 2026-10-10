@@ -13,7 +13,7 @@ from dsb_image_manager.dsb_image_manager.ui.tk_app import ImageManagerApp
 class SendToAutoSelectorTests(unittest.TestCase):
     def _app(self, root: Path, records):
         catalog = SimpleNamespace(list_images=lambda pick_filter=None: records)
-        return SimpleNamespace(catalog=catalog, source_dir=root)
+        return SimpleNamespace(catalog=catalog, source_dir=root, _can_start_work=lambda: True)
 
     def test_only_picked_jpgs_are_handed_off(self):
         with tempfile.TemporaryDirectory() as tmp:

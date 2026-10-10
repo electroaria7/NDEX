@@ -2,36 +2,45 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from threading import Event
 
 from ndex_common.filecopy import copy_verified
 
 from ..core.models import DuplicatePolicy, ExportOptions, ExportSummary, ImageRecord
+from .operations import ProgressCallback, operation_records
 
 INVALID_FILENAME_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
 
 class ExportService:
-    def export(self, records: list[ImageRecord], options: ExportOptions) -> ExportSummary:
+    def export(
+        self, records: list[ImageRecord], options: ExportOptions, *,
+        cancel_event: Event | None = None,
+        progress_callback: ProgressCallback | None = None,
+    ) -> ExportSummary:
         summary = ExportSummary(total=len(records))
-        options.destination_dir.mkdir(parents=True, exist_ok=True)
 
-        for offset, record in enumerate(records):
+        for offset, record in enumerate(operation_records(records, summary, cancel_event, progress_callback)):
             try:
+                options.destination_dir.mkdir(parents=True, exist_ok=True)
                 index = options.start_index + offset
                 stem = render_export_stem(record, options.rename_pattern, index)
                 destination = options.destination_dir / f"{stem}{record.file_path.suffix}"
                 final_path, action = resolve_duplicate(destination, options.duplicate_policy)
                 if action == "skip":
                     summary.skipped += 1
+                    summary.items.append({"path": str(record.file_path), "destination": str(final_path), "status": "skipped"})
                     continue
                 copy_verified(record.file_path, final_path, overwrite=action == "overwrite")
                 if action == "overwrite":
                     summary.overwritten += 1
                 summary.exported += 1
                 summary.exported_paths.append(final_path)
+                summary.items.append({"path": str(record.file_path), "destination": str(final_path), "status": "exported"})
             except Exception as exc:  # pragma: no cover - filesystem failures vary
                 summary.errors += 1
                 summary.messages.append(f"{record.file_path.name}: {exc}")
+                summary.items.append({"path": str(record.file_path), "status": "failed", "detail": str(exc)})
         return summary
 
 

@@ -35,7 +35,7 @@ APP_LABELS = {
 # latest-{app}-{type}.json pointers instead of listing the whole folder.
 APP_TYPES = {
     "ndex_one": ("backup",),
-    "image_manager": ("select_handoff",),
+    "image_manager": ("select_handoff", "backup", "export"),
     "auto_selector": ("extract",),
     "frame": ("export",),
 }
@@ -44,7 +44,7 @@ APP_TYPES = {
 _STAMP = re.compile(r"-(" + chr(92) + "d{8}T" + chr(92) + "d{6}Z)(?:-(" + chr(92) + "d+))?" + chr(92) + ".json$")
 
 # Counts worth showing, in the order a reader cares about them.
-COUNT_ORDER = ("copied", "exported", "selected", "overwritten", "skipped", "ambiguous", "missing", "failed")
+COUNT_ORDER = ("copied", "exported", "written", "selected", "overwritten", "skipped", "ambiguous", "missing", "failed")
 
 # Item statuses that mean the file did not make it.
 PROBLEM_STATUSES = frozenset({"failed", "error", "ambiguous", "missing"})
@@ -79,6 +79,8 @@ class JobReport:
 
     @property
     def type_label(self) -> str:
+        if self.type == "export" and self.context.get("operation") == "xmp":
+            return "XMP Export"
         if self.type == "select_handoff" and self.context.get("target") == "auto_selector":
             return "Send to Auto Selector"
         return TYPE_LABELS.get(self.type, self.type)

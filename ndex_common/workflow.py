@@ -150,6 +150,7 @@ def record_extract(
             "work": str(work_folder),
         },
         context={
+            "cancelled": bool(getattr(result, "cancelled", False)),
             **({"recursive": bool(recursive)} if recursive is not None else {}),
             **dict(context or {}),
         },

@@ -80,6 +80,11 @@ class ExportResult:
     frame_id: str = ""
     output_id: str = ""
 
+    @property
+    def cancelled_count(self) -> int:
+        """Unprocessed files remain failed items so Job Results can retry them."""
+        return sum(item.state == "failed" and item.message == "not run: cancelled" for item in self.items)
+
 
 class CancelToken:
     """Thread-safe cooperative cancellation flag checked between files."""
@@ -189,6 +194,10 @@ def run_export(
     for index, item in enumerate(snapshot.items, start=1):
         if cancel.is_cancelled():
             cancelled = True
+            results.extend(
+                ExportItemResult(pending.source.path, pending.destination, "failed", "not run: cancelled")
+                for pending in snapshot.items[index - 1:]
+            )
             _notify_progress(
                 progress, ExportProgress(index, total, item.source.path, "cancelled", "Export cancelled.")
             )
