@@ -27,6 +27,15 @@ CAMERA_ID_PATTERNS = (
 CACHE_DIR_NAME = ".dsb_cache"
 
 
+def shared_camera_id(jpg_stem: str, raw_stem: str) -> str | None:
+    """The camera number (e.g. IMG_1004) a JPG and a RAW have in common, if any."""
+    raw_keys = set(AutoSelectorService._match_keys(raw_stem, anchored=True))
+    for key in AutoSelectorService._match_keys(jpg_stem):
+        if key != jpg_stem.casefold() and key in raw_keys:
+            return key.upper()
+    return None
+
+
 def load_handoff(manifest_path: Path) -> tuple[Path | None, list[Path]]:
     """Read an Image Manager select_handoff: (source folder, picked JPG files)."""
     from ndex_common.manifest import handoff_files, load_manifest
@@ -121,8 +130,8 @@ class AutoSelectorService:
         """
         raw_source_dir = Path(raw_source_dir)
         selected_jpg_dir = Path(selected_jpg_dir)
-        self._require_dir(raw_source_dir, "CR3 source folder")
-        self._require_dir(selected_jpg_dir, "selected JPG folder")
+        self._require_dir(raw_source_dir, "RAW folder")
+        self._require_dir(selected_jpg_dir, "selected JPGs folder")
 
         _check_cancelled(cancel_event)
         raw_by_stem = self._index_cr3_files(
@@ -144,12 +153,14 @@ class AutoSelectorService:
         matches = []
         for jpg_path in jpg_files:
             _check_cancelled(cancel_event)
-            raw_path, status = self._find_matching_raw(raw_by_stem, jpg_path.stem)
+            raw_path, status, candidates, kind = self._match_details(raw_by_stem, jpg_path.stem)
             matches.append(
                 SelectionMatch(
                     jpg_path=jpg_path,
                     raw_path=raw_path,
                     status=status,
+                    candidates=candidates,
+                    match_kind=kind,
                 )
             )
         return AnalysisSummary(
@@ -188,15 +199,15 @@ class AutoSelectorService:
                 if match.status == "ambiguous":
                     result.ambiguous += 1
                     result.messages.append(
-                        f"ambiguous RAW match for {match.jpg_path.name}; skipped copy"
+                        f"several RAW files match {match.jpg_path.name}; skipped"
                     )
                     result.items.append(
                         {"path": str(match.jpg_path), "status": "ambiguous", "detail": "multiple RAW matches"}
                     )
                     continue
-                if match.raw_path is None:
+                if match.raw_path is None or match.status not in ("matched", "chosen"):
                     result.missing += 1
-                    result.messages.append(f"missing CR3 for {match.jpg_path.name}")
+                    result.messages.append(f"no RAW found for {match.jpg_path.name}")
                     result.items.append(
                         {"path": str(match.jpg_path), "status": "missing", "detail": "no RAW match"}
                     )
@@ -213,6 +224,7 @@ class AutoSelectorService:
                     )
                     continue
 
+                note = "chosen by user" if match.status == "chosen" else ""
                 effective_rating = xmp_rating
                 if rating_from_jpg:
                     jpg_rating = read_jpg_rating(match.jpg_path)
@@ -228,6 +240,8 @@ class AutoSelectorService:
                     # the RAW as _001. Existing sidecars stay untouched; only a
                     # missing one is created, so a failed XMP write can recover.
                     detail = "identical copy already in work folder"
+                    if note:
+                        detail += f"; {note}"
                     if write_xmp and not any(p.exists() for p in sidecar_paths_for_read(final_path)):
                         try:
                             self._write_selected_xmp(final_path, effective_rating, xmp_label)
@@ -254,7 +268,8 @@ class AutoSelectorService:
                     copied_sources.add(source_key)
                     result.messages.append(f"skipped existing {destination_path.name}")
                     result.items.append(
-                        {"path": str(destination_path), "status": "skipped", "detail": "already exists; RAW and XMP preserved"}
+                        {"path": str(destination_path), "status": "skipped",
+                         "detail": "already exists; RAW and XMP preserved" + (f"; {note}" if note else "")}
                     )
                     continue
                 copy_verified(match.raw_path, final_path, overwrite=action == "overwrite")
@@ -281,7 +296,10 @@ class AutoSelectorService:
                 if action == "overwrite":
                     result.overwritten += 1
                 result.copied += 1
-                result.items.append({"path": str(final_path), "status": "copied"})
+                item = {"path": str(final_path), "status": "copied"}
+                if note:
+                    item["detail"] = note
+                result.items.append(item)
             except Exception as exc:  # pragma: no cover - filesystem errors vary
                 result.errors += 1
                 result.messages.append(f"{match.file_stem}: {exc}")
@@ -352,11 +370,21 @@ class AutoSelectorService:
     def _find_matching_raw(
         raw_by_stem: dict[str, list[Path]], jpg_stem: str
     ) -> tuple[Path | None, str]:
+        raw_path, status, _candidates, _kind = AutoSelectorService._match_details(raw_by_stem, jpg_stem)
+        return raw_path, status
+
+    @staticmethod
+    def _match_details(
+        raw_by_stem: dict[str, list[Path]], jpg_stem: str
+    ) -> tuple[Path | None, str, tuple[Path, ...], str]:
+        """(raw, status, candidates, kind); candidates is filled only when ambiguous."""
         stem_key = jpg_stem.casefold()
         # The exact file name wins over any camera-ID overlap.
         exact = [path for path in raw_by_stem.get(stem_key, ()) if path.stem.casefold() == stem_key]
         if exact:
-            return (exact[0], "matched") if len(exact) == 1 else (None, "ambiguous")
+            if len(exact) == 1:
+                return exact[0], "matched", (), "exact"
+            return None, "ambiguous", tuple(exact), ""
         candidates: list[Path] = []
         for key in AutoSelectorService._match_keys(jpg_stem):
             if key == stem_key:
@@ -365,10 +393,10 @@ class AutoSelectorService:
                 if path not in candidates:
                     candidates.append(path)
         if len(candidates) == 1:
-            return candidates[0], "matched"
+            return candidates[0], "matched", (), "camera_id"
         if len(candidates) > 1:
-            return None, "ambiguous"
-        return None, "missing"
+            return None, "ambiguous", tuple(candidates), ""
+        return None, "missing", (), ""
 
     @staticmethod
     def _match_keys(stem: str, anchored: bool = False) -> list[str]:

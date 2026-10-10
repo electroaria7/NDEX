@@ -12,6 +12,10 @@ class SelectionMatch:
     jpg_path: Path
     raw_path: Path | None
     status: str
+    # Every RAW that fits an ambiguous photo; empty for other statuses.
+    candidates: tuple[Path, ...] = ()
+    # How the RAW was found: "exact" (same name) or "camera_id"; "" if unmatched.
+    match_kind: str = ""
 
     @property
     def file_stem(self) -> str:
@@ -31,6 +35,14 @@ class AnalysisSummary:
     @property
     def matched_count(self) -> int:
         return sum(1 for match in self.matches if match.status == "matched")
+
+    @property
+    def chosen_count(self) -> int:
+        return sum(1 for match in self.matches if match.status == "chosen")
+
+    @property
+    def copyable_count(self) -> int:
+        return self.matched_count + self.chosen_count
 
     @property
     def missing_count(self) -> int:
