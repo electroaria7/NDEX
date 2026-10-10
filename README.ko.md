@@ -2,7 +2,7 @@
 
 [English](README.md)
 
-**공개 베타 · 0.9.4**
+**공개 베타 · 0.9.5**
 
 사진 작업 흐름(백업 → 선별 → 원본 추출 → 프레임·내보내기)을 위한 Windows 데스크톱 유틸리티입니다.
 각 앱은 혼자 실행할 수 있고, XMP 사이드카와 공용 설정으로 연동됩니다. Lightroom / Evoto에서의 실제 XMP 해석은 별도 검증이 필요합니다.
@@ -11,38 +11,38 @@
 
 ## 공개 베타
 
-- 현재 버전: **0.9.4 Beta**. 패키지: `NDEX_v0.9.4.zip` (포터블), `NDEX_Setup_0.9.4.exe` (설치본). [0.9.4 Beta 릴리스](https://github.com/electroaria7/NDEX/releases/tag/v0.9.4)에서 확인하세요.
-- GitHub 태그 `v1.0.0` / `v1.0.1`은 같은 베타 줄에 안정 버전 번호를 붙인 기록입니다. `v0.9.3`을 포함한 과거 다운로드는 0.9.4 릴리스와 별도로 유지합니다.
-- 이미 `NDEX_Setup_1.0.1.exe`를 설치했다면 `0.9.4`를 설치하기 전에 제거하세요. Windows는 `0.9.4`를 `1.0.1`보다 낮은 버전으로 봅니다.
+- 현재 버전: **0.9.5 Beta**. 패키지: `NDEX_v0.9.5.zip` (포터블), `NDEX_Setup_0.9.5.exe` (설치본). [0.9.5 Beta 릴리스](https://github.com/electroaria7/NDEX/releases/tag/v0.9.5)에서 확인하세요.
+- GitHub 태그 `v1.0.0` / `v1.0.1`은 같은 베타 줄에 안정 버전 번호를 붙인 기록입니다. `v0.9.4`를 포함한 과거 다운로드는 0.9.5 릴리스와 별도로 유지합니다.
+- 이미 `NDEX_Setup_1.0.1.exe`를 설치했다면 `0.9.5`를 설치하기 전에 제거하세요. Windows는 `0.9.5`를 `1.0.1`보다 낮은 버전으로 봅니다.
 - 변경점: [PATCH_NOTES.md](PATCH_NOTES.md).
 
 ## 빠른 시작
 
-**0.9.4 주요 변경**
+**0.9.5 주요 변경**
 
-- Image Manager 백업·파일 내보내기·XMP 내보내기를 백그라운드에서 실행하고 진행률·취소를 제공합니다. 스캔과 파일 작업은 한 번에 하나씩 실행합니다.
-- Auto Selector에 취소, 오래된 분석 방지, 번호가 붙은 동일 RAW 재사용을 추가했습니다. Image Manager에서 Pick한 JPG만 넘기며, 카메라 ID보다 정확히 같은 RAW 파일명을 우선합니다.
-- One·Auto Selector·Frame은 취소한 미처리 파일을 Retry Failed 대상으로 남기고, Image Manager는 Job Results에 기록합니다. 네 작업 앱 모두 실행 중인 작업과 결과 처리가 끝난 뒤 닫힙니다.
-- Frame은 디코딩한 미리보기를 재사용하고, 폴더 탐색은 제외할 백업·작업·캐시 디렉터리에 들어가지 않습니다. Image Manager 다중 선택 변경은 한 번의 데이터베이스 트랜잭션으로 처리합니다.
-- 한글 RAW 경로의 촬영일, RAW/JPG 짝, 오래된 썸네일, XMP Pick 갱신, 설정 복구, Frame 색상·프로필 처리를 감사하여 수정했습니다.
+- Launcher의 네 작업 카드를 한 줄로 정리하고 폴더명과 문제 결과를 읽기 쉽게 표시합니다. Job Results에서 파일별 처리 이유를 유지하고 재시도·폴더 열기 버튼을 정리했습니다.
+- One의 백업 옵션 설명, 전체 크기·여유 공간 요약, 분석한 목적지 확인과 완료창을 개선했습니다. 과거 작업 재시도 후에도 실제 백업 폴더를 열거나 Manager로 전달합니다.
+- Image Manager의 필터·Pick·별점 표시, 한 칸씩 이동하는 방향키, 표시 후 자동 이동 옵션, 미리보기·전체 화면 안내를 개선했습니다. 필터 입력 중 사진의 선택 상태가 바뀌는 문제를 수정했습니다.
+- Auto Selector에서 **Choose RAW…**로 중복 후보를 직접 선택할 수 있습니다. 매칭 근거, Pick 전달 표시, 중복·XMP 옵션과 방금 끝난 작업 결과를 여는 완료창을 제공합니다.
+- 0.9.4의 백그라운드 작업·취소·안전 종료·동일 RAW 재사용·파일 보존 수정을 포함합니다. Frame은 스위트 버전으로 재빌드하며 이번 패치에서 앱 동작은 바뀌지 않습니다.
 
 취소는 현재 파일의 복사·검증·렌더링 또는 현재 메타데이터 묶음 처리가 끝난 뒤 적용합니다. One 분석 중 닫기를 요청하면 분석 완료를 기다립니다.
 0.9.3의 검증 후 원자적 복사와 Auto Selector 중복 `skip`의 기존 RAW·XMP 보존 동작은 유지합니다.
 
 실제 대량 RAW·SD카드 성능과 Lightroom/Evoto 호환성 확인은 후속 과제입니다.
-검토 기록: [10월 9일 코드 감사](https://github.com/electroaria7/NDEX/blob/v0.9.4/docs/Improvement_Review_2026-10-09.md), [10월 10일 UI·작업 안정성](https://github.com/electroaria7/NDEX/blob/v0.9.4/docs/Improvement_Review_2026-10-10.md), [배포 검증](https://github.com/electroaria7/NDEX/blob/v0.9.4/docs/Release_Validation_2026-10-10.md).
+검토 기록: [10월 9일 코드 감사](https://github.com/electroaria7/NDEX/blob/v0.9.5/docs/Improvement_Review_2026-10-09.md), [10월 10일 UI·작업 안정성](https://github.com/electroaria7/NDEX/blob/v0.9.5/docs/Improvement_Review_2026-10-10.md), [0.9.5 배포 검증](https://github.com/electroaria7/NDEX/blob/v0.9.5/docs/Release_Validation_0.9.5.md).
 
-실행 전 용량 요약·CSV/HTML 리포트·언어 통일·배포 자동화는 이후 순서입니다.
+다른 앱의 실행 전 용량 점검·CSV/HTML 리포트·언어 통일·배포 자동화는 후속 과제입니다.
 상세 계획은 [통합 로드맵](https://github.com/electroaria7/NDEX/blob/main/docs/obsidian/NDEX/Roadmap.md)을 참고하세요.
 
 **Windows 패키지 (권장)**
 
-1. [0.9.4 Beta 릴리스](https://github.com/electroaria7/NDEX/releases/tag/v0.9.4)에서 `NDEX_v0.9.4.zip`을 받습니다.
+1. [0.9.5 Beta 릴리스](https://github.com/electroaria7/NDEX/releases/tag/v0.9.5)에서 `NDEX_v0.9.5.zip`을 받습니다.
 2. 압축을 풉니다. `Apps\` 폴더는 그대로 둡니다.
 3. `NDEX_Launcher.exe`를 더블클릭합니다.
 4. 카드 순서대로 진행합니다: **1. Backup** → **2. Select & Rate** → **3. Extract** → **4. Frame & Export**.
 
-**설치본 (`NDEX_Setup_0.9.4.exe`)**
+**설치본 (`NDEX_Setup_0.9.5.exe`)**
 
 1. 설치 프로그램을 실행합니다. 파일은 `C:\Program Files\NDEX`에 들어갑니다.
 2. 시작 메뉴 또는 바탕화면의 **NDEX Launcher**를 엽니다.
@@ -111,7 +111,7 @@ Frame 데이터: `%LOCALAPPDATA%\NDEX\Frame\`
 ## 패키지 구성 (설치본·포터블)
 
 ```
-NDEX_v0.9.4\                  설치 위치: C:\Program Files\NDEX\
+NDEX_v0.9.5\                  설치 위치: C:\Program Files\NDEX\
   NDEX_Launcher.exe           여기서 시작
   SHA256SUMS.txt
   Apps\
@@ -142,7 +142,7 @@ powershell -ExecutionPolicy Bypass -File .\build_all.ps1
 powershell -ExecutionPolicy Bypass -File .\build_all.ps1 -Installer
 ```
 
-결과: `release\NDEX_v0.9.4\` (포터블)과 `release\NDEX_Setup_0.9.4.exe`.
+결과: `release\NDEX_v0.9.5\` (포터블)과 `release\NDEX_Setup_0.9.5.exe`.
 
 ```powershell
 python -m ndex_launcher.main

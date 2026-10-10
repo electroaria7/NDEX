@@ -65,6 +65,16 @@ class JobReportWindowTests(unittest.TestCase):
         listing = window.item_text.get("1.0", tk.END)
         self.assertLess(listing.index("failed"), listing.index("copied"))
 
+    def test_success_and_skip_details_remain_visible(self) -> None:
+        report = _report(items=(
+            JobItem(path="a.CR3", status="copied", detail="chosen by user"),
+            JobItem(path="b.CR3", status="skipped", detail="already exists; RAW and XMP preserved"),
+        ))
+        window = self._open([report])
+        listing = window.item_text.get("1.0", tk.END)
+        self.assertIn("a.CR3 — chosen by user", listing)
+        self.assertIn("b.CR3 — already exists; RAW and XMP preserved", listing)
+
     def test_jobs_with_problems_are_flagged_in_the_list(self) -> None:
         clean = _report(counts={"copied": 3}, items=(JobItem(path="a.CR3", status="copied"),))
         window = self._open([_report(), clean])

@@ -922,6 +922,7 @@ class AutoSelectorApp(tk.Tk):
                 recursive=job["options"]["recursive"],
                 context=plan.context() if plan is not None else None,
             )
+            job["manifest"] = manifest
             if manifest is None:
                 job["record_error"] = "Couldn't save the job record. Check the log for what was processed."
         except Exception as exc:
@@ -1045,7 +1046,10 @@ class AutoSelectorApp(tk.Tk):
                 self._completion_dialog.destroy()
             except tk.TclError:
                 pass
-        self._completion_dialog = CopyDoneDialog(self, result, job["work_folder"], self.open_job_results)
+        manifest = job.get("manifest")
+        self._completion_dialog = CopyDoneDialog(
+            self, result, job["work_folder"], lambda: self.open_job_results(select=manifest)
+        )
 
     def _handle_error(self, message: str) -> None:
         self.status_var.set("Job failed")

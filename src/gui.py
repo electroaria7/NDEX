@@ -733,8 +733,8 @@ class DSBApp(tk.Tk):
         self.status_var.set("Closing safely. Waiting for the running task and its results...")
         self._update_button_states()
 
-    def _open_in_image_manager(self) -> None:
-        destination = self.destination_var.get().strip()
+    def _open_in_image_manager(self, destination: str | None = None) -> None:
+        destination = self.destination_var.get().strip() if destination is None else destination
         if not destination or not Path(destination).is_dir():
             messagebox.showerror("Missing Folder", "Backup destination does not exist.")
             return
@@ -803,8 +803,8 @@ class DSBApp(tk.Tk):
         self.pending_backup["items"] = items
         self._backup_worker()
 
-    def _open_backup_folder(self) -> None:
-        destination = Path(self.destination_var.get())
+    def _open_backup_folder(self, destination: str | None = None) -> None:
+        destination = Path(self.destination_var.get() if destination is None else destination)
         if destination.exists():
             os.startfile(destination)  # type: ignore[attr-defined]
         else:
@@ -975,6 +975,8 @@ class DSBApp(tk.Tk):
 
     def _show_completion_dialog(self, status: str) -> None:
         """A small "all done" dialog with the next steps a photographer wants."""
+        # A retry uses its recorded destination even if the form shows another job.
+        destination = (self.pending_backup or {}).get("destination", self.destination_var.get().strip())
         dialog = tk.Toplevel(self)
         dialog.title(NDEX_ONE_TITLE)
         dialog.transient(self)
@@ -985,6 +987,8 @@ class DSBApp(tk.Tk):
         ttk.Label(frame, text=status, style="Card.TLabel", wraplength=380, justify="left").pack(
             anchor="w", pady=(6, 14)
         )
+        ttk.Label(frame, text=f"Destination: {destination}", style="CardMuted.TLabel",
+                  wraplength=380, justify="left").pack(anchor="w", pady=(0, 14))
         row = ttk.Frame(frame, style="CardInner.TFrame")
         row.pack(fill="x")
 
@@ -992,10 +996,16 @@ class DSBApp(tk.Tk):
             dialog.destroy()
             command()
 
-        ttk.Button(row, text="Open Backup Folder", command=lambda: run(self._open_backup_folder)).pack(
+        ttk.Button(
+            row, text="Open Backup Folder",
+            command=lambda: run(lambda: self._open_backup_folder(destination)),
+        ).pack(
             side="left", padx=(0, 6)
         )
-        ttk.Button(row, text="Open in Image Manager", command=lambda: run(self._open_in_image_manager)).pack(
+        ttk.Button(
+            row, text="Open in Image Manager",
+            command=lambda: run(lambda: self._open_in_image_manager(destination)),
+        ).pack(
             side="left", padx=(0, 6)
         )
         close = ttk.Button(row, text="Close", style="Accent.TButton", command=dialog.destroy)

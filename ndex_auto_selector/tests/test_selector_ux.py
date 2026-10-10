@@ -259,11 +259,20 @@ class SelectorUxAppTests(unittest.TestCase):
     def test_completion_dialog_after_copy(self):
         self._analyze()
         with patch.object(self.app, "_save_settings"), \
-                patch.object(tk_app, "CopyDoneDialog") as dialog:
+                patch.object(tk_app, "CopyDoneDialog") as dialog, \
+                patch.object(self.app, "open_job_results") as results:
             self.app.start_copy()
             self._pump(lambda: not self.app._busy)
+            dialog.call_args.args[3]()
         dialog.assert_called_once()
         self.assertEqual(self.app.banner_var.get(), "Copied 1 \u00b7 Skipped 1 \u00b7 Not found 1 \u00b7 Failed 0")
+        self.assertIn("select", results.call_args.kwargs)
+        from ndex_common.report import read_report
+
+        report = read_report(results.call_args.kwargs["select"])
+        self.assertIsNotNone(report)
+        self.assertEqual(report.destination, str(self.work))
+        self.assertEqual(report.counts["copied"], 1)
 
 
 if __name__ == "__main__":

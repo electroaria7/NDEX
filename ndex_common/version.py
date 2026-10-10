@@ -5,5 +5,5 @@ PyInstaller version resources can parse it. GitHub tags v1.0.0 and
 v1.0.1 were this same line under a premature stable number.
 """
 
-NDEX_VERSION = "0.9.4"
+NDEX_VERSION = "0.9.5"
 NDEX_CHANNEL = "beta"

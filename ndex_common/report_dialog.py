@@ -391,7 +391,10 @@ def _item_segments(report: JobReport) -> list[tuple[str, str]]:
                 if item.folder:
                     runs.append((f"{item.folder}\n", "muted"))
             else:
-                runs.append((f"{item.path or '(no path)'}\n", "row"))
+                line = item.path or "(no path)"
+                if item.detail:
+                    line += f" — {item.detail}"
+                runs.append((f"{line}\n", "row"))
     return runs
 
 

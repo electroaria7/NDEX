@@ -117,6 +117,36 @@ class CullingUiTests(unittest.TestCase):
         self.assertEqual(self.index(), 1)
         self.assertIsNone(self.app._on_arrow(SimpleNamespace(widget=self.app.tree, state=0x1), 1))
 
+    def test_filter_keyboard_input_does_not_mark_or_select_photos(self):
+        app = self.app
+        app.rating_filter_widget.focus_force()
+        app.update()
+        if app.focus_get() is not app.rating_filter_widget:
+            self.skipTest("Tk could not give the filter keyboard focus")
+        selected = app.tree.selection()
+        for key in ("3", "p", "x", "<Control-a>"):
+            with self.subTest(key=key):
+                app.rating_filter_widget.event_generate(key)
+                app.update()
+                self.assertEqual(app.tree.selection(), selected)
+                self.assertTrue(all(r.rating == 0 and r.pick_status == "Unrated"
+                                    for r in app.catalog.list_images()))
+
+    def test_photo_shortcuts_still_mark_and_advance_from_the_tree(self):
+        app = self.app
+        app.tree.focus_force()
+        app.update()
+        if app.focus_get() is not app.tree:
+            self.skipTest("Tk could not give the tree keyboard focus")
+        app.tree.event_generate("p")
+        app.update()
+        self.assertEqual(self.index(), 1)
+        self.assertEqual(app.records[0].pick_status, "Pick")
+        app.tree.event_generate("3")
+        app.update()
+        self.assertEqual(self.index(), 2)
+        self.assertEqual(app.records[1].rating, 3)
+
     def test_auto_advance_after_pick_and_setting_off(self):
         self.app.set_pick("Pick")
         self.assertEqual(self.index(), 1)

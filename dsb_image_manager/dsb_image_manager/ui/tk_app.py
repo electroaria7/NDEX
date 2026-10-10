@@ -606,28 +606,31 @@ class ImageManagerApp(tk.Tk):
         self.after(120, self.apply_preview_background)
 
     def _bind_shortcuts(self) -> None:
-        self.bind("<p>", lambda event: self.set_pick("Pick"))
-        self.bind("<P>", lambda event: self.set_pick("Pick"))
-        self.bind("<m>", lambda event: self.set_pick("Maybe"))
-        self.bind("<M>", lambda event: self.set_pick("Maybe"))
-        self.bind("<x>", lambda event: self.set_pick("Reject"))
-        self.bind("<X>", lambda event: self.set_pick("Reject"))
-        self.bind("<u>", lambda event: self.set_pick("Unrated"))
-        self.bind("<U>", lambda event: self.set_pick("Unrated"))
+        for key, status in (("p", "Pick"), ("m", "Maybe"), ("x", "Reject"), ("u", "Unrated")):
+            for letter in (key, key.upper()):
+                self.bind(f"<{letter}>", lambda event, mark=status:
+                          self._on_photo_shortcut(event, self.set_pick, mark))
         for value in range(0, 6):
-            self.bind(str(value), lambda event, rating=value: self.set_rating(rating))
+            self.bind(str(value), lambda event, rating=value:
+                      self._on_photo_shortcut(event, self.set_rating, rating))
         self.bind("<Down>", lambda event: self._on_arrow(event, 1))
         self.bind("<Right>", lambda event: self._on_arrow(event, 1))
         self.bind("<Up>", lambda event: self._on_arrow(event, -1))
         self.bind("<Left>", lambda event: self._on_arrow(event, -1))
-        self.bind("<f>", lambda event: self.open_fullscreen_viewer())
-        self.bind("<F>", lambda event: self.open_fullscreen_viewer())
-        self.bind("<Control-a>", lambda event: self.select_all_visible())
+        self.bind("<f>", lambda event: self._on_photo_shortcut(event, self.open_fullscreen_viewer))
+        self.bind("<F>", lambda event: self._on_photo_shortcut(event, self.open_fullscreen_viewer))
+        self.bind("<Control-a>", lambda event: self._on_photo_shortcut(event, self.select_all_visible))
         self.bind("<Control-o>", lambda event: self.choose_folder())
         self.bind("<Control-e>", lambda event: self.open_export_dialog())
         self.bind("<F5>", lambda event: self.rescan())
 
     # ---- filters, arrows, menu hints, empty state ----
+
+    def _on_photo_shortcut(self, event, command, *args):
+        if event.widget.winfo_class() in TEXT_INPUT_CLASSES:
+            return None
+        command(*args)
+        return "break"
 
     def _measure_columns(self) -> dict[str, tuple[int, int]]:
         """(width, minwidth) per column, measured from the real fonts so text never clips."""

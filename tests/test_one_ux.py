@@ -267,6 +267,34 @@ class WindowTests(unittest.TestCase):
         self.assertIn("Open Job Results now?", ask.call_args.args[1])
         results.assert_called_once()
 
+    def test_completion_actions_use_the_finished_jobs_destination(self):
+        actual = self.root / "retried-backup"
+        actual.mkdir()
+        other = self.root / "current-form-folder"
+        other.mkdir()
+        self.app.destination_var.set(str(other))
+        self.app.pending_backup = {"destination": str(actual)}
+
+        def click_action(dialog, label):
+            def descendants(widget):
+                for child in widget.winfo_children():
+                    yield child
+                    yield from descendants(child)
+            button = next(w for w in descendants(dialog)
+                          if isinstance(w, gui.ttk.Button) and w.cget("text") == label)
+            button.invoke()
+
+        for label in ("Open Backup Folder", "Open in Image Manager"):
+            with self.subTest(action=label), \
+                    patch.object(gui.os, "startfile") as open_folder, \
+                    patch.object(gui, "launch_app", return_value=True) as launch, \
+                    patch.object(self.app, "wait_window", side_effect=lambda d: click_action(d, label)):
+                self.app._show_completion_dialog("Done")
+                if label == "Open Backup Folder":
+                    self.assertEqual(Path(open_folder.call_args.args[0]), actual)
+                else:
+                    launch.assert_called_once_with("image_manager", ["--open", "--source", str(actual)])
+
     def _drain(self):
         app = self.app
         app.after(0, lambda: None)
