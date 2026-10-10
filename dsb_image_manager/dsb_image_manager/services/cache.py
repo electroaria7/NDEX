@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import subprocess
+import tempfile
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageOps
@@ -34,7 +36,7 @@ class CacheManager:
 
     def ensure_jpg_thumbnail(self, image_path: Path, source_key: Path | None = None) -> Path | None:
         target = self.thumbnail_dir / f"{_safe_cache_stem(source_key or image_path)}_thumb.jpg"
-        if target.exists():
+        if _is_valid_image(target):
             return target
 
         try:
@@ -45,30 +47,35 @@ class CacheManager:
                 x = (420 - image.width) // 2
                 y = (420 - image.height) // 2
                 canvas.paste(image.convert("RGB"), (x, y))
-                canvas.save(target, "JPEG", quality=86)
+                _save_atomic(canvas, target, quality=86)
                 return target
         except OSError:
             return self.ensure_placeholder_thumbnail(source_key or image_path)
 
     def ensure_raw_proxy(self, raw_path: Path) -> Path | None:
         target = self.preview_dir / f"{_safe_cache_stem(raw_path)}_proxy.jpg"
-        if target.exists():
+        if _is_valid_image(target):
             return target
         extracted = self._extract_raw_preview(raw_path)
         if not extracted:
             return None
-        target.write_bytes(extracted)
+        fd, temp_name = tempfile.mkstemp(dir=target.parent, prefix=target.stem + ".", suffix=".tmp")
+        temp = Path(temp_name)
         try:
-            with Image.open(target) as image:
-                image.verify()
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(extracted)
+            if not _is_valid_image(temp):
+                return None
+            os.replace(temp, target)
         except OSError:
-            target.unlink(missing_ok=True)
             return None
+        finally:
+            temp.unlink(missing_ok=True)
         return target
 
     def ensure_placeholder_thumbnail(self, image_path: Path) -> Path:
         target = self.thumbnail_dir / f"{_safe_cache_stem(image_path)}_placeholder.jpg"
-        if target.exists():
+        if _is_valid_image(target):
             return target
         image = Image.new("RGB", (420, 420), "#202833")
         draw = ImageDraw.Draw(image)
@@ -77,7 +84,7 @@ class CacheManager:
         draw.text((44, 168), label, fill="#f2c14e")
         draw.text((44, 204), "preview unavailable", fill="#d7dee8")
         draw.text((44, 236), image_path.name[:34], fill="#9fb0c4")
-        image.save(target, "JPEG", quality=82)
+        _save_atomic(image, target, quality=82)
         return target
 
     def _extract_raw_preview(self, raw_path: Path) -> bytes | None:
@@ -101,7 +108,35 @@ class CacheManager:
         return None
 
 
+def _is_valid_image(path: Path) -> bool:
+    if not path.exists():
+        return False
+    try:
+        with Image.open(path) as image:
+            image.verify()
+    except (OSError, SyntaxError, ValueError):
+        return False
+    return True
+
+
+def _save_atomic(image: Image.Image, target: Path, quality: int) -> None:
+    fd, temp_name = tempfile.mkstemp(dir=target.parent, prefix=target.stem + ".", suffix=".tmp")
+    os.close(fd)
+    temp = Path(temp_name)
+    try:
+        image.save(temp, "JPEG", quality=quality)
+        os.replace(temp, target)
+    finally:
+        temp.unlink(missing_ok=True)
+
+
 def _safe_cache_stem(path: Path) -> str:
-    digest = hashlib.sha1(str(path.resolve()).encode("utf-8")).hexdigest()[:12]
+    # The key includes mtime/size so a replaced or edited source gets a fresh cache entry.
+    try:
+        stat = path.stat()
+        version = f"|{stat.st_mtime_ns}|{stat.st_size}"
+    except OSError:
+        version = ""
+    digest = hashlib.sha1((str(path.resolve()) + version).encode("utf-8")).hexdigest()[:12]
     suffix = path.suffix.lower().lstrip(".") or "file"
     return f"{path.stem}_{suffix}_{digest}"

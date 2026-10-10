@@ -65,6 +65,7 @@ class ImageManagerApp(tk.Tk):
         self.catalog: Catalog | None = None
         self.records: list[ImageRecord] = []
         self.current_record: ImageRecord | None = None
+        self._scan_generation = 0
         self.preview_image: ImageTk.PhotoImage | None = None
         self.fullscreen_image: ImageTk.PhotoImage | None = None
         self.thumbnail_images: dict[int, ImageTk.PhotoImage] = {}
@@ -422,26 +423,32 @@ class ImageManagerApp(tk.Tk):
         self.records = []
         self.current_record = None
         self._show_preview(None)
-        thread = threading.Thread(target=self._scan_worker, args=(self.source_dir,), daemon=True)
+        # Events from any scan other than the newest one are ignored (see _process_ui_queue).
+        self._scan_generation = getattr(self, "_scan_generation", 0) + 1
+        thread = threading.Thread(
+            target=self._scan_worker, args=(self.source_dir, self._scan_generation), daemon=True
+        )
         thread.start()
 
-    def _scan_worker(self, source_dir: Path) -> None:
+    def _scan_worker(self, source_dir: Path, generation: int) -> None:
         try:
             result = ImageScanner().scan(
                 source_dir,
                 recursive=True,
-                progress_callback=self._queue_scan_progress,
+                progress_callback=lambda index, total, path: self._queue_scan_progress(
+                    generation, index, total, path
+                ),
             )
-            self.ui_queue.put(("scan_done", result.catalog_path))
+            self.ui_queue.put(("scan_done", generation, result.catalog_path))
         except Exception as exc:
-            self.ui_queue.put(("scan_error", str(exc)))
+            self.ui_queue.put(("scan_error", generation, str(exc)))
 
-    def _queue_scan_progress(self, index: int, total: int, path: Path) -> None:
+    def _queue_scan_progress(self, generation: int, index: int, total: int, path: Path) -> None:
         now = time.monotonic()
         if index < total and (now - self._last_progress_emit) < 0.1:
             return
         self._last_progress_emit = now
-        self.ui_queue.put(("scan_progress", index, total, path.name))
+        self.ui_queue.put(("scan_progress", generation, index, total, path.name))
 
     def _process_ui_queue(self) -> None:
         while True:
@@ -450,14 +457,16 @@ class ImageManagerApp(tk.Tk):
             except queue.Empty:
                 break
             kind = event[0]
+            if kind in {"scan_progress", "scan_done", "scan_error"} and event[1] != self._scan_generation:
+                continue
             if kind == "scan_progress":
-                _, index, total, name = event
+                _, _generation, index, total, name = event
                 self.status.set(f"Scanning {index}/{total}: {name}")
             elif kind == "scan_done":
-                self._scan_finished(event[1])
+                self._scan_finished(event[2])
             elif kind == "scan_error":
                 self.status.set("Scan failed.")
-                messagebox.showerror("Scan failed", event[1])
+                messagebox.showerror("Scan failed", event[2])
         self.after(100, self._process_ui_queue)
 
     def _scan_finished(self, catalog_path: Path) -> None:
@@ -541,18 +550,22 @@ class ImageManagerApp(tk.Tk):
     def set_pick(self, pick_status: str) -> None:
         if not self.catalog or not self.current_record or self.current_record.id is None:
             return
-        self.catalog.update_selection(self.current_record.id, pick_status=pick_status)
+        targets = [record for record in self.selected_records() if record.id is not None]
+        for record in targets:
+            self.catalog.update_selection(record.id, pick_status=pick_status)
         self.refresh_records()
-        self._restore_selection(self.current_record.id)
+        self._restore_selection_ids([record.id for record in targets], self.current_record.id)
 
     def set_rating(self, rating: int) -> None:
         if not self.catalog or not self.current_record or self.current_record.id is None:
             return
-        self.catalog.update_selection(self.current_record.id, rating=rating)
-        self.current_record.rating = rating
+        targets = [record for record in self.selected_records() if record.id is not None]
+        for record in targets:
+            self.catalog.update_selection(record.id, rating=rating)
+            record.rating = rating
         self._refresh_rating_widgets(rating)
         self.refresh_records()
-        self._restore_selection(self.current_record.id)
+        self._restore_selection_ids([record.id for record in targets], self.current_record.id)
 
     def move_selection(self, offset: int) -> None:
         children = list(self.tree.get_children())
@@ -818,6 +831,16 @@ class ImageManagerApp(tk.Tk):
             "Export complete",
             f"Exported {summary.exported} / skipped {summary.skipped} / errors {summary.errors}",
         )
+
+    def _restore_selection_ids(self, image_ids: list[int], focus_id: int) -> None:
+        iids = [str(image_id) for image_id in image_ids if self.tree.exists(str(image_id))]
+        if not iids:
+            return
+        self.tree.selection_set(iids)
+        focus = str(focus_id) if str(focus_id) in iids else iids[0]
+        self.tree.focus(focus)
+        self.tree.see(focus)
+        self.on_select()
 
     def _restore_selection(self, image_id: int) -> None:
         iid = str(image_id)
