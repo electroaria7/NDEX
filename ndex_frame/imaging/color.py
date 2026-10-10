@@ -46,6 +46,26 @@ def sanitize_exif(source_exif: Image.Exif, policy: MetadataPolicy) -> bytes:
     return sanitized.tobytes()
 
 
+def _eight_bit(image: Image.Image) -> Image.Image:
+    """Scale 16-bit grayscale to 8-bit instead of clipping at 255."""
+    if image.mode.startswith("I"):
+        return image.convert("I").point(lambda value: value * (1 / 257)).convert("L")
+    return image
+
+
+def _to_rgb(image: Image.Image) -> Image.Image:
+    return _eight_bit(image).convert("RGB")
+
+
+def _native_for_profile(image: Image.Image, profile: ImageCms.ImageCmsProfile) -> Image.Image:
+    space = str(profile.profile.xcolor_space).strip()
+    if (image.mode, space) in {("CMYK", "CMYK"), ("RGB", "RGB"), ("L", "GRAY")}:
+        return image
+    if image.mode.startswith("I") and space == "GRAY":
+        return _eight_bit(image)
+    return _to_rgb(image)
+
+
 def prepare_master(path: Path, policy: MetadataPolicy) -> PreparedImage:
     with Image.open(path) as opened:
         source_exif = opened.getexif()
@@ -54,16 +74,23 @@ def prepare_master(path: Path, policy: MetadataPolicy) -> PreparedImage:
         warnings: list[str] = []
 
         if source_icc:
-            source_profile = ImageCms.ImageCmsProfile(BytesIO(source_icc))
-            target_profile = ImageCms.ImageCmsProfile(ImageCms.createProfile("sRGB"))
-            rgb = ImageCms.profileToProfile(
-                oriented.convert("RGB"),
-                source_profile,
-                target_profile,
-                outputMode="RGB",
-            )
+            try:
+                source_profile = ImageCms.ImageCmsProfile(BytesIO(source_icc))
+                target_profile = ImageCms.ImageCmsProfile(ImageCms.createProfile("sRGB"))
+                # Transform from the native mode when it matches the profile's
+                # colour space (CMYK needs this); otherwise pre-convert.
+                native = _native_for_profile(oriented, source_profile)
+                rgb = ImageCms.profileToProfile(
+                    native,
+                    source_profile,
+                    target_profile,
+                    outputMode="RGB",
+                )
+            except (ImageCms.PyCMSError, OSError):
+                rgb = _to_rgb(oriented)
+                warnings.append("색상 프로필 변환 실패, 기본 변환 사용")
         else:
-            rgb = oriented.convert("RGB")
+            rgb = _to_rgb(oriented)
             warnings.append("색상 프로필 없음")
 
         return PreparedImage(

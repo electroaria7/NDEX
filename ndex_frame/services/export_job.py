@@ -74,6 +74,11 @@ class ExportResult:
     failed: int
     cancelled: bool
     items: tuple[ExportItemResult, ...]
+    # Job context frozen at plan time, so a manifest never reads live UI state.
+    output_dir: Path | None = None
+    source_dir: str = ""
+    frame_id: str = ""
+    output_id: str = ""
 
 
 class CancelToken:
@@ -223,4 +228,8 @@ def run_export(
         failed=sum(item.state == "failed" for item in results),
         cancelled=cancelled,
         items=tuple(results),
+        output_dir=snapshot.output_dir,
+        source_dir=str(snapshot.items[0].source.path.parent) if snapshot.items else "",
+        frame_id=snapshot.frame.id,
+        output_id=snapshot.output.id,
     )
