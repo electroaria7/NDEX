@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Iterable
@@ -40,6 +42,8 @@ class MetadataReader:
         assert self.exiftool_path is not None
         command = [
             str(self.exiftool_path),
+            "-charset",
+            "filename=utf8",
             "-api",
             "largefilesupport=1",
             "-m",
@@ -81,38 +85,51 @@ class MetadataReader:
             "-FileSize",
             "-d",
             "%Y-%m-%d %H:%M:%S",
-            *[str(path) for path in paths],
         ]
+        # Pass names through a UTF-8 argfile so non-ASCII paths survive the
+        # Windows ANSI code page, and decode the output as UTF-8 ourselves.
+        argfile_path = None
         try:
+            descriptor, argfile_path = tempfile.mkstemp(prefix="ndex_exif_", suffix=".args")
+            with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as handle:
+                for path in paths:
+                    handle.write(f"{path}\n")
+            command.extend(["-@", argfile_path])
             completed = subprocess.run(
                 command,
                 capture_output=True,
-                text=True,
+                text=False,
                 timeout=20,
                 check=False,
                 **subprocess_no_window_options(),
             )
         except (OSError, subprocess.SubprocessError):
             return {}
+        finally:
+            if argfile_path:
+                try:
+                    os.unlink(argfile_path)
+                except OSError:
+                    pass
 
         # ExifTool can return a non-zero status when one file in a batch has a
         # minor warning. If JSON was still emitted, keep the usable rows.
-        if not completed.stdout.strip():
+        stdout = (completed.stdout or b"").decode("utf-8", errors="replace")
+        if not stdout.strip():
             return {}
 
         try:
-            rows = json.loads(completed.stdout)
-        except json.JSONDecodeError:
+            rows = json.loads(stdout)
+        except (json.JSONDecodeError, ValueError):
             return {}
 
-        lookup = {path.resolve(): path for path in paths}
+        lookup = {_path_key(path): path for path in paths}
         results: dict[Path, ImageMetadata] = {}
         for row in rows:
             source = row.get("SourceFile")
             if not source:
                 continue
-            source_path = Path(source).resolve()
-            key = lookup.get(source_path, Path(source))
+            key = lookup.get(_path_key(source), Path(source))
             results[key] = metadata_from_exiftool_row(row)
         return results
 
@@ -262,6 +279,10 @@ def _join_gps(latitude: object, longitude: object) -> str:
     if latitude and longitude:
         return f"{latitude}, {longitude}"
     return ""
+
+
+def _path_key(path: Path | str) -> str:
+    return os.path.normcase(os.path.abspath(str(path)))
 
 
 def _chunks(items: list[Path], size: int):

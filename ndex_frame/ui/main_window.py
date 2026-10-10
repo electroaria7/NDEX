@@ -77,6 +77,8 @@ class MainWindow(QMainWindow):
         self._known_source_paths: set[Path] = set()
         self._export_total = 0
         self._busy = False
+        self._close_pending = False
+        self._close_ready = False
         self.handoff_path: Path | None = None
         self.setWindowTitle(NDEX_FRAME_TITLE)
         self.resize(1180, 760)
@@ -92,10 +94,25 @@ class MainWindow(QMainWindow):
         self._refresh_sources()
 
     def closeEvent(self, event: QCloseEvent) -> None:
+        if self._close_ready:
+            super().closeEvent(event)
+            return
         self._interactive_dialogs = False
+        self._close_pending = True
         self.request_cancel()
-        self.controller.shutdown()
-        super().closeEvent(event)
+        if self.controller.shutdown():
+            self._close_ready = True
+            super().closeEvent(event)
+        else:
+            self.setEnabled(False)
+            self.statusBar().showMessage("Closing after the current file finishes…")
+            event.ignore()
+
+    @Slot()
+    def _finish_close(self) -> None:
+        if self._close_pending:
+            self._close_ready = True
+            self.close()
 
     def set_interactive_dialogs(self, enabled: bool) -> None:
         self._interactive_dialogs = enabled
@@ -305,6 +322,7 @@ class MainWindow(QMainWindow):
         self.controller.exportFinished.connect(self._export_finished)
         self.controller.importFailed.connect(self._retry_import_failed)
         self.controller.exportAborted.connect(self._retry_export_aborted)
+        self.controller.shutdownFinished.connect(self._finish_close)
 
     def _reload_preset_combos(self) -> None:
         frames: list[FramePreset]
@@ -570,10 +588,8 @@ class MainWindow(QMainWindow):
 
     def _status_for(self, path: Path) -> str:
         export_status = self._source_export_status.get(path)
-        if export_status == "Error":
-            return "Error"
-        if export_status == "Exported":
-            return "Exported"
+        if export_status in {"Error", "Exported", "Cancelled"}:
+            return export_status
         if self.controller.state.is_modified(path):
             return "Modified"
         return "Default"
@@ -624,7 +640,20 @@ class MainWindow(QMainWindow):
         self.result_summary_label.setText(
             f"{width}×{height} · {state.output_profile.format.upper()} · {state.output_profile.color_space}"
         )
-        can_export = (not self._busy) and self._output_folder_ready() and bool(state.sources)
+        exporting = self.controller._export_thread is not None
+        # An import ending mid-export clears _busy; the export thread still
+        # keeps the buttons off until the job itself is done.
+        can_export = (not self._busy) and (not exporting) and self._output_folder_ready() and bool(state.sources)
+        for control in (
+            self.open_files_button,
+            self.open_folder_button,
+            self.output_folder_button,
+            self.frame_preset_combo,
+            self.output_profile_combo,
+            self.manage_presets_button,
+            self.save_frame_button,
+        ):
+            control.setEnabled(not exporting)
         self.export_all_button.setEnabled(can_export)
         self.export_selected_button.setEnabled(can_export and state.selected_path is not None)
 
@@ -738,6 +767,8 @@ class MainWindow(QMainWindow):
         sources: list[SourceItem] | None = None,
         collision_policy: str = "rename",
     ) -> None:
+        if self.controller._export_thread is not None:
+            raise RuntimeError("An export is already running. Wait for it to finish.")
         selected = list(sources) if sources is not None else list(self.controller.state.sources)
         plan_export(self._export_request(selected, collision_policy))
         self.last_export_result = None
@@ -765,7 +796,10 @@ class MainWindow(QMainWindow):
         policy = dialog.collision_policy()
         if policy not in {"skip", "rename"}:
             return
-        self.confirm_export(sources, policy)
+        try:
+            self.confirm_export(sources, policy)
+        except Exception as error:
+            self.show_nonfatal_error(str(error) or error.__class__.__name__)
 
     def _export_selected(self) -> None:
         path = self.controller.state.selected_path
@@ -810,16 +844,17 @@ class MainWindow(QMainWindow):
             if item.state == "exported":
                 self._source_export_status[item.source] = "Exported"
             elif item.state == "failed":
-                self._source_export_status[item.source] = "Error"
+                self._source_export_status[item.source] = (
+                    "Cancelled" if item.message == "not run: cancelled" else "Error"
+                )
         cancelled = 0
         if getattr(result, "cancelled", False):
-            cancelled = max(
+            cancelled = getattr(result, "cancelled_count", 0) or max(
                 0,
                 self._export_total - result.exported - result.skipped - result.failed,
             )
-        dialog = ExportCompletionDialog(
-            result, cancelled, self.controller.state.output_directory, self
-        )
+        output_dir = getattr(result, "output_dir", None) or self.controller.state.output_directory
+        dialog = ExportCompletionDialog(result, cancelled, output_dir, self)
         self._last_completion_dialog = dialog
         summary = dialog.summary_label.text()
         self.statusBar().showMessage(summary, 15000)

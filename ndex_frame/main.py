@@ -181,18 +181,17 @@ def _run_gui(args: argparse.Namespace) -> int:
     def record_frame_export(result: ExportResult) -> None:
         from ndex_common.workflow import record_export
 
-        source = ""
-        if controller.state.sources:
-            source = str(controller.state.sources[0].path.parent)
-        destination = controller.state.output_directory or ""
+        # The job's own folders and preset ids: the UI may have moved on since.
+        source = result.source_dir
+        destination = result.output_dir if result.output_dir is not None else ""
         plan = window.pending_retry
         window.pending_retry = None
         record_export(
             source,
             destination,
             result,
-            frame_preset=controller.state.working_frame.id,
-            output_profile=controller.state.output_profile.id,
+            frame_preset=result.frame_id or controller.state.working_frame.id,
+            output_profile=result.output_id or controller.state.output_profile.id,
             context=plan.context() if plan is not None else None,
         )
 
@@ -202,6 +201,10 @@ def _run_gui(args: argparse.Namespace) -> int:
         controller.state.output_directory = args.output
     window.show()
     window.sync_output_folder_label()
+    if store.errors:
+        window.show_nonfatal_error(
+            f"{len(store.errors)} custom preset(s) could not be loaded: {store.errors[0]}"
+        )
     handoff = args.handoff
     source = args.source
     if handoff is not None:

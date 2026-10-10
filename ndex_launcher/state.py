@@ -93,7 +93,7 @@ def gather_workflow_state() -> list[StepState]:
         document = documents[step.key]
         step.last_result = results.get(step.key)
         step.last_folder = workflow_session.preferred_folder(document)
-        handoff = workflow_session.usable_handoff(document)
+        handoff = workflow_session.usable_handoff(document) if step.key == "frame" else ""
         step.handoff_ready = bool(handoff)
         step.last_manifest = handoff or str(document.get("last_manifest") or "")
         step.launch_args = workflow_session.launch_args(document)

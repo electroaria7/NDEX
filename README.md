@@ -2,7 +2,7 @@
 
 [한국어](README.ko.md)
 
-**Public beta · 0.9.3**
+**Public beta · 0.9.4**
 
 Windows desktop tools for a photo workflow: backup → select → extract masters → frame & export.
 Each app can run alone. Together they share XMP sidecars and one settings file. Actual XMP interpretation in Lightroom / Evoto still needs separate validation.
@@ -11,38 +11,38 @@ This is a **public beta**, not a 1.0 product. EXEs are unsigned, so Windows Smar
 
 ## Public beta
 
-- Current version: **0.9.3**. Packages: `NDEX_v0.9.3.zip` (portable) and `NDEX_Setup_0.9.3.exe` (installer).
-- GitHub tags `v1.0.0` and `v1.0.1` were this same beta line with a premature stable number. Those downloads still work; the current release is **0.9.3**.
-- If `NDEX_Setup_1.0.1.exe` is already installed, uninstall it before installing `0.9.3`. Windows treats `0.9.3` as older than `1.0.1`.
+- Current version: **0.9.4 Beta**. Packages: `NDEX_v0.9.4.zip` (portable) and `NDEX_Setup_0.9.4.exe` (installer). See the [0.9.4 Beta release](https://github.com/electroaria7/NDEX/releases/tag/v0.9.4) for downloads.
+- GitHub tags `v1.0.0` and `v1.0.1` were this same beta line with a premature stable number. Historical downloads, including `v0.9.3`, remain separate from the 0.9.4 release.
+- If `NDEX_Setup_1.0.1.exe` is already installed, uninstall it before installing `0.9.4`. Windows treats `0.9.4` as older than `1.0.1`.
 - Changelog: [PATCH_NOTES.md](PATCH_NOTES.md).
 
 ## Quick start
 
-**What's new in 0.9.3**
+**What's new in 0.9.4**
 
-- Image Manager marks only successfully copied photos as backed up.
-- Manager backup/export and Auto Selector stage copies, verify size and SHA-256, then commit them atomically. Failed overwrites preserve existing files.
-- Auto Selector duplicate `skip` preserves both existing RAW and XMP; it no longer updates sidecars for skipped files.
-- Verification adds disk reads. Large-job performance, cancellation, and shutdown handling are the next patch's focus.
+- Image Manager runs backup, file export, and XMP export in the background with progress and cancellation. Scans and file jobs run one at a time.
+- Auto Selector adds cancellation, rejects stale analysis, and reuses identical numbered RAW copies when a job is repeated. Image Manager sends only picked JPGs to it, and exact RAW filenames take priority over camera-ID matches.
+- One, Auto Selector, and Frame retain unprocessed cancelled files for Retry Failed; Image Manager records them in Job Results. All four working apps wait for active jobs and their results before closing.
+- Frame reuses decoded previews; folder scans avoid entering excluded backup/work/cache directories. Bulk Image Manager selection updates use one database transaction.
+- Audit fixes cover Korean RAW paths and capture dates, RAW/JPG pairing, stale thumbnails, XMP pick updates, settings recovery, and Frame color/profile handling.
 
-**Next patch: responsive long-running jobs**
+Cancellation takes effect after the current file's copy, verification, or render, or the current metadata batch. One waits for analysis to finish when closing during analysis.
+The verified atomic-copy behavior from 0.9.3 remains, including preservation of existing RAW and XMP files under Auto Selector's duplicate `skip` policy.
 
-1. Run Image Manager copy/XMP operations in the background.
-2. Add Auto Selector cancellation and safe shutdown while work is active.
-3. Record cancelled/interrupted outcomes and show retry progress.
-4. Validate throughput, cancellation response, and source/existing-output preservation on large jobs.
+Large real-world RAW/SD-card benchmarks and Lightroom/Evoto compatibility remain follow-up work.
+Review details: [October 9 audit](https://github.com/electroaria7/NDEX/blob/v0.9.4/docs/Improvement_Review_2026-10-09.md), [October 10 UI and task safety](https://github.com/electroaria7/NDEX/blob/v0.9.4/docs/Improvement_Review_2026-10-10.md), [release validation](https://github.com/electroaria7/NDEX/blob/v0.9.4/docs/Release_Validation_2026-10-10.md).
 
 Preflight capacity summaries, CSV/HTML reports, localization, and release automation follow this work.
 See the [consolidated roadmap](https://github.com/electroaria7/NDEX/blob/main/docs/obsidian/NDEX/Roadmap.md).
 
 **Windows package (recommended)**
 
-1. Download `NDEX_v0.9.3.zip` from [Releases](https://github.com/electroaria7/NDEX/releases).
+1. Download `NDEX_v0.9.4.zip` from the [0.9.4 Beta release](https://github.com/electroaria7/NDEX/releases/tag/v0.9.4).
 2. Unzip the folder. Keep `Apps\` together.
 3. Double-click `NDEX_Launcher.exe`.
 4. Use the four cards: **1. Backup** → **2. Select & Rate** → **3. Extract** → **4. Frame & Export**.
 
-**Installed (`NDEX_Setup_0.9.3.exe`)**
+**Installed (`NDEX_Setup_0.9.4.exe`)**
 
 1. Run the installer. Files go to `C:\Program Files\NDEX`.
 2. Open **NDEX Launcher** from the Start menu or the desktop icon.
@@ -70,7 +70,7 @@ First launch of a one-file EXE can take a few seconds while it unpacks.
 | **NDEX Frame** | Place finished Masters on a crop-free canvas and export color-managed Instagram JPEG/PNG/WebP |
 
 Supported RAW: CR3 · CR2 · ARW · SRF · SR2 · NEF · NRW  
-Filename matching: Canon `IMG_0001` · Nikon `DSC_0001`/`_DSC0001` · Sony `DSC00001` (renamed files still match by token)
+Filename matching: Canon `IMG_0001` · Nikon `DSC_0001`/`_DSC0001` · Sony `DSC00001`. Exact names take priority; a camera ID inside a renamed JPG can match a RAW whose name begins with that ID. Prefixed RAW names require an exact filename match.
 
 NDEX Frame input: JPG/JPEG · PNG · TIFF. Masters and existing outputs are never overwritten.
 
@@ -111,7 +111,7 @@ Shared settings `frame` section: `%LOCALAPPDATA%\NDEX\config\settings.json`
 ## Packaged layout (installer and portable)
 
 ```
-NDEX_v0.9.3\                  also installed as C:\Program Files\NDEX\
+NDEX_v0.9.4\                  also installed as C:\Program Files\NDEX\
   NDEX_Launcher.exe           start here
   SHA256SUMS.txt
   Apps\
@@ -142,7 +142,7 @@ powershell -ExecutionPolicy Bypass -File .\build_all.ps1
 powershell -ExecutionPolicy Bypass -File .\build_all.ps1 -Installer
 ```
 
-Output: `release\NDEX_v0.9.3\` (portable package) and `release\NDEX_Setup_0.9.3.exe`.
+Output: `release\NDEX_v0.9.4\` (portable package) and `release\NDEX_Setup_0.9.4.exe`.
 
 ```powershell
 python -m ndex_launcher.main

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import stat
 import tempfile
 import threading
 import unittest
@@ -8,6 +10,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from src.backup_executor import TEMP_SUFFIX, execute_backup
+from ndex_common.report import PROBLEM_STATUSES
 from src.models import ScanItem
 
 
@@ -285,7 +288,79 @@ class BackupItemRecordTests(unittest.TestCase):
             result = execute_backup(items, dry_run=False, cancel_event=cancel)
 
         self.assertTrue(result.cancelled)
-        self.assertEqual(result.items, [])
+        self.assertEqual(result.copied, 0)
+        # Files never attempted are recorded with a status Retry treats as a problem.
+        self.assertEqual(len(result.items), 3)
+        for entry in result.items:
+            self.assertEqual(entry["status"], "failed")
+            self.assertEqual(entry["detail"], "not run: cancelled")
+            self.assertIn(entry["status"], PROBLEM_STATUSES)
+
+    def test_cancel_midway_records_remaining_files(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            destination_dir = root / "backup" / "cr3"
+            items = []
+            for index in range(3):
+                source_file = root / f"source{index}.CR3"
+                source_file.write_text("camera-file", encoding="utf-8")
+                items.append(_make_item(source_file, destination_dir))
+
+            cancel = threading.Event()
+
+            def progress(stage, current, total, name):
+                cancel.set()
+
+            result = execute_backup(
+                items, dry_run=False, cancel_event=cancel, progress_callback=progress
+            )
+
+        self.assertTrue(result.cancelled)
+        statuses = [entry["status"] for entry in result.items]
+        self.assertEqual(statuses, ["copied", "failed", "failed"])
+
+    def test_read_only_source_leaves_no_temp_file(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            source_file = root / "source.CR3"
+            source_file.write_text("camera-file", encoding="utf-8")
+            os.chmod(source_file, stat.S_IREAD)
+            destination_dir = root / "backup" / "cr3"
+            try:
+                # Verification fails, so the temp copy is deleted rather than published.
+                with patch("src.backup_executor._verify_copy", return_value=False):
+                    result = execute_backup(
+                        [_make_item(source_file, destination_dir)], dry_run=False
+                    )
+                leftovers = list(destination_dir.glob(f"*{TEMP_SUFFIX}"))
+            finally:
+                os.chmod(source_file, stat.S_IWRITE | stat.S_IREAD)
+
+        self.assertEqual(result.verification_failed, 1)
+        self.assertEqual(leftovers, [])
+
+    def test_overwrite_replaces_read_only_destination(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            source_file = root / "source.CR3"
+            source_file.write_text("new-content", encoding="utf-8")
+            destination_dir = root / "backup" / "cr3"
+            destination_dir.mkdir(parents=True)
+            existing = destination_dir / "source.CR3"
+            existing.write_text("old", encoding="utf-8")
+            os.chmod(existing, stat.S_IREAD)
+
+            result = execute_backup(
+                [_make_item(source_file, destination_dir)],
+                duplicate_policy="overwrite",
+                dry_run=False,
+            )
+            content = existing.read_text(encoding="utf-8")
+            os.chmod(existing, stat.S_IWRITE | stat.S_IREAD)
+
+        self.assertEqual(result.errors, 0)
+        self.assertEqual(result.overwritten, 1)
+        self.assertEqual(content, "new-content")
 
 
 

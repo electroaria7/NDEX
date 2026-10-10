@@ -6,7 +6,7 @@ from pathlib import Path
 
 from src.branding import NDEX_AUTO_SELECTOR_TITLE
 
-from ndex_auto_selector.ndex_auto_selector.services.selector import AutoSelectorService
+from ndex_auto_selector.ndex_auto_selector.services.selector import AutoSelectorService, load_handoff
 from ndex_auto_selector.ndex_auto_selector.ui.tk_app import run_app
 from ndex_common.crashlog import install_crash_logging
 
@@ -42,6 +42,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="How to handle CR3 files that already exist in the work folder",
     )
     parser.add_argument(
+        "--handoff",
+        type=Path,
+        help="Select-handoff manifest from Image Manager: only its picked JPGs are matched.",
+    )
+    parser.add_argument(
         "--open",
         action="store_true",
         help="Open the GUI with folder arguments preloaded (used by NDEX handoff)",
@@ -64,27 +69,45 @@ def main() -> int:
             initial_selected_jpg=args.selected_jpg,
             initial_work_folder=args.work_folder,
             retry_manifest=args.retry,
+            initial_handoff=args.handoff,
         )
         return 0
 
-    cli_mode = any([args.raw_source, args.selected_jpg, args.work_folder, args.analyze, args.copy])
+    cli_mode = any(
+        [args.raw_source, args.selected_jpg, args.handoff, args.work_folder, args.analyze, args.copy]
+    )
 
     if not cli_mode:
         run_app()
         return 0
 
-    if not args.raw_source or not args.selected_jpg:
-        raise SystemExit("--raw-source and --selected-jpg are required for CLI mode.")
+    selected_jpg = args.selected_jpg
+    jpg_files = None
+    if args.handoff is not None:
+        try:
+            handoff_source, jpg_files = load_handoff(args.handoff)
+        except ValueError as exc:
+            raise SystemExit(str(exc))
+        selected_jpg = handoff_source or (jpg_files[0].parent if jpg_files else None)
+    if not args.raw_source or not selected_jpg:
+        raise SystemExit("--raw-source and --selected-jpg (or --handoff) are required for CLI mode.")
     if args.copy and not args.work_folder:
         raise SystemExit("--work-folder is required with --copy.")
 
     service = AutoSelectorService()
-    summary = service.analyze(args.raw_source, args.selected_jpg, recursive=args.recursive)
+    summary = service.analyze(
+        args.raw_source,
+        selected_jpg,
+        recursive=args.recursive,
+        exclude=args.work_folder,
+        jpg_files=jpg_files,
+    )
     _emit(f"CR3 source: {summary.raw_source_dir}")
     _emit(f"Selected JPG folder: {summary.selected_jpg_dir}")
     _emit(f"Selected JPG: {summary.selected_count}")
     _emit(f"Matched CR3: {summary.matched_count}")
     _emit(f"Missing CR3: {summary.missing_count}")
+    _emit(f"Ambiguous: {summary.ambiguous_count}")
 
     if args.copy:
         result = service.copy_matches(
@@ -105,7 +128,11 @@ def main() -> int:
             _emit(message)
         from ndex_common.workflow import record_extract
 
-        record_extract(args.selected_jpg, args.raw_source, args.work_folder, result)
+        record_extract(
+            selected_jpg, args.raw_source, args.work_folder, result, recursive=args.recursive
+        )
+        if result.errors > 0:
+            return 1
 
     return 0
 

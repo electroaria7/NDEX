@@ -10,6 +10,7 @@ from typing import Any, Callable, Literal
 
 from ndex_common import settings
 from ndex_common.jsonio import write_json_atomic
+from ndex_frame.core.framing_choices import normalize_hex_color
 from ndex_frame.core.models import AspectRatio, FramePreset, MetadataPolicy, OutputProfile, OutputSizing
 
 PresetKind = Literal["frame", "output"]
@@ -41,7 +42,12 @@ class PresetStore:
         self.root = Path(root)
         self._settings_reader = settings_reader
         self._settings_writer = settings_writer
-        self.errors: list[PresetError] = []
+        self._errors: dict[str, list[PresetError]] = {"frame": [], "output": []}
+
+    @property
+    def errors(self) -> list[PresetError]:
+        """Load problems from the latest refresh of every preset kind."""
+        return [error for kind in ("frame", "output") for error in self._errors[kind]]
 
     def list_frames(self) -> tuple[FramePreset, ...]:
         return tuple(self._load("frame"))
@@ -74,7 +80,7 @@ class PresetStore:
         return self._default("default_output_id", self.list_outputs(), "builtin.instagram-feed-hq")
 
     def _load(self, kind: PresetKind) -> list[FramePreset | OutputProfile]:
-        self.errors = []
+        self._errors[kind] = []
         loaded = self._load_directory(self._builtin_directory(kind), kind, builtin=True)
         loaded.extend(
             self._load_directory(
@@ -100,8 +106,9 @@ class PresetStore:
                         raise PresetError(path, f"Duplicate preset id: {preset.id}")
                     existing_ids.add(preset.id)
                 loaded.append(preset)
-            except (OSError, json.JSONDecodeError, PresetError) as error:
-                self.errors.append(error if isinstance(error, PresetError) else PresetError(path, str(error)))
+            except (OSError, ValueError) as error:
+                # ValueError covers JSONDecodeError, UnicodeDecodeError and PresetError.
+                self._errors[kind].append(error if isinstance(error, PresetError) else PresetError(path, str(error)))
         return loaded
 
     def _save(self, preset: FramePreset | OutputProfile, kind: PresetKind) -> None:
@@ -152,7 +159,7 @@ def _frame_from_dict(data: Any, builtin: bool, path: Path = Path("<memory>")) ->
             _string(values["id"], path, "id"), _string(values["name"], path, "name"),
             _positive_int(values["version"], path, "version"),
             AspectRatio(_positive_int(ratio["width"], path, "ratio.width"), _positive_int(ratio["height"], path, "ratio.height")),
-            _string(values["background"], path, "background"), _number(values["photo_scale"], path, "photo_scale"),
+            _color(values["background"], path, "background"), _number(values["photo_scale"], path, "photo_scale"),
             _number(values["x"], path, "x"), _number(values["y"], path, "y"), builtin,
         )
     except (KeyError, ValueError) as error:
@@ -203,6 +210,14 @@ def _string(value: Any, path: Path, label: str) -> str:
     if not isinstance(value, str) or not value:
         raise ValueError(f"{label} must be a non-empty string")
     return value
+
+
+def _color(value: Any, path: Path, label: str) -> str:
+    text = _string(value, path, label)
+    normalized = normalize_hex_color(text)
+    if normalized is None:
+        raise ValueError(f"{label} must be a hex color such as #FFFFFF")
+    return normalized
 
 
 def _positive_int(value: Any, path: Path, label: str) -> int:

@@ -34,6 +34,29 @@ class WorkflowRecordTests(unittest.TestCase):
     def _patch_roots(self, root: Path):
         return patch_roots(root)
 
+    def test_cancelled_extract_preserves_unprocessed_files_for_retry(self) -> None:
+        from ndex_common.report import read_report
+        from ndex_common.retry import plan_retry
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            selected = root / "selected"
+            raw = root / "raw"
+            work = root / "work"
+            for folder in (selected, raw, work):
+                folder.mkdir()
+            pending = selected / "IMG_0001.JPG"
+            pending.write_bytes(b"jpg")
+            result = SimpleNamespace(cancelled=True, errors=1, items=[{
+                "path": str(pending), "status": "failed", "detail": "not run: cancelled",
+            }])
+            patches = self._patch_roots(root)
+            with patches[0], patches[1], patches[2], patches[3], patches[4]:
+                path = record_extract(selected, raw, work, result, recursive=True)
+                report = read_report(path)
+            self.assertTrue(report.cancelled)
+            self.assertIn("cancelled", report.headline)
+            self.assertEqual(plan_retry(report).paths, (pending,))
+
     def test_select_handoff_writes_sidecar_and_frame_session(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

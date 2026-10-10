@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
@@ -79,8 +80,9 @@ def record_job(
                     folders=dict(folders or {}),
                     last_manifest=str(path),
                     context=extra,
+                    drop_context=("handoff",) if _supersedes_handoff(app, type, folders) else (),
                 )
-                if type == "select_handoff":
+                if type == "select_handoff" and (context or {}).get("target", "frame") == "frame":
                     session.remember(
                         "frame",
                         folders={"source": source} if source else {},
@@ -97,6 +99,25 @@ def record_job(
             return path
     except OSError:
         return None
+
+
+def _supersedes_handoff(app: str, type: str, folders: Mapping[str, str] | None) -> bool:
+    """True when an ordinary job moved the app to a different source folder.
+
+    A handoff is still the right thing to continue from while later jobs work
+    on the same source (Frame exporting the picks it was handed), but once the
+    app works on another folder the old handoff is stale.
+    """
+    if type == "select_handoff":
+        return False
+    current = session.load_session(app)
+    if current is None or not (current.get("context") or {}).get("handoff"):
+        return False
+    new_source = str((folders or {}).get("source") or "")
+    old_source = str((current.get("folders") or {}).get("source") or "")
+    if not new_source or not old_source:
+        return False
+    return os.path.normcase(os.path.normpath(new_source)) != os.path.normcase(os.path.normpath(old_source))
 
 
 def record_extract(
@@ -129,6 +150,7 @@ def record_extract(
             "work": str(work_folder),
         },
         context={
+            "cancelled": bool(getattr(result, "cancelled", False)),
             **({"recursive": bool(recursive)} if recursive is not None else {}),
             **dict(context or {}),
         },
@@ -180,7 +202,13 @@ def record_export(
 def record_select_handoff(
     source_folder: Path | str,
     files: Iterable[Path | str],
+    *,
+    target: str = "frame",
 ) -> Path | None:
+    """Record picks handed to ``target`` ("frame" or "auto_selector").
+
+    Only a Frame handoff becomes Frame's Continue point.
+    """
     paths = [str(path) for path in files]
     items = [{"path": path, "status": "selected"} for path in paths]
     return record_job(
@@ -190,7 +218,7 @@ def record_select_handoff(
         counts={"selected": len(paths)},
         items=items,
         folders={"source": str(source_folder)},
-        context={"files": paths},
+        context={"files": paths, "target": target},
     )
 
 

@@ -4,6 +4,7 @@ import queue
 import threading
 import time
 import tkinter as tk
+from dataclasses import replace
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
@@ -15,7 +16,7 @@ from ..core.models import ExportOptions, ImageRecord
 from ..services.backup import BackupService
 from ..services.catalog import Catalog
 from ..services.exporter import ExportService
-from ..services.scanner import ImageScanner
+from ..services.scanner import ImageScanner, ScanCancelled
 from ..services.xmp_export import XmpExportService
 
 from ndex_common.launch import launch_app
@@ -65,6 +66,12 @@ class ImageManagerApp(tk.Tk):
         self.catalog: Catalog | None = None
         self.records: list[ImageRecord] = []
         self.current_record: ImageRecord | None = None
+        self._scan_generation = 0
+        self._worker: threading.Thread | None = None
+        self._cancel_event = threading.Event()
+        self._active_job: str | None = None
+        self._closing = False
+        self._queue_job: str | None = None
         self.preview_image: ImageTk.PhotoImage | None = None
         self.fullscreen_image: ImageTk.PhotoImage | None = None
         self.thumbnail_images: dict[int, ImageTk.PhotoImage] = {}
@@ -90,12 +97,15 @@ class ImageManagerApp(tk.Tk):
         self._build_menu()
         self._build_ui()
         self._bind_shortcuts()
-        self.after(100, self._process_ui_queue)
+        self.protocol("WM_DELETE_WINDOW", self.destroy)
+        self._queue_job = self.after(100, self._process_ui_queue)
 
         if initial_source is not None:
             self.after(200, lambda: self._open_initial_source(Path(initial_source)))
 
     def _open_initial_source(self, source_dir: Path) -> None:
+        if not self._can_start_work():
+            return
         if not source_dir.is_dir():
             messagebox.showwarning(
                 NDEX_IMAGE_MANAGER_TITLE,
@@ -124,6 +134,12 @@ class ImageManagerApp(tk.Tk):
         file_menu.add_command(label="Job Results...", command=self.open_job_results)
         file_menu.add_separator()
         file_menu.add_command(label="Exit", command=self.destroy)
+        self.file_menu = file_menu
+        self._file_action_indices = [
+            index for index in range(file_menu.index("end") + 1)
+            if file_menu.type(index) == "command"
+            and file_menu.entrycget(index, "label") not in {"Exit", "Job Results..."}
+        ]
         menu_bar.add_cascade(label="File", menu=file_menu)
 
         selection_menu = tk.Menu(menu_bar, tearoff=0)
@@ -206,6 +222,9 @@ class ImageManagerApp(tk.Tk):
         toolbar = ttk.Frame(toolbar_outer, padding=(12, 8), style="Toolbar.TFrame")
         toolbar.pack(fill=tk.X)
 
+        self.choose_button = ttk.Button(toolbar, text="Choose Folder", command=self.choose_folder)
+        self.choose_button.pack(side=tk.LEFT, padx=(0, 12))
+
         ttk.Label(toolbar, text="Type", style="Toolbar.TLabel").pack(side=tk.LEFT)
         file_filter = ttk.Combobox(
             toolbar,
@@ -216,6 +235,7 @@ class ImageManagerApp(tk.Tk):
         )
         file_filter.pack(side=tk.LEFT, padx=(6, 14))
         file_filter.bind("<<ComboboxSelected>>", lambda event: self.refresh_records())
+        self.file_filter_widget = file_filter
 
         ttk.Label(toolbar, text="Pick", style="Toolbar.TLabel").pack(side=tk.LEFT)
         pick_filter = ttk.Combobox(
@@ -227,10 +247,11 @@ class ImageManagerApp(tk.Tk):
         )
         pick_filter.pack(side=tk.LEFT, padx=(6, 14))
         pick_filter.bind("<<ComboboxSelected>>", lambda event: self.refresh_records())
+        self.pick_filter_widget = pick_filter
 
         ttk.Label(
             toolbar,
-            text="Use the top menu for actions. Click table columns to sort.",
+            text="File menu: exports and backup | Click columns to sort",
             style="CardMuted.TLabel",
         ).pack(side=tk.LEFT, padx=(8, 0))
 
@@ -348,8 +369,14 @@ class ImageManagerApp(tk.Tk):
 
         bottom = ttk.Frame(self, padding=(16, 0, 16, 12), style="Footer.TFrame")
         bottom.pack(fill=tk.X)
-        ttk.Label(bottom, textvariable=self.status, style="Muted.TLabel").pack(side=tk.LEFT)
-        ttk.Label(bottom, textvariable=self.selection_status, style="Muted.TLabel").pack(side=tk.LEFT, padx=(18, 0))
+        status_row = ttk.Frame(bottom, style="Footer.TFrame")
+        status_row.pack(fill=tk.X, pady=(0, 4))
+        self.cancel_button = ttk.Button(status_row, text="Cancel", command=self.cancel_work, state=tk.DISABLED)
+        self.cancel_button.pack(side=tk.RIGHT, padx=(8, 0))
+        self.work_progress = ttk.Progressbar(status_row, length=130, mode="determinate")
+        self.work_progress.pack(side=tk.RIGHT, padx=(8, 0))
+        ttk.Label(status_row, textvariable=self.status, style="Muted.TLabel", anchor=tk.W).pack(side=tk.LEFT, fill=tk.X, expand=True)
+        ttk.Label(bottom, textvariable=self.selection_status, style="Muted.TLabel").pack(side=tk.LEFT)
         ttk.Label(
             bottom,
             text="F fullscreen | P/M/X/U pick | 0-5 rating",
@@ -381,6 +408,8 @@ class ImageManagerApp(tk.Tk):
         self.bind("<F5>", lambda event: self.rescan())
 
     def choose_folder(self) -> None:
+        if not self._can_start_work():
+            return
         selected = filedialog.askdirectory(title="Choose a shooting folder")
         if selected:
             self.source_dir = Path(selected)
@@ -389,6 +418,8 @@ class ImageManagerApp(tk.Tk):
             self.scan_folder()
 
     def reopen_last_folder(self) -> None:
+        if not self._can_start_work():
+            return
         stored = get_section(SETTINGS_SECTION)
         last_source = stored.get("last_source", "")
         if not last_source or not Path(last_source).is_dir():
@@ -416,49 +447,164 @@ class ImageManagerApp(tk.Tk):
         self.scan_folder()
 
     def scan_folder(self) -> None:
+        if not self._can_start_work():
+            return
         assert self.source_dir is not None
+        if self.catalog:
+            self.catalog.close()
+            self.catalog = None
         self.status.set(f"Scanning {self.source_dir} ...")
         self.tree.delete(*self.tree.get_children())
         self.records = []
         self.current_record = None
         self._show_preview(None)
-        thread = threading.Thread(target=self._scan_worker, args=(self.source_dir,), daemon=True)
-        thread.start()
+        self._show_details(None)
+        self._refresh_rating_widgets(0)
+        self.update_selection_status()
+        self.update_catalog_status()
+        source = self.source_dir
+        self._start_worker("scan", lambda cancel, progress: ImageScanner().scan(
+            source, recursive=True, progress_callback=progress, cancel_event=cancel,
+        ))
 
-    def _scan_worker(self, source_dir: Path) -> None:
-        try:
-            result = ImageScanner().scan(
-                source_dir,
-                recursive=True,
-                progress_callback=self._queue_scan_progress,
-            )
-            self.ui_queue.put(("scan_done", result.catalog_path))
-        except Exception as exc:
-            self.ui_queue.put(("scan_error", str(exc)))
+    def _can_start_work(self) -> bool:
+        if self._closing:
+            return False
+        if self._active_job is not None:
+            self.status.set("A task is running. Wait for it to finish or use Cancel.")
+            return False
+        return True
 
-    def _queue_scan_progress(self, index: int, total: int, path: Path) -> None:
+    def _set_work_controls(self, busy: bool) -> None:
+        state = tk.DISABLED if busy else tk.NORMAL
+        for index in self._file_action_indices:
+            self.file_menu.entryconfigure(index, state=state)
+        self.choose_button.configure(state=state)
+        self.file_filter_widget.configure(state=tk.DISABLED if busy else "readonly")
+        self.pick_filter_widget.configure(state=tk.DISABLED if busy else "readonly")
+        self.cancel_button.configure(state=tk.NORMAL if busy else tk.DISABLED)
+        if busy:
+            self.work_progress.configure(mode="indeterminate", value=0)
+            self.work_progress.start(15)
+        else:
+            self.work_progress.stop()
+            self.work_progress.configure(mode="determinate", value=0)
+
+    def _start_worker(self, kind: str, work) -> None:
+        self._active_job = kind
+        self._cancel_event = threading.Event()
+        self._scan_generation += 1
+        generation = self._scan_generation
+        cancel = self._cancel_event
+        self._last_progress_emit = 0.0
+        self._set_work_controls(True)
+
+        def run() -> None:
+            result, error, cancelled = None, None, False
+            try:
+                result = work(cancel, lambda index, total, path: self._queue_work_progress(
+                    generation, index, total, path,
+                ))
+            except ScanCancelled:
+                cancelled = True
+            except Exception as exc:
+                error = str(exc)
+            self.ui_queue.put(("work_done", generation, kind, result, error, cancelled))
+
+        self._worker = threading.Thread(target=run, name=f"image-manager-{kind}", daemon=False)
+        self._worker.start()
+
+    def _queue_work_progress(self, generation: int, index: int, total: int, path: Path) -> None:
         now = time.monotonic()
         if index < total and (now - self._last_progress_emit) < 0.1:
             return
         self._last_progress_emit = now
-        self.ui_queue.put(("scan_progress", index, total, path.name))
+        self.ui_queue.put(("work_progress", generation, index, total, path.name))
+
+    def cancel_work(self) -> None:
+        if self._active_job is None:
+            return
+        self._cancel_event.set()
+        self.cancel_button.configure(state=tk.DISABLED)
+        message = "Cancelling after the current file or metadata batch finishes..."
+        self.status.set(f"Closing: {message}" if self._closing else message)
+
+    def destroy(self) -> None:
+        if self._active_job is not None:
+            self._closing = True
+            self.cancel_work()
+            return
+        self._closing = True
+        if self.catalog:
+            self.catalog.close()
+            self.catalog = None
+        if self._queue_job is not None:
+            self.after_cancel(self._queue_job)
+            self._queue_job = None
+        # Layout/preview callbacks also belong to this window. Cancelling them
+        # avoids callbacks into destroyed widgets when another Tk window lives.
+        for callback in self.tk.call("after", "info"):
+            self.after_cancel(callback)
+        super().destroy()
 
     def _process_ui_queue(self) -> None:
+        self._queue_job = None
         while True:
             try:
                 event = self.ui_queue.get_nowait()
             except queue.Empty:
                 break
-            kind = event[0]
-            if kind == "scan_progress":
-                _, index, total, name = event
-                self.status.set(f"Scanning {index}/{total}: {name}")
-            elif kind == "scan_done":
-                self._scan_finished(event[1])
-            elif kind == "scan_error":
-                self.status.set("Scan failed.")
-                messagebox.showerror("Scan failed", event[1])
-        self.after(100, self._process_ui_queue)
+            if event[1] != self._scan_generation:
+                continue
+            try:
+                if not self._dispatch_work_event(event):
+                    return
+            except Exception as exc:
+                self.status.set(f"Could not update the task view: {exc}")
+                messagebox.showerror(NDEX_IMAGE_MANAGER_TITLE, f"Could not update the task view:\n{exc}")
+        self._queue_job = self.after(100, self._process_ui_queue)
+
+    def _dispatch_work_event(self, event) -> bool:
+        kind = event[0]
+        if kind == "work_progress":
+            _, _generation, index, total, name = event
+            if index > 0:
+                self.work_progress.stop()
+                self.work_progress.configure(mode="determinate", maximum=max(total, 1), value=index)
+            if not self._cancel_event.is_set():
+                self.status.set(f"{self._active_job.title()} {index}/{total}: {name}")
+        elif kind == "work_done":
+            _, _generation, task, result, error, cancelled = event
+            # A completion is queued only after file I/O and report saving.
+            if self._worker:
+                self._worker.join()
+            self._worker = None
+            self._active_job = None
+            self._set_work_controls(False)
+            if self._closing:
+                problems = [error] if error else []
+                if task != "scan" and result is not None:
+                    summary, warnings = result
+                    problems.extend(summary.messages[:10])
+                    problems.extend(warnings)
+                if problems:
+                    messagebox.showwarning(
+                        "Closing Image Manager",
+                        "The task finished with problems:\n\n" + "\n".join(problems),
+                    )
+                self.destroy()
+                return False
+            if error:
+                self.status.set(f"{task.title()} failed.")
+                messagebox.showerror(f"{task.title()} failed", error)
+            elif task == "scan":
+                if cancelled:
+                    self.status.set("Scan cancelled. Previous catalog was preserved; rescan to reload.")
+                else:
+                    self._scan_finished(result.catalog_path)
+            else:
+                self._operation_finished(task, *result)
+        return True
 
     def _scan_finished(self, catalog_path: Path) -> None:
         if self.catalog:
@@ -470,6 +616,8 @@ class ImageManagerApp(tk.Tk):
     def refresh_records(self) -> None:
         if not self.catalog:
             return
+        selection = self.tree.selection()
+        focus = self.tree.focus()
         self.records = self.catalog.list_images(
             file_filter=self.file_filter.get(),
             pick_filter=self.pick_filter.get(),
@@ -477,6 +625,7 @@ class ImageManagerApp(tk.Tk):
             descending=self.sort_descending.get(),
         )
         self.tree.delete(*self.tree.get_children())
+        self.current_record = None
         self._update_column_headings()
         for record in self.records:
             values = (
@@ -489,9 +638,12 @@ class ImageManagerApp(tk.Tk):
             self.tree.insert("", tk.END, iid=str(record.id), values=values, tags=(record.pick_status,))
         if self.records:
             first = self.tree.get_children()[0]
-            self.tree.selection_set(first)
-            self.tree.focus(first)
-            self.tree.see(first)
+            surviving = [iid for iid in selection if self.tree.exists(iid)]
+            self.tree.selection_set(surviving or [first])
+            focused = focus if focus in surviving else (surviving[0] if surviving else first)
+            self.tree.focus(focused)
+            self.tree.see(focused)
+            self.on_select()
         else:
             self.status.set("No images match the current filters.")
             self._show_preview(None)
@@ -539,20 +691,23 @@ class ImageManagerApp(tk.Tk):
         self.update_selection_status()
 
     def set_pick(self, pick_status: str) -> None:
+        if not self._can_start_work():
+            return
         if not self.catalog or not self.current_record or self.current_record.id is None:
             return
-        self.catalog.update_selection(self.current_record.id, pick_status=pick_status)
+        targets = [record for record in self.selected_records() if record.id is not None]
+        self.catalog.update_selections((record.id for record in targets), pick_status=pick_status)
         self.refresh_records()
-        self._restore_selection(self.current_record.id)
 
     def set_rating(self, rating: int) -> None:
+        if not self._can_start_work():
+            return
         if not self.catalog or not self.current_record or self.current_record.id is None:
             return
-        self.catalog.update_selection(self.current_record.id, rating=rating)
-        self.current_record.rating = rating
+        targets = [record for record in self.selected_records() if record.id is not None]
+        self.catalog.update_selections((record.id for record in targets), rating=rating)
         self._refresh_rating_widgets(rating)
         self.refresh_records()
-        self._restore_selection(self.current_record.id)
 
     def move_selection(self, offset: int) -> None:
         children = list(self.tree.get_children())
@@ -601,68 +756,142 @@ class ImageManagerApp(tk.Tk):
         )
 
     def backup_picked(self) -> None:
+        if not self._can_start_work():
+            return
         if not self.catalog:
             messagebox.showinfo(NDEX_IMAGE_MANAGER_TITLE, "Scan a folder first.")
+            return
+        records = self.catalog.list_images(pick_filter="Pick")
+        if not records:
+            messagebox.showinfo(NDEX_IMAGE_MANAGER_TITLE, "No picked images found. Set Pick first.")
             return
         destination = filedialog.askdirectory(title="Choose NDEX backup destination")
         if not destination:
             return
-        records = self.catalog.list_images(pick_filter="Pick")
-        summary = BackupService().backup(records, Path(destination), duplicate_policy="rename")
-        copied = {item["path"] for item in summary.items if item["status"] == "copied"}
-        for record in records:
-            if record.id is not None and str(record.file_path) in copied:
-                self.catalog.update_backup_status(record.id, "backed_up")
-        self.refresh_records()
-        from ndex_common.workflow import record_job
-
-        record_job(
-            app="image_manager",
-            type="backup",
-            source=str(self.source_dir or ""),
-            destination=destination,
-            counts={
-                "copied": summary.copied,
-                "skipped": summary.skipped,
-                "failed": summary.errors,
-                "overwritten": summary.overwritten,
-            },
-            items=summary.items,
-            folders={"source": str(self.source_dir or "")},
-        )
-        messagebox.showinfo(
-            "Backup complete",
-            f"Copied {summary.copied} / skipped {summary.skipped} / errors {summary.errors}",
-        )
+        self._start_operation("backup", records, Path(destination))
 
     def export_xmp_sidecars(self) -> None:
+        if not self._can_start_work():
+            return
         if not self.catalog:
             messagebox.showinfo(NDEX_IMAGE_MANAGER_TITLE, "Scan a folder first.")
             return
         records = self.catalog.list_images()
-        summary = XmpExportService().export(records)
-        if summary.written == 0 and summary.errors == 0:
+        if not records:
             messagebox.showinfo(
                 NDEX_IMAGE_MANAGER_TITLE,
-                "No picked or rated images found. Set pick status or rating first.",
+                "No images found. Scan a shooting folder first.",
             )
             return
-        message = (
-            f"XMP sidecars written: {summary.written}\n"
-            f"Skipped (no pick/rating): {summary.skipped}\n"
-            f"Errors: {summary.errors}\n\n"
-            "Sidecars were created next to the original files and are readable "
-            "by Auto Selector, Lightroom, and Evoto."
-        )
-        if summary.errors:
-            messagebox.showwarning("XMP Export", message + "\n\n" + "\n".join(summary.messages[:10]))
-        else:
-            messagebox.showinfo("XMP Export", message)
+        self._start_operation("xmp", records, self.source_dir)
+
+    def _start_operation(
+        self, kind: str, records: list[ImageRecord], destination: Path,
+        options: ExportOptions | None = None,
+    ) -> None:
+        # Keep paths, selections and options fixed for the entire job. Tk and
+        # its SQLite connection are used only on the main thread.
+        snapshots = [replace(record) for record in records]
+        source = str(self.source_dir or "")
+        catalog_path = self.catalog.db_path if self.catalog else None
+        self.status.set(f"Starting {kind} for {len(snapshots)} image(s)...")
+
+        def work(cancel, progress):
+            from ndex_common.workflow import record_job
+
+            if kind == "backup":
+                summary = BackupService().backup(snapshots, destination, cancel_event=cancel, progress_callback=progress)
+                counts = {"copied": summary.copied, "overwritten": summary.overwritten}
+            elif kind == "export":
+                summary = ExportService().export(snapshots, options, cancel_event=cancel, progress_callback=progress)
+                counts = {"exported": summary.exported, "overwritten": summary.overwritten}
+            else:
+                summary = XmpExportService().export(snapshots, cancel_event=cancel, progress_callback=progress)
+                counts = {"written": summary.written}
+            warnings = []
+            if kind == "backup" and catalog_path:
+                copied = {item["path"] for item in summary.items if item["status"] == "copied"}
+                catalog = None
+                try:
+                    catalog = Catalog(catalog_path)
+                    catalog.update_backup_statuses(
+                        (record.id for record in snapshots if record.id is not None and str(record.file_path) in copied),
+                        "backed_up",
+                    )
+                except Exception as exc:
+                    warnings.append(f"Could not update catalog backup status: {exc}")
+                finally:
+                    if catalog:
+                        catalog.close()
+            context = {"cancelled": summary.cancelled, "operation": kind}
+            if options:
+                context.update(rename_pattern=options.rename_pattern, start_index=options.start_index,
+                               duplicate_policy=options.duplicate_policy)
+            try:
+                report = record_job(
+                    app="image_manager", type="export" if kind == "xmp" else kind,
+                    source=source, destination=str(destination),
+                    counts={**counts, "skipped": summary.skipped, "failed": summary.errors},
+                    items=summary.items, folders={"source": source}, context=context,
+                )
+                if report is None:
+                    warnings.append("Could not save Job Results. Check the NDEX application data folder.")
+            except Exception as exc:
+                warnings.append(f"Could not save Job Results: {exc}")
+            return summary, warnings
+
+        self._start_worker(kind, work)
+
+    def _operation_finished(self, kind: str, summary, warnings: list[str]) -> None:
+        if kind == "backup":
+            self.refresh_records()
+        finished = "cancelled" if summary.cancelled else "complete"
+        count = getattr(summary, "copied", getattr(summary, "exported", getattr(summary, "written", 0)))
+        message = f"Completed {count} / skipped {summary.skipped} / failed or not run {summary.errors}"
+        self.status.set(f"{kind.title()} {finished}. {message}")
+        details = [message]
+        if summary.cancelled:
+            details.append("The active file finished safely. Unprocessed files are listed in Job Results.")
+        elif kind == "xmp" and summary.written == 0 and summary.errors == 0:
+            details.append("No picked or rated images found. Set pick status or rating first.")
+        details.extend(summary.messages[:10])
+        details.extend(warnings)
+        show = messagebox.showwarning if summary.errors or warnings else messagebox.showinfo
+        show(f"{kind.title()} {finished}", "\n\n".join(details))
 
     def send_to_auto_selector(self) -> None:
-        args: list[str] = ["--open"]
+        if not self._can_start_work():
+            return
+        if not self.catalog:
+            messagebox.showinfo(NDEX_IMAGE_MANAGER_TITLE, "Scan a folder first.")
+            return
+        from ndex_common.manifest import frame_ready_paths
+        from ndex_common.workflow import record_select_handoff
+
+        # Hand over exactly the picked JPGs. Passing the whole folder would let
+        # Auto Selector scan .dsb_cache thumbnails and select every RAW.
+        records = self.catalog.list_images(pick_filter="Pick")
+        files = frame_ready_paths(
+            record.file_path
+            for record in records
+            if record.media_type == "jpg" and Path(record.file_path).suffix.casefold() in (".jpg", ".jpeg")
+        )
+        if not files:
+            messagebox.showinfo(NDEX_IMAGE_MANAGER_TITLE, "No picked JPG files to send to Auto Selector.")
+            return
+        handoff = record_select_handoff(
+            self.source_dir or files[0].parent, files, target="auto_selector"
+        )
+        if handoff is None:
+            messagebox.showerror(
+                NDEX_IMAGE_MANAGER_TITLE,
+                "Could not write the handoff file, so the picks were not sent. "
+                "Check that %LOCALAPPDATA%\\NDEX is writable.",
+            )
+            return
+        args: list[str] = ["--open", "--handoff", str(handoff)]
         if self.source_dir is not None:
-            args.extend(["--selected-jpg", str(self.source_dir)])
+            args.extend(["--raw-source", str(self.source_dir)])
         launched = launch_app("auto_selector", args)
         if not launched:
             messagebox.showerror(
@@ -671,6 +900,8 @@ class ImageManagerApp(tk.Tk):
             )
 
     def send_picks_to_frame(self) -> None:
+        if not self._can_start_work():
+            return
         if not self.catalog:
             messagebox.showinfo(NDEX_IMAGE_MANAGER_TITLE, "Scan a folder first.")
             return
@@ -709,6 +940,8 @@ class ImageManagerApp(tk.Tk):
         open_job_reports(self, title=NDEX_IMAGE_MANAGER_TITLE, apps=("image_manager",))
 
     def open_export_dialog(self) -> None:
+        if not self._can_start_work():
+            return
         records = self.selected_records()
         if not records:
             messagebox.showinfo(NDEX_IMAGE_MANAGER_TITLE, "Select one or more images first.")
@@ -723,7 +956,7 @@ class ImageManagerApp(tk.Tk):
 
         destination = tk.StringVar(value="")
         pattern = tk.StringVar(value="{date}_{index}_{name}")
-        start_index = tk.IntVar(value=1)
+        start_index = tk.StringVar(value="1")
         duplicate_policy = tk.StringVar(value="rename")
 
         body = ttk.Frame(dialog, padding=16, style="Card.TFrame")
@@ -797,6 +1030,8 @@ class ImageManagerApp(tk.Tk):
         start_index: int,
         duplicate_policy: str,
     ) -> None:
+        if not self._can_start_work():
+            return
         if not destination:
             messagebox.showinfo(NDEX_IMAGE_MANAGER_TITLE, "Choose an export destination.")
             return
@@ -811,13 +1046,18 @@ class ImageManagerApp(tk.Tk):
             start_index=safe_start_index,
             duplicate_policy=duplicate_policy,  # type: ignore[arg-type]
         )
-        summary = ExportService().export(records, options)
+        self._start_operation("export", records, options.destination_dir, options)
         dialog.destroy()
-        self.status.set(f"Exported {summary.exported} image(s) to {options.destination_dir}")
-        messagebox.showinfo(
-            "Export complete",
-            f"Exported {summary.exported} / skipped {summary.skipped} / errors {summary.errors}",
-        )
+
+    def _restore_selection_ids(self, image_ids: list[int], focus_id: int) -> None:
+        iids = [str(image_id) for image_id in image_ids if self.tree.exists(str(image_id))]
+        if not iids:
+            return
+        self.tree.selection_set(iids)
+        focus = str(focus_id) if str(focus_id) in iids else iids[0]
+        self.tree.focus(focus)
+        self.tree.see(focus)
+        self.on_select()
 
     def _restore_selection(self, image_id: int) -> None:
         iid = str(image_id)

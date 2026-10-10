@@ -5,6 +5,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from PySide6.QtGui import QImage
+
 from ndex_frame.core.models import (
     AspectRatio,
     FramePreset,
@@ -15,6 +17,14 @@ from ndex_frame.core.models import (
 )
 from ndex_frame.services.export_job import CancelToken, ExportResult
 from ndex_frame.ui.workspace import WorkspaceController, WorkspaceState
+
+
+class _QueuedPool:
+    def __init__(self) -> None:
+        self.jobs = []
+
+    def start(self, job) -> None:
+        self.jobs.append(job)
 
 
 class WorkspaceStateTests(unittest.TestCase):
@@ -115,6 +125,81 @@ class WorkspaceStateTests(unittest.TestCase):
             with patch("ndex_frame.ui.workspace.plan_export", side_effect=PlannedAgain):
                 with self.assertRaises(PlannedAgain):
                     controller.start_export()
+
+    def test_late_import_cannot_replace_the_newest_request(self) -> None:
+        pool = _QueuedPool()
+        controller = WorkspaceController(self.workspace, thread_pool=pool, settings_writer=lambda *_: None)
+        busy = []
+        controller.busyChanged.connect(busy.append)
+        controller.import_paths([Path("old")])
+        first = pool.jobs[-1]
+        controller.import_paths([Path("new")])
+        second = pool.jobs[-1]
+        controller._finish_import(first, [self.workspace.sources[0]])
+        self.assertTrue(busy[-1])
+        newest = self.workspace.sources[1]
+        controller._finish_import(second, [newest])
+        self.assertEqual(controller.state.sources, [newest])
+        self.assertFalse(busy[-1])
+
+    def test_preview_failure_does_not_finish_an_import(self) -> None:
+        pool = _QueuedPool()
+        controller = WorkspaceController(self.workspace, thread_pool=pool, settings_writer=lambda *_: None)
+        busy = []
+        controller.busyChanged.connect(busy.append)
+        controller.request_preview(self.first_path)
+        preview = pool.jobs[-1]
+        controller.import_paths([Path("next")])
+        controller._fail_job(preview, "Unreadable preview")
+        self.assertTrue(busy[-1])
+
+    def test_old_import_finishing_last_cannot_overwrite_new_sources(self) -> None:
+        pool = _QueuedPool()
+        controller = WorkspaceController(self.workspace, thread_pool=pool, settings_writer=lambda *_: None)
+        original, newest = self.workspace.sources
+        controller.import_paths([Path("old")])
+        first = pool.jobs[-1]
+        controller.import_paths([Path("new")])
+        second = pool.jobs[-1]
+        controller._finish_import(second, [newest])
+        controller._finish_import(first, [original])
+        self.assertEqual(controller.state.sources, [newest])
+
+    def test_source_change_during_preview_decode_drops_the_old_image(self) -> None:
+        pool = _QueuedPool()
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "photo.jpg"
+            path.write_bytes(b"first")
+            self.workspace.replace_sources([SourceItem(path, 3000, 4000, True)])
+            controller = WorkspaceController(self.workspace, thread_pool=pool, settings_writer=lambda *_: None)
+            previews = []
+            controller.previewReady.connect(lambda *_: previews.append(True))
+            controller.request_preview(path)
+            path.write_bytes(b"changed photo")
+            controller._finish_preview(pool.jobs[0], path, QImage(30, 40, QImage.Format.Format_RGB32), "")
+            self.assertEqual(previews, [])
+            controller.request_preview(path)
+            self.assertEqual(len(pool.jobs), 2)
+
+    def test_framing_changes_reuse_decoded_preview_and_invalidate_on_file_change(self) -> None:
+        pool = _QueuedPool()
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "photo.jpg"
+            source.write_bytes(b"first version")
+            self.workspace.replace_sources([SourceItem(source, 3000, 4000, True)])
+            controller = WorkspaceController(self.workspace, thread_pool=pool, settings_writer=lambda *_: None)
+            previews = []
+            controller.previewReady.connect(lambda *_: previews.append(True))
+            for step in range(20):
+                controller.set_selected_framing(.8, step / 20, 0)
+            self.assertEqual(len(pool.jobs), 1)
+            controller._finish_preview(pool.jobs[0], source, QImage(30, 40, QImage.Format.Format_RGB32), "")
+            controller.set_selected_framing(.9, 0, 0)
+            self.assertEqual(len(pool.jobs), 1)
+            self.assertEqual(len(previews), 2)
+            source.write_bytes(b"changed version with new size")
+            controller.request_preview(source)
+            self.assertEqual(len(pool.jobs), 2)
 
 
 if __name__ == "__main__":

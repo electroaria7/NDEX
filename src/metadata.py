@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
+import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Iterable
@@ -64,7 +66,12 @@ class MetadataExtractor:
                 results[file_path] = (capture_time, "pillow", False)
                 continue
 
-            fallback = datetime.fromtimestamp(file_path.stat().st_mtime)
+            try:
+                fallback = datetime.fromtimestamp(file_path.stat().st_mtime)
+            except OSError as exc:
+                if logger:
+                    logger.warn(f"Skipping {file_path.name}: file is no longer readable ({exc}).")
+                continue
             if logger:
                 logger.warn(
                     f"Metadata read failed for {file_path.name}. "
@@ -145,6 +152,8 @@ class MetadataExtractor:
 
         command = [
             self.exiftool_path,
+            "-charset",
+            "filename=utf8",
             "-j",
             "-DateTimeOriginal",
             "-CreateDate",
@@ -154,13 +163,20 @@ class MetadataExtractor:
             "-TrackCreateDate",
             "-d",
             "%Y-%m-%d %H:%M:%S",
-            *[str(path) for path in file_paths],
         ]
+        # File names travel in a UTF-8 argfile so non-ASCII paths survive the
+        # Windows ANSI code page on both the way in and the way out.
+        argfile_path = None
         try:
+            descriptor, argfile_path = tempfile.mkstemp(prefix="ndex_exif_", suffix=".args")
+            with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as handle:
+                for path in file_paths:
+                    handle.write(f"{path}\n")
+            command.extend(["-@", argfile_path])
             result = subprocess.run(
                 command,
                 capture_output=True,
-                text=True,
+                text=False,
                 timeout=self.timeout_seconds,
                 check=False,
                 **self._subprocess_no_window_options(),
@@ -171,17 +187,29 @@ class MetadataExtractor:
             return {}, str(exc)
         except subprocess.SubprocessError as exc:
             return {}, str(exc)
+        finally:
+            if argfile_path:
+                try:
+                    os.unlink(argfile_path)
+                except OSError:
+                    pass
 
-        if result.returncode != 0 or not result.stdout.strip():
-            detail = result.stderr.strip() or f"return code {result.returncode}"
+        try:
+            stdout = (result.stdout or b"").decode("utf-8", errors="replace")
+            stderr = (result.stderr or b"").decode("utf-8", errors="replace")
+        except (UnicodeDecodeError, ValueError, AttributeError):
+            return {}, "ExifTool output could not be decoded"
+
+        if result.returncode != 0 or not stdout.strip():
+            detail = stderr.strip() or f"return code {result.returncode}"
             return {}, detail
 
         try:
-            records = json.loads(result.stdout)
-        except (json.JSONDecodeError, TypeError):
+            records = json.loads(stdout)
+        except (json.JSONDecodeError, TypeError, ValueError):
             return {}, "ExifTool returned invalid JSON"
 
-        input_lookup = {path.resolve(): path for path in file_paths}
+        input_lookup = {self._path_key(path): path for path in file_paths}
         dates: dict[Path, datetime] = {}
         for record in records:
             source = record.get("SourceFile")
@@ -202,8 +230,12 @@ class MetadataExtractor:
                     break
             if parsed:
                 source_path = Path(source)
-                dates[input_lookup.get(source_path.resolve(), source_path)] = parsed
+                dates[input_lookup.get(self._path_key(source_path), source_path)] = parsed
         return dates, None
+
+    @staticmethod
+    def _path_key(path: Path | str) -> str:
+        return os.path.normcase(os.path.abspath(str(path)))
 
     @staticmethod
     def _chunk_paths(paths: list[Path], chunk_size: int) -> Iterable[list[Path]]:

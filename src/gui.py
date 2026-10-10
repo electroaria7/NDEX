@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import queue
 import threading
+import time
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
@@ -14,7 +15,7 @@ from .config import ConfigManager
 from .file_types import FILE_TYPE_ORDER, RAW_BRANDS, get_file_type_definitions, get_file_type_label, get_visible_file_types
 from .logger import AppLogger
 from .metadata import MetadataExtractor
-from .scanner import analyze_source, build_scan_items
+from .scanner import analyze_source, build_scan_items, same_folder
 
 from ndex_common.launch import launch_app
 from ndex_common.theme import apply_tk_theme, apply_window_icon, build_app_header, style_text_widget
@@ -62,8 +63,12 @@ class DSBApp(tk.Tk):
         self.worker_thread: threading.Thread | None = None
         self.cancel_event = threading.Event()
         self.is_busy = False
+        self.is_analyzing = False
+        self._closing = False
+        self._input_controls: list[ttk.Widget] = []
         self.pending_analysis: dict | None = None
         self.pending_backup: dict | None = None
+        self._last_progress_at = 0.0
 
         # With preload_only the caller passed the folders to use (NDEX handoff),
         # so remembered folders stay out of the way and "Open Empty" is empty.
@@ -100,6 +105,7 @@ class DSBApp(tk.Tk):
 
         self._build_layout()
         self._bind_events()
+        self.protocol("WM_DELETE_WINDOW", self._request_close)
         self._update_button_states()
         self.after(100, self._process_ui_queue)
         if retry_manifest is not None:
@@ -131,14 +137,20 @@ class DSBApp(tk.Tk):
             frame.columnconfigure(1, weight=1)
 
         ttk.Label(left, text="Source Folder", style="CardSection.TLabel").grid(row=0, column=0, sticky="w")
-        ttk.Entry(left, textvariable=self.source_var).grid(row=1, column=0, columnspan=2, sticky="ew", pady=(4, 8))
-        ttk.Button(left, text="Browse", command=self._browse_source).grid(row=1, column=2, padx=(8, 0))
+        source_entry = ttk.Entry(left, textvariable=self.source_var)
+        source_entry.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(4, 8))
+        source_browse = ttk.Button(left, text="Browse", command=self._browse_source)
+        source_browse.grid(row=1, column=2, padx=(8, 0))
+        self._input_controls.extend((source_entry, source_browse))
 
         ttk.Label(left, text="Backup Destination", style="CardSection.TLabel").grid(row=2, column=0, sticky="w", pady=(8, 0))
-        ttk.Entry(left, textvariable=self.destination_var).grid(
+        destination_entry = ttk.Entry(left, textvariable=self.destination_var)
+        destination_entry.grid(
             row=3, column=0, columnspan=2, sticky="ew", pady=(4, 8)
         )
-        ttk.Button(left, text="Browse", command=self._browse_destination).grid(row=3, column=2, padx=(8, 0))
+        destination_browse = ttk.Button(left, text="Browse", command=self._browse_destination)
+        destination_browse.grid(row=3, column=2, padx=(8, 0))
+        self._input_controls.extend((destination_entry, destination_browse))
 
         ttk.Label(left, text="File Types", style="CardSection.TLabel").grid(row=4, column=0, sticky="w", pady=(6, 0))
         types_frame = ttk.Frame(left, style="CardInner.TFrame")
@@ -146,13 +158,15 @@ class DSBApp(tk.Tk):
         self.brand_frame = ttk.Frame(types_frame, style="CardInner.TFrame")
         self.brand_frame.grid(row=0, column=0, sticky="w")
         for column, (brand_key, brand) in enumerate(RAW_BRANDS.items()):
-            ttk.Checkbutton(
+            brand_button = ttk.Checkbutton(
                 self.brand_frame,
                 text=brand["label"],
                 variable=self.brand_vars[brand_key],
                 command=self._refresh_file_type_options,
                 style="Card.TCheckbutton",
-            ).grid(row=0, column=column, sticky="w", padx=(0, 12))
+            )
+            brand_button.grid(row=0, column=column, sticky="w", padx=(0, 12))
+            self._input_controls.append(brand_button)
 
         self.types_frame = ttk.Frame(types_frame, style="CardInner.TFrame")
         self.types_frame.grid(row=1, column=0, sticky="w", pady=(6, 0))
@@ -167,6 +181,7 @@ class DSBApp(tk.Tk):
             column = index % 3
             checkbutton.grid(row=row, column=column, sticky="w", padx=(0, 12), pady=(2, 0))
             self.type_checkbuttons[file_type] = checkbutton
+            self._input_controls.append(checkbutton)
         self._refresh_file_type_options()
 
         ttk.Label(left, text="Duplicate Handling", style="CardSection.TLabel").grid(row=6, column=0, sticky="w", pady=(6, 0))
@@ -186,13 +201,16 @@ class DSBApp(tk.Tk):
             state="readonly",
         )
         verify_combo.grid(row=9, column=0, columnspan=3, sticky="ew", pady=(4, 8))
+        self._input_controls.extend((duplicate_combo, verify_combo))
 
-        ttk.Checkbutton(
+        dry_run_button = ttk.Checkbutton(
             left,
             text="Dry Run (preview only, do not copy files)",
             variable=self.dry_run_var,
             style="Card.TCheckbutton",
-        ).grid(row=10, column=0, columnspan=3, sticky="w", pady=(2, 10))
+        )
+        dry_run_button.grid(row=10, column=0, columnspan=3, sticky="w", pady=(2, 10))
+        self._input_controls.append(dry_run_button)
 
         ttk.Label(left, text="Backup Rule", style="CardSection.TLabel").grid(row=11, column=0, sticky="w")
         ttk.Label(left, text="YYYY / MM / MMDD / file_type", style="CardMuted.TLabel").grid(
@@ -272,8 +290,15 @@ class DSBApp(tk.Tk):
         right.rowconfigure(7, weight=2)
 
     def _bind_events(self) -> None:
-        self.source_var.trace_add("write", lambda *_: self._update_button_states())
-        self.destination_var.trace_add("write", lambda *_: self._update_button_states())
+        for variable in (self.source_var, self.destination_var, *self.type_vars.values(), *self.brand_vars.values()):
+            variable.trace_add("write", self._invalidate_analysis)
+
+    def _invalidate_analysis(self, *_args) -> None:
+        self.current_summary = None
+        if not self.is_busy:
+            self.summary_var.set("Folders or file types changed. Run Analyze Files again.")
+            self.status_var.set("Run Analyze Files to update the backup plan.")
+        self._update_button_states()
 
     def _browse_source(self) -> None:
         selected = filedialog.askdirectory(title="Select source folder")
@@ -343,12 +368,23 @@ class DSBApp(tk.Tk):
             pass
 
     def _start_analysis(self) -> None:
-        source = Path(self.source_var.get())
-        destination = Path(self.destination_var.get())
+        if self.is_busy or self._closing:
+            return
+        if not self.source_var.get().strip() or not self.destination_var.get().strip():
+            messagebox.showerror("Missing Folder", "Select both source and backup destination folders.")
+            return
+        source = Path(self.source_var.get().strip())
+        destination = Path(self.destination_var.get().strip())
         if not source.is_dir():
             messagebox.showerror("Invalid Source", "Select a valid source folder.")
             return
         if not self._destination_usable(destination):
+            return
+        if same_folder(source, destination):
+            messagebox.showerror(
+                "Invalid Destination",
+                "The backup destination must be different from the source folder.",
+            )
             return
         selected_types = self._selected_types()
         if not selected_types:
@@ -362,6 +398,8 @@ class DSBApp(tk.Tk):
             "backup_root": destination,
             "enabled_types": selected_types,
         }
+        # The analysis loop has no cancellation point, so Cancel stays disabled.
+        self.is_analyzing = True
         self._set_busy(True, "Analyzing files...")
         self._run_worker(self._analyze_worker)
 
@@ -394,12 +432,14 @@ class DSBApp(tk.Tk):
         self.status_var.set("Folder preview refreshed.")
 
     def _start_backup(self) -> None:
+        if self.is_busy or self._closing:
+            return
         if not self.current_summary:
             messagebox.showinfo("Backup", "Run Analyze Files first.")
             return
 
         total = len(self.current_summary.items)
-        destination = self.destination_var.get()
+        destination = str(self.current_summary.backup_root)
         confirmed = messagebox.askyesno(
             "Start Backup",
             f"{total} files will be processed.\n\nDestination:\n{destination}\n\nContinue?",
@@ -430,12 +470,33 @@ class DSBApp(tk.Tk):
             logger=self.logger,
             cancel_event=self.cancel_event,
         )
+        if not result.dry_run:
+            if self._record_backup_session(result) is None:
+                self.ui_queue.put(("record_warning", "Backup finished, but Job Results could not be saved."))
         self.ui_queue.put(("backup_done", result))
 
     def _cancel_task(self) -> None:
-        if self.is_busy:
+        if self.is_busy and not self.is_analyzing:
             self.cancel_event.set()
             self.status_var.set("Cancel requested. Waiting for current file to finish...")
+            self._update_button_states()
+
+    def _request_close(self) -> None:
+        if self._closing:
+            return
+        if not self.is_busy and not (self.worker_thread and self.worker_thread.is_alive()):
+            self.destroy()
+            return
+        if not messagebox.askyesno(
+            "Close NDEX One",
+            "A task is running. Stop after the current file and close when its results are saved?\n\n"
+            "An active analysis must finish before the window closes.",
+        ):
+            return
+        self._closing = True
+        self.cancel_event.set()
+        self.status_var.set("Closing safely. Waiting for the running task and its results...")
+        self._update_button_states()
 
     def _open_in_image_manager(self) -> None:
         destination = self.destination_var.get().strip()
@@ -467,7 +528,7 @@ class DSBApp(tk.Tk):
         The folders come from that job's manifest, not from the form: the
         window may be showing a different pair by now.
         """
-        if self.is_busy:
+        if self.is_busy or self._closing:
             messagebox.showinfo(
                 NDEX_ONE_TITLE, "Wait for the running job to finish, then retry."
             )
@@ -516,7 +577,9 @@ class DSBApp(tk.Tk):
 
     def _run_worker(self, target) -> None:
         self.cancel_event.clear()
-        self.worker_thread = threading.Thread(target=lambda: self._worker_wrapper(target), daemon=True)
+        self._last_progress_at = 0.0
+        self._update_button_states()
+        self.worker_thread = threading.Thread(target=lambda: self._worker_wrapper(target), daemon=False)
         self.worker_thread.start()
 
     def _worker_wrapper(self, target) -> None:
@@ -529,10 +592,15 @@ class DSBApp(tk.Tk):
         self.ui_queue.put(("log", line))
 
     def _queue_progress(self, stage: str, current: int, total: int, name: str) -> None:
+        now = time.monotonic()
+        if current != total and now - self._last_progress_at < 0.1:
+            return
+        self._last_progress_at = now
         self.ui_queue.put(("progress", stage, current, total, name))
 
     def _process_ui_queue(self) -> None:
-        while True:
+        # Yield to input/paint events even when a fast job fills the queue.
+        for _ in range(100):
             try:
                 item = self.ui_queue.get_nowait()
             except queue.Empty:
@@ -546,13 +614,20 @@ class DSBApp(tk.Tk):
                 _, stage, current, total, name = item
                 progress = 0 if total == 0 else (current / total) * 100
                 self.progress_var.set(progress)
-                self.status_var.set(
-                    f"{stage.title()} {current}/{total}: {name}"
-                )
+                if not self.cancel_event.is_set() and not self._closing:
+                    self.status_var.set(f"{stage.title()} {current}/{total}: {name}")
             elif kind == "analysis_done":
-                self.current_summary = item[1]
-                self._render_summary()
-                self._set_busy(False, "Analysis completed.")
+                summary = item[1]
+                job = self.pending_analysis
+                if (same_folder(summary.source_dir, self.source_var.get().strip())
+                        and same_folder(summary.backup_root, self.destination_var.get().strip())
+                        and job["enabled_types"] == self._selected_types()):
+                    self.current_summary = summary
+                    self._render_summary()
+                    self._set_busy(False, "Analysis completed.")
+                else:
+                    self.current_summary = None
+                    self._set_busy(False, "Inputs changed. Run Analyze Files again.")
             elif kind == "backup_done":
                 result = item[1]
                 if result.cancelled:
@@ -567,10 +642,9 @@ class DSBApp(tk.Tk):
                         f"Skipped: {result.skipped}, "
                         f"Errors: {result.errors}"
                     )
-                    self._record_backup_session(result)
                 self._render_backup_result(result)
                 self._set_busy(False, status)
-                if not result.dry_run and (result.verification_failed or result.errors):
+                if not self._closing and not result.dry_run and (result.verification_failed or result.errors):
                     messagebox.showwarning(
                         "Backup Warnings",
                         f"{result.verification_failed} file(s) failed verification and "
@@ -580,9 +654,17 @@ class DSBApp(tk.Tk):
                         "Retry Failed to run just those files again.",
                     )
             elif kind == "error":
+                self._closing = False
                 self._set_busy(False, item[1])
                 messagebox.showerror("Error", item[1])
+            elif kind == "record_warning":
+                self._closing = False
+                messagebox.showwarning("Job Results", item[1])
 
+        if (self._closing and not self.is_busy and self.ui_queue.empty()
+                and not (self.worker_thread and self.worker_thread.is_alive())):
+            self.destroy()
+            return
         self.after(100, self._process_ui_queue)
 
     def _render_summary(self) -> None:
@@ -635,14 +717,14 @@ class DSBApp(tk.Tk):
                 parts.append(f"{label}: {count}")
         return " / ".join(parts) if parts else "None"
 
-    def _record_backup_session(self, result) -> None:
+    def _record_backup_session(self, result) -> Path | None:
         from ndex_common.workflow import record_backup
 
         # The folders the job actually used. The form can have changed since
         # Analyze, and a manifest with the wrong destination misleads a retry.
         job = self.pending_backup
         plan = job["retry"]
-        record_backup(
+        return record_backup(
             job["source"],
             job["destination"],
             result,
@@ -664,6 +746,7 @@ class DSBApp(tk.Tk):
         self.is_busy = busy
         self.status_var.set(status)
         if not busy:
+            self.is_analyzing = False
             self.progress_var.set(0.0)
         self._update_button_states()
 
@@ -671,10 +754,15 @@ class DSBApp(tk.Tk):
         has_paths = bool(self.source_var.get().strip()) and bool(self.destination_var.get().strip())
         has_analysis = self.current_summary is not None
 
-        self.analyze_button.config(state="disabled" if self.is_busy or not has_paths else "normal")
-        self.preview_button.config(state="disabled" if self.is_busy or not has_analysis else "normal")
-        self.backup_button.config(state="disabled" if self.is_busy or not has_analysis else "normal")
-        self.cancel_button.config(state="normal" if self.is_busy else "disabled")
+        blocked = self.is_busy or self._closing
+        for control in self._input_controls:
+            control.state(["disabled"] if blocked else ["!disabled"])
+        self.analyze_button.config(state="disabled" if blocked or not has_paths else "normal")
+        self.preview_button.config(state="disabled" if blocked or not has_analysis else "normal")
+        self.backup_button.config(state="disabled" if blocked or not has_analysis else "normal")
+        self.cancel_button.config(
+            state="normal" if self.is_busy and not self.is_analyzing and not self.cancel_event.is_set() else "disabled"
+        )
         destination_ready = (
             "disabled" if self.is_busy or not self.destination_var.get().strip() else "normal"
         )

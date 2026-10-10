@@ -81,12 +81,19 @@ class Catalog:
 
     def upsert_image(self, record: ImageRecord) -> ImageRecord:
         existing = self.connection.execute(
-            "SELECT id FROM images WHERE file_path = ?",
+            "SELECT id, file_modified_datetime, file_size, backup_status FROM images WHERE file_path = ?",
             (str(record.file_path),),
         ).fetchone()
         values = self._record_values(record)
         if existing:
             image_id = int(existing["id"])
+            # Keep backup_status across rescans unless the file itself changed on disk.
+            changed = existing["file_modified_datetime"] != _dt_to_text(record.file_modified_datetime) or (
+                bool(existing["file_size"]) and bool(record.file_size) and existing["file_size"] != record.file_size
+            )
+            if not changed:
+                record.backup_status = existing["backup_status"]
+                values = values[:-1] + (existing["backup_status"],)
             self.connection.execute(
                 """
                 UPDATE images SET
@@ -222,9 +229,43 @@ class Catalog:
         )
         self.connection.commit()
 
+    def remove_missing_under(self, root: Path, keep_paths: Iterable[Path], recursive: bool = True) -> int:
+        """Delete catalog rows under root whose files were not found by the latest scan."""
+        keep = {str(path) for path in keep_paths}
+        root = Path(root)
+        stale: list[int] = []
+        for row in self.connection.execute("SELECT id, file_path FROM images").fetchall():
+            if row["file_path"] in keep:
+                continue
+            path = Path(row["file_path"])
+            under = (root in path.parents) if recursive else (path.parent == root)
+            if under:
+                stale.append(int(row["id"]))
+        for image_id in stale:
+            self.connection.execute("DELETE FROM selection WHERE image_id = ?", (image_id,))
+            self.connection.execute("DELETE FROM images WHERE id = ?", (image_id,))
+        self.connection.commit()
+        return len(stale)
+
     def update_backup_status(self, image_id: int, status: str) -> None:
         self.connection.execute("UPDATE images SET backup_status = ? WHERE id = ?", (status, image_id))
         self.connection.commit()
+
+    def update_backup_statuses(self, image_ids: Iterable[int], status: str) -> None:
+        with self.connection:
+            self.connection.executemany(
+                "UPDATE images SET backup_status = ? WHERE id = ?",
+                ((status, image_id) for image_id in image_ids),
+            )
+
+    def update_selections(
+        self, image_ids: Iterable[int], *, pick_status: str | None = None, rating: int | None = None,
+    ) -> None:
+        with self.connection:
+            self.connection.executemany(
+                "UPDATE selection SET pick_status = COALESCE(?, pick_status), rating = COALESCE(?, rating) WHERE image_id = ?",
+                ((pick_status, rating, image_id) for image_id in image_ids),
+            )
 
     def set_setting(self, key: str, value: str) -> None:
         self.connection.execute(

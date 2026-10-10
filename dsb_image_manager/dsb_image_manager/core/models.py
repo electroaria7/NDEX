@@ -115,6 +115,7 @@ class BackupSummary:
     errors: int = 0
     messages: list[str] = field(default_factory=list)
     items: list[dict[str, str]] = field(default_factory=list)
+    cancelled: bool = False
 
 
 @dataclass(slots=True)
@@ -134,3 +135,5 @@ class ExportSummary:
     errors: int = 0
     exported_paths: list[Path] = field(default_factory=list)
     messages: list[str] = field(default_factory=list)
+    items: list[dict[str, str]] = field(default_factory=list)
+    cancelled: bool = False

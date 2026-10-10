@@ -3,7 +3,9 @@ from __future__ import annotations
 import hashlib
 import os
 import shutil
+import stat
 import threading
+import uuid
 from pathlib import Path
 
 TEMP_SUFFIX = ".ndex_tmp"
@@ -30,6 +32,16 @@ def execute_backup(
             result.cancelled = True
             if logger:
                 logger.warn("Backup cancelled by user")
+            # Files never attempted stay visible to Job Results and Retry.
+            # "failed" is an existing problem status, so a retry picks them up.
+            for pending in ordered_items[index - 1:]:
+                _record(
+                    result,
+                    pending,
+                    pending.destination_dir / pending.source_path.name,
+                    "failed",
+                    "not run: cancelled",
+                )
             break
 
         destination_dir = item.destination_dir
@@ -72,14 +84,25 @@ def execute_backup(
                         )
                 else:
                     destination_dir.mkdir(parents=True, exist_ok=True)
-                    temp_path = final_path.parent / f".{final_path.name}{TEMP_SUFFIX}"
+                    temp_path = final_path.parent / (
+                        f".{final_path.name}.{uuid.uuid4().hex[:8]}{TEMP_SUFFIX}"
+                    )
                     try:
                         shutil.copy2(item.source_path, temp_path)
                         verified = verify_mode == "none" or _verify_copy(
                             item.source_path, temp_path, verify_mode
                         )
                         if verified:
-                            os.replace(temp_path, final_path)
+                            if duplicate_policy == "overwrite":
+                                if overwriting_existing:
+                                    _make_writable(final_path)
+                                os.replace(temp_path, final_path)
+                            elif os.name == "nt":
+                                # A concurrent backup may have claimed this name
+                                # while we copied. Only overwrite may replace it.
+                                os.rename(temp_path, final_path)
+                            else:
+                                os.link(temp_path, final_path)
                             result.copied += 1
                             if overwriting_existing:
                                 result.overwritten += 1
@@ -112,7 +135,7 @@ def execute_backup(
                     finally:
                         if temp_path.exists():
                             try:
-                                temp_path.unlink()
+                                _unlink_temp(temp_path)
                             except OSError:
                                 if logger:
                                     logger.warn(f"could not remove temp file {temp_path.name}")
@@ -133,6 +156,24 @@ def execute_backup(
         else:
             logger.info("Backup completed")
     return result
+
+
+def _make_writable(path: Path) -> None:
+    """Clear the read-only attribute so Windows lets the file be replaced or deleted."""
+    try:
+        os.chmod(path, stat.S_IWRITE | stat.S_IREAD)
+    except OSError:
+        pass
+
+
+def _unlink_temp(temp_path: Path) -> None:
+    # copy2 carries a read-only source's attribute onto the temp copy, and
+    # Windows then refuses to delete it.
+    try:
+        temp_path.unlink()
+    except PermissionError:
+        _make_writable(temp_path)
+        temp_path.unlink()
 
 
 def _record(

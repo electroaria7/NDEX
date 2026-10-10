@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from .file_types import get_extensions_for_types
@@ -7,15 +8,52 @@ from .folder_manager import build_destination_dir, build_preview, get_file_type_
 from .models import ScanItem, ScanSummary
 
 
-def collect_supported_files(source_dir: Path, enabled_types: list[str]) -> list[Path]:
-    enabled_extensions = get_extensions_for_types(enabled_types)
+def _is_within(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+    except ValueError:
+        return False
+    return True
 
-    files = [
-        path
-        for path in source_dir.rglob("*")
-        if path.is_file() and path.suffix.lower() in enabled_extensions
-    ]
+
+def collect_supported_files(
+    source_dir: Path,
+    enabled_types: list[str],
+    exclude_dir: Path | None = None,
+) -> list[Path]:
+    """Supported files under ``source_dir``, skipping anything under ``exclude_dir``.
+
+    ``exclude_dir`` is the backup destination: when it sits inside the source,
+    scanning it would back up the backups themselves on every run.
+    """
+    enabled_extensions = get_extensions_for_types(enabled_types)
+    excluded = Path(os.path.normcase(os.path.abspath(exclude_dir))) if exclude_dir else None
+
+    def excluded_path(path: Path) -> bool:
+        return excluded is not None and _is_within(
+            Path(os.path.normcase(os.path.abspath(path))), excluded
+        )
+
+    if excluded_path(source_dir):
+        return []
+    files = []
+    for directory, dirs, names in os.walk(source_dir):
+        root = Path(directory)
+        # Prune before descending: an existing backup can dwarf the source.
+        dirs[:] = [name for name in dirs if not excluded_path(root / name)]
+        for name in names:
+            path = root / name
+            if path.suffix.lower() in enabled_extensions and path.is_file():
+                files.append(path)
     return sorted(files, key=lambda path: str(path).lower())
+
+
+def same_folder(first: Path | str, second: Path | str) -> bool:
+    """True when both paths name the same folder (case and slashes ignored)."""
+    def key(value):
+        return os.path.normcase(os.path.abspath(str(value)))
+
+    return key(first) == key(second)
 
 
 def analyze_source(
@@ -29,7 +67,7 @@ def analyze_source(
     source_dir = Path(source_dir)
     backup_root = Path(backup_root)
 
-    files = collect_supported_files(source_dir, enabled_types)
+    files = collect_supported_files(source_dir, enabled_types, exclude_dir=backup_root)
     if logger:
         logger.info(f"Source: {source_dir}")
         logger.info(f"Destination: {backup_root}")
@@ -90,6 +128,9 @@ def build_scan_items(
         }
 
     for index, file_path in enumerate(files, start=1):
+        if file_path not in metadata:
+            # The extractor skipped it (for example, the file vanished mid-scan).
+            continue
         capture_datetime, metadata_source, fallback_used = metadata[file_path]
         file_type = get_file_type_folder(file_path)
         if allowed is not None and file_type not in allowed:
