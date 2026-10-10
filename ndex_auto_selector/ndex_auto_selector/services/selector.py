@@ -166,7 +166,6 @@ class AutoSelectorService:
                         {"path": str(match.jpg_path), "status": "skipped", "detail": "already copied in this run"}
                     )
                     continue
-                copied_sources.add(source_key)
 
                 effective_rating = xmp_rating
                 if rating_from_jpg:
@@ -213,6 +212,9 @@ class AutoSelectorService:
                     )
                     continue
                 copy_verified(match.raw_path, final_path, overwrite=action == "overwrite")
+                # Only a RAW that actually reached the work folder counts, so a
+                # later JPG for the same RAW still gets a try after a failure.
+                copied_sources.add(source_key)
                 if write_xmp:
                     try:
                         self._write_selected_xmp(final_path, effective_rating, xmp_label)

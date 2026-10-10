@@ -690,7 +690,9 @@ class ImageManagerApp(tk.Tk):
         if not files:
             messagebox.showinfo(NDEX_IMAGE_MANAGER_TITLE, "No picked JPG files to send to Auto Selector.")
             return
-        handoff = record_select_handoff(self.source_dir or files[0].parent, files)
+        handoff = record_select_handoff(
+            self.source_dir or files[0].parent, files, target="auto_selector"
+        )
         if handoff is None:
             messagebox.showerror(
                 NDEX_IMAGE_MANAGER_TITLE,

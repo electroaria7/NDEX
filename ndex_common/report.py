@@ -79,6 +79,8 @@ class JobReport:
 
     @property
     def type_label(self) -> str:
+        if self.type == "select_handoff" and self.context.get("target") == "auto_selector":
+            return "Send to Auto Selector"
         return TYPE_LABELS.get(self.type, self.type)
 
     @property

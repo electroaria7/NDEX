@@ -93,6 +93,30 @@ class CopyRunTests(unittest.TestCase):
         self.assertEqual((result.copied, result.skipped, result.errors), (1, 1, 0))
         self.assertIn("already copied in this run", [i.get("detail") for i in result.items])
 
+    def test_failed_copy_does_not_mark_raw_as_copied_for_the_next_jpg(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            raw, jpg, work = _folders(Path(tmp))
+            (raw / "IMG_1234.CR3").write_bytes(b"raw")
+            (jpg / "IMG_1234.jpg").write_bytes(b"j")
+            (jpg / "IMG_1234_b.jpg").write_bytes(b"j")
+            service = AutoSelectorService()
+            matches = service.analyze(raw, jpg).matches
+            module = "ndex_auto_selector.ndex_auto_selector.services.selector"
+            real_copy = __import__(module, fromlist=["copy_verified"]).copy_verified
+            calls = []
+
+            def flaky_copy(*args, **kwargs):
+                calls.append(args)
+                if len(calls) == 1:
+                    raise OSError("disk hiccup")
+                return real_copy(*args, **kwargs)
+
+            with patch(f"{module}.copy_verified", side_effect=flaky_copy):
+                result = service.copy_matches(matches, work, "rename")
+            names = sorted(p.name for p in work.glob("*.CR3"))
+        self.assertEqual(names, ["IMG_1234.CR3"])
+        self.assertEqual((result.copied, result.errors), (1, 1))
+
     def test_rerun_skips_identical_copy_and_writes_missing_xmp_only(self):
         with tempfile.TemporaryDirectory() as tmp:
             raw, jpg, work = _folders(Path(tmp))

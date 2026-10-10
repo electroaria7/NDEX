@@ -82,7 +82,7 @@ def record_job(
                     context=extra,
                     drop_context=("handoff",) if _supersedes_handoff(app, type, folders) else (),
                 )
-                if type == "select_handoff":
+                if type == "select_handoff" and (context or {}).get("target", "frame") == "frame":
                     session.remember(
                         "frame",
                         folders={"source": source} if source else {},
@@ -201,7 +201,13 @@ def record_export(
 def record_select_handoff(
     source_folder: Path | str,
     files: Iterable[Path | str],
+    *,
+    target: str = "frame",
 ) -> Path | None:
+    """Record picks handed to ``target`` ("frame" or "auto_selector").
+
+    Only a Frame handoff becomes Frame's Continue point.
+    """
     paths = [str(path) for path in files]
     items = [{"path": path, "status": "selected"} for path in paths]
     return record_job(
@@ -211,7 +217,7 @@ def record_select_handoff(
         counts={"selected": len(paths)},
         items=items,
         folders={"source": str(source_folder)},
-        context={"files": paths},
+        context={"files": paths, "target": target},
     )
 
 
