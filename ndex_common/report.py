@@ -61,6 +61,26 @@ class JobItem:
     def is_problem(self) -> bool:
         return self.status.casefold() in PROBLEM_STATUSES
 
+    @property
+    def name(self) -> str:
+        """The file name alone, for either kind of path separator."""
+        text = self.path.replace(chr(92), "/").rstrip("/")
+        return text.rsplit("/", 1)[-1] if text else "(no path)"
+
+    @property
+    def folder(self) -> str:
+        """The folder the file lives in, or an empty string."""
+        text = self.path.replace(chr(92), "/").rstrip("/")
+        if "/" not in text:
+            return ""
+        head = text.rsplit("/", 1)[0]
+        return head.replace("/", chr(92)) if chr(92) in self.path else head
+
+    @property
+    def problem_line(self) -> str:
+        """``name — reason`` for a results list; just the name without a reason."""
+        return f"{self.name} — {self.detail}" if self.detail else self.name
+
 
 @dataclass(frozen=True)
 class JobReport:
@@ -98,6 +118,20 @@ class JobReport:
         # Cached: a results window asks several times per selection, and a
         # backup manifest can carry thousands of items.
         return tuple(item for item in self.items if item.is_problem)
+
+    @property
+    def has_problems(self) -> bool:
+        return self.failed_count > 0
+
+    @property
+    def list_label(self) -> str:
+        """A short row for the job list: marker, type, time, and the outcome."""
+        outcome = f"{self.failed_count} failed" if self.has_problems else self.count_summary
+        label = f"{self.type_label} (cancelled)" if self.cancelled else self.type_label
+        # Outcome before time: a narrow list truncates the tail, and the
+        # outcome is the part worth seeing.
+        text = f"{label} - {outcome} - {self.display_time}"
+        return f"⚠ {text}" if self.has_problems else text
 
     @property
     def failed_count(self) -> int:
@@ -250,6 +284,23 @@ def index_of(reports: Sequence[JobReport], manifest: Path | None) -> int:
         return 0
     for index, report in enumerate(reports):
         if same_path(report.manifest_path, manifest):
+            return index
+    return 0
+
+
+def default_index(reports: Sequence[JobReport], manifest: Path | None = None) -> int:
+    """Row to select on open.
+
+    A named job wins. Otherwise the newest job that has problems, since that
+    is what someone opening the window is most likely looking for; with no
+    problems anywhere, the newest job. ``reports`` is newest first.
+    """
+    if manifest is not None:
+        for index, report in enumerate(reports):
+            if same_path(report.manifest_path, manifest):
+                return index
+    for index, report in enumerate(reports):
+        if report.has_problems:
             return index
     return 0
 

@@ -210,12 +210,12 @@ class HandoffChainTests(unittest.TestCase):
         step = self.steps()["ndex_one"]
         # The library is still there, so Continue drops only the missing half.
         self.assertEqual(step.launch_args, ["--open", "--destination", str(self.library)])
-        self.assertEqual(step.status_text, f"Last: {self.library}")
+        self.assertEqual(step.status_text, f"Last: {Path(self.library).name}")
 
         shutil.rmtree(self.library)
         step = self.steps()["ndex_one"]
         self.assertEqual(step.launch_args, ["--open"])
-        self.assertEqual(step.status_text, f"Last folder missing: {self.library}")
+        self.assertEqual(step.status_text, f"Last folder missing: {Path(self.library).name}")
 
     def test_frame_stops_offering_a_handoff_whose_files_are_gone(self) -> None:
         self.backup()
