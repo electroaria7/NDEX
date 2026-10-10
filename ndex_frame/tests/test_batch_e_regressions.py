@@ -146,7 +146,7 @@ class ExportContextTests(unittest.TestCase):
         ))
         result = run_export(snapshot, lambda _event: None, CancelToken())
         self.assertEqual(result.output_dir, snapshot.output_dir)
-        self.assertEqual(result.source_dir, str(self.input))
+        self.assertEqual(result.source_dir, str(self.input.resolve()))
         self.assertEqual((result.frame_id, result.output_id), ("test.frame", "test.output"))
 
     def test_controls_locked_and_export_disabled_while_export_runs(self) -> None:

@@ -297,7 +297,7 @@ class AppFlowTests(unittest.TestCase):
             self.assertTrue(manifests[0].is_file())
             report = read_report(manifests[0])
             self.assertTrue(report.cancelled)
-            self.assertEqual(plan_retry(report).paths, (source_dir / "one.jpg",))
+            self.assertEqual(plan_retry(report).paths, ((source_dir / "one.jpg").resolve(),))
 
     def test_completion_dialog_lists_counts_and_open_folder(self) -> None:
         dialog = ExportCompletionDialog(ExportResult(2, 1, 3, True, ()), 4, self.root / "output")
