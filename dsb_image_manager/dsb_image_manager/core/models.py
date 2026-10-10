@@ -17,6 +17,9 @@ ProxyStatus = Literal[
 PairStatus = Literal["raw_jpg_pair", "raw_only", "jpg_only", "unknown"]
 DuplicatePolicy = Literal["rename", "skip", "overwrite"]
 
+# Shown in the list so pick state is readable without relying on colour.
+PICK_GLYPHS = {"Pick": "\u2713", "Maybe": "?", "Reject": "\u2715", "Unrated": ""}
+
 
 @dataclass(slots=True)
 class ImageMetadata:
@@ -81,6 +84,23 @@ class ImageRecord:
     @property
     def display_name(self) -> str:
         return self.file_path.name
+
+    @property
+    def type_label(self) -> str:
+        """Short file-type text for lists: RAW, JPG, or the bare extension."""
+        if self.media_type == "raw":
+            return "RAW"
+        if self.media_type == "jpg":
+            return "JPG"
+        return self.file_ext.lstrip(".").upper() or "-"
+
+    @property
+    def short_datetime(self) -> str:
+        return f"{self.effective_datetime:%m-%d %H:%M}"
+
+    @property
+    def pick_glyph(self) -> str:
+        return PICK_GLYPHS.get(self.pick_status, "")
 
 
 @dataclass(slots=True)
