@@ -9,11 +9,15 @@ import tkinter as tk
 from datetime import datetime
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
+from tkinter import font as tkfont
 
 from src.branding import NDEX_AUTO_SELECTOR_TITLE
 
 from ndex_common.settings import get_section, update_section
 from ndex_common.theme import (
+    CARD_BG,
+    ScrollableFrame,
+    Tooltip,
     apply_tk_theme,
     apply_window_icon,
     build_app_header,
@@ -27,8 +31,8 @@ SETTINGS_SECTION = "auto_selector"
 
 STATUS_LABELS = {
     "matched": "✔ Matched",
-    "ambiguous": "⚠ Multiple RAW found",
-    "missing": "✖ No RAW found",
+    "ambiguous": "⚠ Choose RAW",
+    "missing": "✖ Not found",
     "chosen": "✔ Chosen",
 }
 
@@ -393,24 +397,37 @@ class AutoSelectorApp(tk.Tk):
 
         body = ttk.Panedwindow(self, orient=tk.HORIZONTAL)
         body.pack(fill=tk.BOTH, expand=True, padx=16, pady=(0, 16))
-        left = ttk.Frame(body, padding=(14, 10), style="Card.TFrame")
-        right = ttk.Frame(body, padding=(14, 10), style="Card.TFrame")
-        body.add(left, weight=2)
+        left_panel = ttk.Frame(body, padding=(14, 10), style="Card.TFrame", width=400)
+        right = ttk.Frame(body, padding=(14, 10), style="Card.TFrame", width=500)
+        # Long result paths and summaries must not steal width from the actions.
+        left_panel.grid_propagate(False)
+        right.grid_propagate(False)
+        body.add(left_panel, weight=2)
         body.add(right, weight=3)
-        self.left_panel = left
+        self.left_panel = left_panel
+        left_panel.columnconfigure(0, weight=1)
+        left_panel.rowconfigure(0, weight=1)
+        self.options_scroll = ScrollableFrame(
+            left_panel, style="CardInner.TFrame", content_style="CardInner.TFrame", background=CARD_BG)
+        self.options_scroll.grid(row=0, column=0, sticky="nsew")
+        self.options_scroll.canvas.configure(width=360)
+        left = self.options_scroll.content
 
         left.columnconfigure(0, weight=1)
         self.raw_entry, _ = self._path_row(
-            left, 0, "RAW folder (CR3, CR2, ARW, NEF…)", self.raw_source_var, self._browse_raw_source)
+            left, 0, "Original RAW folder", self.raw_source_var, self._browse_raw_source)
         self.selected_entry, self.selected_browse = self._path_row(
             left, 2, "Selected JPGs folder", self.selected_jpg_var, self._browse_selected_jpg)
         self.work_entry, _ = self._path_row(
-            left, 4, "Work folder (RAW copies go here)", self.work_folder_var, self._browse_work_folder)
+            left, 4, "Work folder (RAW copies)", self.work_folder_var, self._browse_work_folder)
         # Handoff mode swaps the browse button for this one.
         self.use_folder_button = ttk.Button(
-            left, text="Use a folder instead", command=self._leave_handoff)
-        self.use_folder_button.grid(row=2, column=0, columnspan=3, sticky="e")
+            left, text="Use folder…", width=0, command=self._leave_handoff)
+        self.use_folder_button.grid(row=3, column=2, sticky="ew", padx=(8, 0), pady=(1, 4))
         self.use_folder_button.grid_remove()
+        Tooltip(self.use_folder_button, "Use the Selected JPGs folder instead of the picks sent by Image Manager.")
+        Tooltip(self.selected_entry, lambda: self.selected_display_var.get() if self.handoff_files is not None
+                else self.selected_jpg_var.get())
 
         recursive_check = ttk.Checkbutton(
             left, text="Include subfolders", variable=self.recursive_var, style="Card.TCheckbutton"
@@ -418,7 +435,7 @@ class AutoSelectorApp(tk.Tk):
         recursive_check.grid(row=6, column=0, columnspan=3, sticky="w", pady=(0, 6))
         self._input_widgets.append((recursive_check, "normal"))
 
-        ttk.Label(left, text="If a file already exists", style="Card.TLabel").grid(row=7, column=0, sticky="w")
+        ttk.Label(left, text="If a file already exists", style="Card.TLabel").grid(row=7, column=0, columnspan=3, sticky="w")
         duplicate_combo = ttk.Combobox(
             left,
             textvariable=self.duplicate_label_var,
@@ -426,6 +443,7 @@ class AutoSelectorApp(tk.Tk):
             state="readonly",
         )
         duplicate_combo.grid(row=8, column=0, columnspan=3, sticky="ew", pady=(2, 2))
+        Tooltip(duplicate_combo, self.duplicate_label_var.get)
         self._input_widgets.append((duplicate_combo, "readonly"))
         self._muted_note(left, 9, "Identical files already in the work folder are always skipped.", pady=(0, 6))
 
@@ -433,15 +451,15 @@ class AutoSelectorApp(tk.Tk):
         xmp_row.grid(row=10, column=0, columnspan=3, sticky="ew")
         xmp_check = ttk.Checkbutton(
             xmp_row,
-            text="Write XMP sidecar for copied RAW",
+            text="Write XMP sidecars",
             variable=self.write_xmp_var,
             style="Card.TCheckbutton",
         )
         xmp_check.pack(side=tk.LEFT)
         self._input_widgets.append((xmp_check, "normal"))
 
-        rating_row = ttk.Frame(xmp_row, style="CardInner.TFrame")
-        rating_row.pack(side=tk.RIGHT)
+        rating_row = ttk.Frame(left, style="CardInner.TFrame")
+        rating_row.grid(row=11, column=0, columnspan=3, sticky="w", padx=(22, 0), pady=(4, 4))
         ttk.Label(rating_row, text="Star rating", style="Card.TLabel").pack(side=tk.LEFT, padx=(0, 6))
         rating_combo = ttk.Combobox(
             rating_row,
@@ -455,7 +473,7 @@ class AutoSelectorApp(tk.Tk):
 
         jpg_rating_check = ttk.Checkbutton(
             left,
-            text="Use each JPG's star rating (fallback: rating above)",
+            text="Use each JPG's star rating",
             variable=self.rating_from_jpg_var,
             style="Card.TCheckbutton",
         )
@@ -463,27 +481,33 @@ class AutoSelectorApp(tk.Tk):
         self._input_widgets.append((jpg_rating_check, "normal"))
         self._xmp_dependents = [rating_combo, jpg_rating_check]
         self._muted_note(
-            left, 13, "Writes rating, label 'NDEX Selected' and keyword next to each copied RAW.",
+            left, 13, "JPGs without a rating use the rating above. Writes rating, label 'NDEX Selected' "
+            "and keyword next to each copied RAW.",
             padx=(22, 0), pady=(0, 6))
 
-        ttk.Label(left, textvariable=self.status_var, style="CardMuted.TLabel", wraplength=330).grid(
-            row=14, column=0, columnspan=3, sticky="w", pady=(2, 0))
-        self._wrapped_labels.append(left.grid_slaves(row=14, column=0)[0])
-        progress_row = ttk.Frame(left, style="CardInner.TFrame")
-        progress_row.grid(row=15, column=0, columnspan=3, sticky="ew", pady=(4, 6))
+        # Keep progress and primary actions visible while only the options scroll.
+        action_panel = ttk.Frame(left_panel, style="CardInner.TFrame")
+        action_panel.grid(row=1, column=0, sticky="ew", pady=(8, 0))
+        action_panel.columnconfigure(0, weight=1)
+        self.status_label = ttk.Label(
+            action_panel, textvariable=self.status_var, style="CardMuted.TLabel", wraplength=330)
+        self.status_label.grid(row=0, column=0, sticky="ew", pady=(2, 0))
+        Tooltip(self.status_label, self.status_var.get)
+        progress_row = ttk.Frame(action_panel, style="CardInner.TFrame")
+        progress_row.grid(row=1, column=0, sticky="ew", pady=(4, 6))
         progress_row.columnconfigure(0, weight=1)
         self.progress_bar = ttk.Progressbar(progress_row, variable=self.progress_var, maximum=100)
         self.progress_bar.grid(row=0, column=0, sticky="ew", padx=(0, 8))
         self.cancel_button = ttk.Button(progress_row, text="Cancel", command=self.cancel_work, state="disabled")
         self.cancel_button.grid(row=0, column=1)
 
-        buttons = ttk.Frame(left, style="CardInner.TFrame")
-        buttons.grid(row=16, column=0, columnspan=3, sticky="ew")
+        buttons = ttk.Frame(action_panel, style="CardInner.TFrame")
+        buttons.grid(row=2, column=0, sticky="ew")
         buttons.columnconfigure(0, weight=1)
         buttons.columnconfigure(1, weight=1)
-        self.analyze_button = ttk.Button(buttons, text="Analyze Matches", command=self.start_analysis)
+        self.analyze_button = ttk.Button(buttons, text="Analyze Matches", width=0, command=self.start_analysis)
         self.copy_button = ttk.Button(
-            buttons, text="Copy RAW Files", style="Accent.TButton", command=self.start_copy
+            buttons, text="Copy RAW Files", width=0, style="Accent.TButton", command=self.start_copy
         )
         self.analyze_button.grid(row=0, column=0, sticky="ew", padx=(0, 6))
         self.copy_button.grid(row=0, column=1, sticky="ew", padx=(6, 0))
@@ -496,25 +520,34 @@ class AutoSelectorApp(tk.Tk):
         title_row.columnconfigure(0, weight=1)
         ttk.Label(title_row, text="Match results", style="CardSection.TLabel").grid(row=0, column=0, sticky="w")
         ttk.Button(title_row, text="Job Results…", command=self.open_job_results).grid(row=0, column=1, sticky="e")
-        ttk.Label(right, textvariable=self.banner_var, style="Card.TLabel").grid(
-            row=1, column=0, columnspan=2, sticky="w", pady=(4, 4))
+        self.banner_label = ttk.Label(right, textvariable=self.banner_var, style="Card.TLabel", wraplength=400)
+        self.banner_label.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(4, 4))
 
+        results = ttk.Frame(right, style="CardInner.TFrame")
+        results.grid(row=2, column=0, columnspan=2, sticky="nsew")
+        results.rowconfigure(0, weight=1)
+        results.columnconfigure(0, weight=1)
         columns = ("jpg", "raw", "location", "status")
-        self.match_tree = ttk.Treeview(right, columns=columns, show="headings", height=8, selectmode="browse")
-        self.match_tree.grid(row=2, column=0, sticky="nsew")
+        self.match_tree = ttk.Treeview(results, columns=columns, show="headings", height=8, selectmode="browse")
+        self.match_tree.grid(row=0, column=0, sticky="nsew")
+        tree_font = tkfont.Font(self, font=ttk.Style(self).lookup("Treeview", "font") or "TkDefaultFont")
+        status_width = max(tree_font.measure(label) for label in STATUS_LABELS.values()) + 16
         for column, text, width, stretch in (
             ("jpg", "Selected JPG", 150, True),
             ("raw", "Matched RAW", 120, True),
             ("location", "RAW location", 100, True),
-            ("status", "Status", 145, False),
+            ("status", "Status", status_width, False),
         ):
             self.match_tree.heading(column, text=text)
-            self.match_tree.column(column, width=width, minwidth=70, anchor="w", stretch=stretch)
+            self.match_tree.column(column, width=width, minwidth=70 if stretch else width, anchor="w", stretch=stretch)
+        self.match_tree.bind("<Configure>", self._fit_match_columns, add="+")
         self.match_tree.tag_configure("missing", foreground="#B91C1C")
         self.match_tree.tag_configure("ambiguous", foreground="#B45309")
-        match_scroll = ttk.Scrollbar(right, orient="vertical", command=self.match_tree.yview)
-        match_scroll.grid(row=2, column=1, sticky="ns")
-        self.match_tree.configure(yscrollcommand=match_scroll.set)
+        match_scroll = ttk.Scrollbar(results, orient="vertical", command=self.match_tree.yview)
+        match_scroll.grid(row=0, column=1, sticky="ns")
+        self.match_xscroll = ttk.Scrollbar(results, orient="horizontal", command=self.match_tree.xview)
+        self.match_xscroll.grid(row=1, column=0, sticky="ew")
+        self.match_tree.configure(yscrollcommand=match_scroll.set, xscrollcommand=self.match_xscroll.set)
         self.placeholder_label = ttk.Label(
             self.match_tree, text=PLACEHOLDER_TEXT, style="CardMuted.TLabel", anchor="center")
 
@@ -529,14 +562,15 @@ class AutoSelectorApp(tk.Tk):
         self.choose_button.grid(row=0, column=1, sticky="ne")
 
         ttk.Label(right, text="Log", style="CardSection.TLabel").grid(row=4, column=0, sticky="w")
-        self.log_text = tk.Text(right, height=5, wrap="word")
+        self.log_text = tk.Text(right, width=1, height=5, wrap="word")
         style_text_widget(self.log_text)
         self.log_text.grid(row=5, column=0, sticky="nsew", pady=(4, 0))
         log_scroll = ttk.Scrollbar(right, orient="vertical", command=self.log_text.yview)
         log_scroll.grid(row=5, column=1, sticky="ns", pady=(4, 0))
         self.log_text.configure(yscrollcommand=log_scroll.set)
 
-        left.bind("<Configure>", self._on_left_resize)
+        left.bind("<Configure>", self._on_left_resize, add="+")
+        action_panel.bind("<Configure>", lambda event: self.status_label.configure(wraplength=max(event.width, 120)))
         right.bind("<Configure>", self._on_right_resize)
 
     def _muted_note(self, parent, row: int, text: str, padx=(0, 0), pady=(0, 0)) -> ttk.Label:
@@ -549,17 +583,32 @@ class AutoSelectorApp(tk.Tk):
     def _on_left_resize(self, event) -> None:
         for label in self._wrapped_labels:
             if label is not self.hint_label:
-                label.configure(wraplength=max(event.width - 36 - self._label_indent.get(label, 0), 160))
+                label.configure(wraplength=max(event.width - 4 - self._label_indent.get(label, 0), 120))
 
     def _on_right_resize(self, event) -> None:
-        self.hint_label.configure(wraplength=max(event.width - 170, 160))
+        self.banner_label.configure(wraplength=max(event.width - 32, 160))
+        self.hint_label.configure(wraplength=max(event.width - 40 - self.choose_button.winfo_reqwidth(), 120))
         self._place_placeholder()
 
+    def _fit_match_columns(self, _event=None) -> None:
+        # Reserve the complete status first; filenames and folders share the rest.
+        # Keep a minimum for those columns so a manually narrowed pane can scroll.
+        available = max(210, self.match_tree.winfo_width() - 4 - self.match_tree.column("status", "width"))
+        extra = available - 210
+        jpg_extra, raw_extra = int(extra * 0.45), int(extra * 0.32)
+        for column, width in (
+            ("jpg", 70 + jpg_extra), ("raw", 70 + raw_extra),
+            ("location", 70 + extra - jpg_extra - raw_extra),
+        ):
+            self.match_tree.column(column, width=width)
+
     def _path_row(self, parent: ttk.Frame, row: int, label: str, variable: tk.StringVar, command):
-        ttk.Label(parent, text=label, style="Card.TLabel").grid(row=row, column=0, sticky="w")
-        entry = ttk.Entry(parent, textvariable=variable)
+        heading = ttk.Label(parent, text=label, style="Card.TLabel", wraplength=330)
+        heading.grid(row=row, column=0, columnspan=3, sticky="w")
+        self._wrapped_labels.append(heading)
+        entry = ttk.Entry(parent, textvariable=variable, width=12)
         entry.grid(row=row + 1, column=0, columnspan=2, sticky="ew", pady=(1, 4))
-        browse = ttk.Button(parent, text="Browse…", command=command)
+        browse = ttk.Button(parent, text="Browse…", width=0, command=command)
         browse.grid(row=row + 1, column=2, sticky="ew", padx=(8, 0), pady=(1, 4))
         self._input_widgets.extend(((entry, "normal"), (browse, "normal")))
         return entry, browse
@@ -620,7 +669,7 @@ class AutoSelectorApp(tk.Tk):
             self.selected_browse.grid_remove()
             self.use_folder_button.grid()
             self._set_resting_state(self.selected_entry, "readonly")
-            self.selected_entry.grid_configure(columnspan=3)
+            self.selected_entry.grid_configure(columnspan=2)
         else:
             self.selected_entry.configure(textvariable=self.selected_jpg_var)
             self.selected_entry.grid_configure(columnspan=2)

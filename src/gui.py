@@ -19,7 +19,7 @@ from .metadata import MetadataExtractor
 from .scanner import analyze_source, build_scan_items, same_folder
 
 from ndex_common.launch import launch_app
-from ndex_common.theme import apply_tk_theme, apply_window_icon, build_app_header, style_text_widget
+from ndex_common.theme import CARD_BG, ScrollableFrame, apply_tk_theme, apply_window_icon, build_app_header, style_text_widget
 
 VERIFY_MODE_LABELS = {
     "size": "Quick check (file size)",
@@ -230,8 +230,9 @@ class DSBApp(tk.Tk):
     ):
         super().__init__()
         self.title(NDEX_ONE_TITLE)
-        self.geometry("1220x820")
-        self.minsize(1080, 770)
+        initial_height = min(820, max(600, self.winfo_screenheight() - 120))
+        self.geometry(f"1220x{initial_height}")
+        self.minsize(1080, 600)
         self.brand_images: list[tk.PhotoImage] = []
         apply_window_icon(self, self.brand_images)
         apply_tk_theme(self)
@@ -316,10 +317,19 @@ class DSBApp(tk.Tk):
         body = ttk.Panedwindow(self, orient=tk.HORIZONTAL)
         body.grid(row=1, column=0, sticky="nsew", padx=16, pady=(0, 16))
 
-        left = ttk.Frame(body, padding=16, style="Card.TFrame")
+        left_panel = ttk.Frame(body, padding=12, style="Card.TFrame")
         right = ttk.Frame(body, padding=16, style="Card.TFrame")
-        body.add(left, weight=3)
+        body.add(left_panel, weight=3)
         body.add(right, weight=4)
+        left_panel.columnconfigure(0, weight=1)
+        left_panel.rowconfigure(0, weight=1)
+        self.options_viewport = ScrollableFrame(
+            left_panel, style="CardInner.TFrame", content_style="CardInner.TFrame", background=CARD_BG,
+        )
+        self.options_viewport.grid(row=0, column=0, sticky="nsew")
+        left = self.options_viewport.content
+        # A useful initial sash position must not depend on the canvas's tiny request size.
+        self.after_idle(lambda: body.sashpos(0, max(500, int(body.winfo_width() * 0.48))))
 
         for frame in (left, right):
             frame.columnconfigure(1, weight=1)
@@ -340,7 +350,8 @@ class DSBApp(tk.Tk):
 
         ttk.Label(left, text="File Types", style="CardSection.TLabel").grid(row=4, column=0, sticky="w")
         types_frame = ttk.Frame(left, style="CardInner.TFrame")
-        types_frame.grid(row=5, column=0, columnspan=3, sticky="w", pady=(2, 6))
+        types_frame.grid(row=5, column=0, columnspan=3, sticky="ew", pady=(2, 6))
+        types_frame.columnconfigure(0, weight=1)
         self.brand_frame = ttk.Frame(types_frame, style="CardInner.TFrame")
         self.brand_frame.grid(row=0, column=0, sticky="w")
         for column, (brand_key, brand) in enumerate(RAW_BRANDS.items()):
@@ -355,7 +366,8 @@ class DSBApp(tk.Tk):
             self._input_controls.append(brand_button)
 
         self.types_frame = ttk.Frame(types_frame, style="CardInner.TFrame")
-        self.types_frame.grid(row=1, column=0, sticky="w", pady=(2, 0))
+        self.types_frame.grid(row=1, column=0, sticky="ew", pady=(2, 0))
+        self.types_frame.bind("<Configure>", self._layout_file_type_options, add="+")
         for index, file_type in enumerate(FILE_TYPE_ORDER):
             checkbutton = ttk.Checkbutton(
                 self.types_frame,
@@ -416,10 +428,8 @@ class DSBApp(tk.Tk):
         rule_label.grid(row=8, column=0, columnspan=3, sticky="w")
         self._wrap_labels.append((rule_label, left, 40))
 
-        left.rowconfigure(9, weight=1)  # spare height collects above the buttons
-
-        buttons = ttk.Frame(left, style="CardInner.TFrame")
-        buttons.grid(row=10, column=0, columnspan=3, sticky="ew", pady=(8, 6))
+        buttons = ttk.Frame(left_panel, style="CardInner.TFrame")
+        buttons.grid(row=1, column=0, sticky="ew", pady=(8, 6))
         for column in range(2):
             buttons.columnconfigure(column, weight=1, uniform="actions")
         self.analyze_button = ttk.Button(buttons, text="Analyze", command=self._start_analysis)
@@ -438,15 +448,16 @@ class DSBApp(tk.Tk):
         self.handoff_button.grid(row=2, column=1, sticky="ew", padx=(4, 0), pady=(6, 0))
         Tooltip(self.cancel_button, CANCEL_HINT)
 
-        progress_frame = ttk.LabelFrame(left, text="Progress", padding=(10, 6))
-        progress_frame.grid(row=11, column=0, columnspan=3, sticky="ew", pady=(4, 0))
+        progress_frame = ttk.LabelFrame(left_panel, text="Progress", padding=(10, 6))
+        progress_frame.grid(row=2, column=0, sticky="ew", pady=(4, 0))
         progress_frame.columnconfigure(0, weight=1)
         progress_frame.rowconfigure(1, minsize=38)  # room for two status lines
         ttk.Progressbar(progress_frame, variable=self.progress_var, maximum=100).grid(row=0, column=0, sticky="ew")
         status_label = ttk.Label(progress_frame, textvariable=self.status_var, style="CardMuted.TLabel", justify="left")
         status_label.grid(row=1, column=0, sticky="nw", pady=(6, 0))
-        self._wrap_labels.append((status_label, left, 56))
+        self._wrap_labels.append((status_label, left_panel, 48))
         left.bind("<Configure>", self._rewrap_labels, add="+")
+        left_panel.bind("<Configure>", self._rewrap_labels, add="+")
 
         right.rowconfigure(3, weight=2, minsize=80)
         right.rowconfigure(5, weight=3, minsize=64)
@@ -556,17 +567,24 @@ class DSBApp(tk.Tk):
         return get_visible_file_types(self._enabled_brands())
 
     def _refresh_file_type_options(self) -> None:
-        visible_types = set(self._visible_file_types())
-        for index, file_type in enumerate(FILE_TYPE_ORDER):
+        self._layout_file_type_options()
+        if hasattr(self, "analyze_button"):
+            self._update_button_states()
+
+    def _layout_file_type_options(self, _event=None) -> None:
+        visible_types = self._visible_file_types()
+        widest = max((self.type_checkbuttons[key].winfo_reqwidth() for key in visible_types), default=1)
+        available = self.options_viewport.content.winfo_width()
+        columns = max(1, min(3, available // (widest + 12)))
+        for file_type in FILE_TYPE_ORDER:
             checkbutton = self.type_checkbuttons[file_type]
             if file_type in visible_types:
-                row = index // 3
-                column = index % 3
+                index = visible_types.index(file_type)
+                row = index // columns
+                column = index % columns
                 checkbutton.grid(row=row, column=column, sticky="w", padx=(0, 12), pady=(2, 0))
             else:
                 checkbutton.grid_remove()
-        if hasattr(self, "analyze_button"):
-            self._update_button_states()
 
     def _selected_verify_mode(self) -> str:
         return VERIFY_LABEL_TO_MODE.get(self.verify_var.get(), "size")

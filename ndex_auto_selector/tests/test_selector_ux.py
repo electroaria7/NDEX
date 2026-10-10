@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import tempfile
 import time
+import tkinter as tk
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -179,9 +180,9 @@ class SelectorUxAppTests(unittest.TestCase):
         rows = [self.app.match_tree.item(i, "values") for i in self.app.match_tree.get_children()]
         self.assertEqual(self.app.banner_var.get(),
                          "3 picked \u00b7 1 will copy \u00b7 1 need your choice \u00b7 1 RAW not found")
-        self.assertEqual(rows[0][1:], ("(2 candidates)", "", "\u26a0 Multiple RAW found"))
+        self.assertEqual(rows[0][1:], ("(2 candidates)", "", "\u26a0 Choose RAW"))
         self.assertEqual(rows[1][3], "\u2714 Matched")
-        self.assertEqual(rows[2][3], "\u2716 No RAW found")
+        self.assertEqual(rows[2][3], "\u2716 Not found")
         self.assertEqual(self.app.match_tree.cget("columns"), ("jpg", "raw", "location", "status"))
 
     def test_choose_button_follows_selection_and_choice_updates_row(self):
@@ -208,6 +209,19 @@ class SelectorUxAppTests(unittest.TestCase):
         self.assertEqual((match.status, match.raw_path), ("ambiguous", None))
         self.assertIn("1 will copy", self.app.banner_var.get())
 
+    def test_status_is_visible_without_scrolling_at_minimum_window_size(self):
+        app = self.app
+        app.attributes("-alpha", 0)
+        app.deiconify()
+        app.geometry("940x620")
+        self._analyze()
+        for _ in range(4):
+            app.update()
+        self.assertEqual(app.match_tree.xview()[0], 0.0)
+        x, _y, width, _height = app.match_tree.bbox("0", "status")
+        self.assertGreaterEqual(x, 0)
+        self.assertLessEqual(x + width, app.match_tree.winfo_width())
+
     def test_duplicate_labels_map_to_policy(self):
         self.assertEqual(self.app.duplicate_label_var.get(), "Keep both (add _001)")
         self.app.duplicate_label_var.set("Skip existing")
@@ -216,6 +230,41 @@ class SelectorUxAppTests(unittest.TestCase):
         self.assertEqual(self.app._copy_options()["duplicate_policy"], "overwrite")
         self.app.duplicate_var.set("rename")
         self.assertEqual(self.app.duplicate_label_var.get(), "Keep both (add _001)")
+
+    def test_large_tk_fonts_keep_actions_visible_and_options_reachable(self):
+        self._close()
+        original_init = tk.Tk.__init__
+
+        def scaled_init(root, *args, **kwargs):
+            original_init(root, *args, **kwargs)
+            root.tk.call("tk", "scaling", 2.0)
+
+        with patch.object(tk.Tk, "__init__", scaled_init):
+            self.app = AutoSelectorApp(self.raw, self.jpg, self.work)
+        app = self.app
+        app.attributes("-alpha", 0)
+        app.geometry("940x620")
+        self._analyze()
+        for _ in range(4):
+            app.update()
+        for button in (app.analyze_button, app.copy_button, app.cancel_button):
+            with self.subTest(action=button.cget("text")):
+                self.assertTrue(button.winfo_ismapped())
+                self.assertGreaterEqual(button.winfo_width(), button.winfo_reqwidth())
+                self.assertLessEqual(button.winfo_rooty() + button.winfo_height(),
+                                     app.winfo_rooty() + app.winfo_height())
+        self.assertTrue(app.options_scroll.scrollbar.winfo_ismapped())
+        app.options_scroll.canvas.yview_moveto(1)
+        app.update()
+        rating_check = app._xmp_dependents[1]
+        canvas = app.options_scroll.canvas
+        self.assertGreaterEqual(rating_check.winfo_rooty(), canvas.winfo_rooty())
+        self.assertLessEqual(rating_check.winfo_rooty() + rating_check.winfo_height(),
+                             canvas.winfo_rooty() + canvas.winfo_height())
+        self.assertEqual(app.match_tree.xview()[0], 0.0)
+        x, _y, width, _height = app.match_tree.bbox("0", "status")
+        self.assertGreaterEqual(x, 0)
+        self.assertLessEqual(x + width, app.match_tree.winfo_width())
 
     def test_replace_asks_before_copying(self):
         self._analyze()

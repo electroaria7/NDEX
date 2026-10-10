@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import tkinter as tk
+from tkinter import font as tkfont
 from tkinter import messagebox, ttk
 
 from ndex_common.branding import NDEX_LAUNCHER_TITLE
@@ -18,14 +19,14 @@ from ndex_common.theme import (
 
 from ndex_launcher.state import StepState, gather_workflow_state
 
-# The window cannot be narrower than its 880px minimum, so the 1x4 row is
-# used at every real size. The 2x2 grid remains for anything narrower.
-COMPACT_LAYOUT_WIDTH = 880
+# Four cards need room for the headings as well as their bodies. Larger fonts
+# can raise this threshold further through the measured heading widths.
+COMPACT_LAYOUT_WIDTH = 1000
 TAGLINE = "Start with 01 Backup. Each step hands its folder to the next."
 
 
-def uses_compact_card_layout(width: int) -> bool:
-    return width < COMPACT_LAYOUT_WIDTH
+def uses_compact_card_layout(width: int, required_width: int = COMPACT_LAYOUT_WIDTH) -> bool:
+    return width < required_width
 
 
 class LauncherApp(tk.Tk):
@@ -42,6 +43,7 @@ class LauncherApp(tk.Tk):
         self._cards: dict[str, ttk.Frame] = {}
         self._arrows: list[ttk.Label] = []
         self._compact_layout: bool | None = None
+        self._card_headings: dict[str, tuple[ttk.Label, ttk.Label]] = {}
         apply_tk_theme(self)
         self._build_ui()
         self.refresh_status()
@@ -71,6 +73,9 @@ class LauncherApp(tk.Tk):
         self._body_window = self._canvas.create_window(0, 0, anchor="nw", window=self._body)
         self._canvas.bind("<Configure>", self._resize_viewport)
         self._body.bind("<Configure>", self._update_scroll_region)
+        # Shorter refreshed cards can move the canvas window fully above the
+        # old scroll position, where Tk unmaps it instead of sending Configure.
+        self._body.bind("<Unmap>", self._update_scroll_region)
         self.bind("<MouseWheel>", self._scroll_cards, add="+")
         self.bind("<FocusIn>", self._reveal_focused_control, add="+")
 
@@ -100,9 +105,9 @@ class LauncherApp(tk.Tk):
         self._fit_body(self._canvas.winfo_width(), self._canvas.winfo_height())
 
     def _fit_body(self, width: int, height: int) -> None:
-        """Stretch the cards to the viewport; show the scrollbar only when they overflow."""
+        """Keep cards at their content height, with scrolling when they overflow."""
         needed = self._body.winfo_reqheight()
-        self._canvas.itemconfigure(self._body_window, width=width, height=max(needed, height))
+        self._canvas.itemconfigure(self._body_window, width=width)
         self._canvas.configure(scrollregion=(0, 0, width, max(needed, height)))
         self._set_scrollbar_visible(needed > height > 1)
 
@@ -125,10 +130,12 @@ class LauncherApp(tk.Tk):
         bottom = top + widget.winfo_height()
         visible_top = self._canvas.canvasy(0)
         height = self._canvas.winfo_height()
+        bounds = tuple(float(value) for value in self._canvas.cget("scrollregion").split())
+        total = max(1, bounds[3] - bounds[1]) if bounds else 1
         if top < visible_top:
-            self._canvas.yview_moveto(top / max(1, self._body.winfo_height()))
+            self._canvas.yview_moveto(top / total)
         elif bottom > visible_top + height:
-            self._canvas.yview_moveto((bottom - height) / max(1, self._body.winfo_height()))
+            self._canvas.yview_moveto((bottom - height) / total)
 
     def _on_window_configure(self, event: tk.Event) -> None:
         if event.widget is not self:
@@ -136,7 +143,7 @@ class LauncherApp(tk.Tk):
         self._apply_card_layout(event.width)
 
     def _apply_card_layout(self, width: int) -> None:
-        compact = uses_compact_card_layout(width)
+        compact = uses_compact_card_layout(width, self._required_row_width())
         if compact == self._compact_layout:
             return
         self._compact_layout = compact
@@ -156,8 +163,6 @@ class LauncherApp(tk.Tk):
                 card.grid(row=row, column=column, sticky="nsew", padx=8, pady=8)
             for column in (0, 1):
                 self._body.columnconfigure(column, weight=1, uniform="steps")
-            for row in (0, 1):
-                self._body.rowconfigure(row, weight=1)
             return
 
         for index, card in enumerate(cards):
@@ -167,7 +172,19 @@ class LauncherApp(tk.Tk):
                 arrow = ttk.Label(self._body, text="→", style="Arrow.TLabel")
                 arrow.grid(row=0, column=index * 2 + 1, padx=2)
                 self._arrows.append(arrow)
-        self._body.rowconfigure(0, weight=1)
+
+    def _required_row_width(self) -> int:
+        style = ttk.Style(self)
+        number_font = tkfont.Font(self, font=style.lookup("StepNumber.TLabel", "font"))
+        title_font = tkfont.Font(self, font=style.lookup("CardTitle.TLabel", "font"))
+        heading_width = max(
+            (number_font.measure(str(number.cget("text"))) + title_font.measure(str(title.cget("text"))) + 6
+             for number, title in self._card_headings.values()),
+            default=0,
+        )
+        # Card padding, a little breathing room, the body margin, and arrows.
+        arrow_font = tkfont.Font(self, font=style.lookup("Arrow.TLabel", "font"))
+        return max(COMPACT_LAYOUT_WIDTH, (heading_width + 40) * 4 + 32 + (arrow_font.measure("→") + 8) * 3)
 
     def refresh_status(self) -> None:
         steps = gather_workflow_state()
@@ -177,6 +194,7 @@ class LauncherApp(tk.Tk):
                 self._compact_layout = None
                 self._apply_card_layout(self.winfo_width())
             self._render_card(step)
+        self._apply_card_layout(self.winfo_width())
 
     def _render_card(self, step: StepState) -> None:
         card = self._cards[step.key]
@@ -186,16 +204,19 @@ class LauncherApp(tk.Tk):
 
         heading = ttk.Frame(card, style="CardInner.TFrame")
         heading.pack(anchor="w", fill=tk.X)
-        ttk.Label(
+        number = ttk.Label(
             heading,
             text=step.number or step.title.split(".", 1)[0],
             style="StepNumber.TLabel",
-        ).pack(side=tk.LEFT)
-        ttk.Label(
+        )
+        number.pack(side=tk.LEFT)
+        title = ttk.Label(
             heading,
             text=step.short_title or step.title,
             style="CardTitle.TLabel",
-        ).pack(side=tk.LEFT, padx=(6, 0), pady=(5, 0))
+        )
+        title.pack(side=tk.LEFT, padx=(6, 0), pady=(5, 0))
+        self._card_headings[step.key] = (number, title)
         ttk.Label(card, text=step.description, style="Card.TLabel", wraplength=160, justify="left").pack(
             anchor="w", pady=(6, 8)
         )
@@ -207,7 +228,7 @@ class LauncherApp(tk.Tk):
         ttk.Label(
             card,
             text=f"⚠ {step.result_text}" if problem else step.result_text,
-            style="CardDanger.TLabel" if problem else "CardFaint.TLabel",
+            style="CardDanger.TLabel" if problem else "CardMuted.TLabel",
             wraplength=160,
             justify="left",
         ).pack(anchor="w", pady=(0, 10))

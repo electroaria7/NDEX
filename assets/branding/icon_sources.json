@@ -1,0 +1,16 @@
+{
+  "master": {
+    "file": "ndex_icon_master.png",
+    "method": "Built-in imagegen transparent-background edit",
+    "reference": "Existing ndex_icon_256.png before this UI update",
+    "prompt": "Edit the existing NDEX app icon. Make only the white background outside the black rounded-square silhouette fully transparent. Preserve the black rounded-square body, white open frame, exact two-row N/reverse-D and E/X lettering, orange E bar and orange lower-right bent corner, relative positions, proportions, stroke thickness and palette. No new typography, matte, shadow, glow, border or padding. Clean antialiased silhouette on true transparent alpha. This is a desktop icon background correction, not a redesign."
+  },
+  "small": {
+    "file": "ndex_icon_small.svg",
+    "method": "Code-native vector artwork for 16px and 24px resources",
+    "design": "Simplified white N and orange corner on the existing black rounded tile. Removes the detailed frame and extra lettering at small sizes."
+  },
+  "build": "python build/generate_branding.py",
+  "outputs": "ndex_icon_{16,24,32,48,64,128,256}.png and ndex_icon.ico",
+  "original_sources": "ndex_icon_source.png and the wordmark sources are retained unchanged."
+}

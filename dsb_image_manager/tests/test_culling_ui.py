@@ -163,6 +163,51 @@ class CullingUiTests(unittest.TestCase):
         self.assertEqual([r.pick_status for r in self.app.records[1:3]], ["Reject", "Reject"])
         self.assertEqual(len(self.app.tree.selection()), 2)
 
+    def test_visible_mark_buttons_keep_advance_and_batch_selection_semantics(self):
+        app = self.app
+        app.mark_buttons["Pick"].invoke()
+        self.assertEqual(self.index(), 1)
+        self.assertEqual(app.records[0].pick_status, "Pick")
+        app.advance_after_mark.set(False)
+        app.mark_buttons["Maybe"].invoke()
+        self.assertEqual(self.index(), 1)
+        self.assertEqual(app.current_record.pick_status, "Maybe")
+        app.set_rating(4, advance=False)
+        app.mark_buttons["Unrated"].invoke()
+        self.assertEqual((app.current_record.pick_status, app.current_record.rating), ("Unrated", 4))
+        app.tree.selection_set(self.rows()[1:3])
+        app.on_select()
+        app.mark_buttons["Reject"].invoke()
+        self.assertEqual([r.pick_status for r in app.records[1:3]], ["Reject", "Reject"])
+        self.assertEqual(len(app.tree.selection()), 2)
+
+    def test_culling_buttons_disable_during_work_and_restore_afterwards(self):
+        app = self.app
+        buttons = (*app.mark_buttons.values(), app.export_button, app.send_selector_button, app.send_frame_button)
+        app._active_job = "backup"
+        app._set_work_controls(True)
+        self.assertTrue(all(str(button.cget("state")) == "disabled" for button in buttons))
+        app.mark_buttons["Pick"].invoke()
+        self.assertTrue(all(record.pick_status == "Unrated" for record in app.records))
+        app._active_job = None
+        app._set_work_controls(False)
+        self.assertTrue(all(str(button.cget("state")) == "normal" for button in buttons))
+        app.tree.selection_remove(*app.tree.selection())
+        app.on_select()
+        self.assertTrue(all(str(button.cget("state")) == "disabled"
+                            for button in (*app.mark_buttons.values(), app.export_button)))
+
+    def test_visible_handoff_buttons_keep_confirmation(self):
+        app = self.app
+        app.mark_buttons["Pick"].invoke()
+        with patch.object(tk_app.messagebox, "askyesno", return_value=False) as confirm, \
+                patch.object(tk_app, "launch_app") as launch:
+            app.send_selector_button.invoke()
+            self.assertEqual(confirm.call_args.args[0], "Send Picks to Auto Selector")
+            app.send_frame_button.invoke()
+            self.assertEqual(confirm.call_args.args[0], "Send Picks to Frame")
+        launch.assert_not_called()
+
     def test_marks_update_in_place_without_rebuilding(self):
         with patch.object(self.app, "refresh_records") as refresh:
             self.app.set_pick("Maybe")

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import tempfile
+import tkinter as tk
 import unittest
 from tkinter import ttk
 from types import SimpleNamespace
@@ -24,17 +25,20 @@ class LauncherLayoutTests(unittest.TestCase):
 
     def _assert_cards_fit(self, app) -> None:
         canvas_height = app._canvas.winfo_height()
-        self.assertLessEqual(app._body.winfo_reqheight(), canvas_height)
-        self.assertFalse(app._scrollbar.winfo_manager())
+        overflow = app._body.winfo_reqheight() > canvas_height
+        self.assertEqual(bool(app._scrollbar.winfo_manager()), overflow)
         for card in app._cards.values():
             for button in (w for w in card.winfo_children()[-1].winfo_children() if isinstance(w, ttk.Button)):
+                app._reveal_focused_control(SimpleNamespace(widget=button))
+                app.update_idletasks()
                 self.assertTrue(button.winfo_ismapped())
+                self.assertGreaterEqual(button.winfo_rooty(), app._canvas.winfo_rooty())
                 self.assertLessEqual(
                     button.winfo_rooty() + button.winfo_height(),
                     app._canvas.winfo_rooty() + canvas_height,
                 )
 
-    def test_every_card_and_button_fits_at_default_and_minimum_size(self) -> None:
+    def test_every_card_action_is_reachable_at_default_and_minimum_size(self) -> None:
         with patch("ndex_launcher.main.gather_workflow_state", return_value=self._steps()):
             app = LauncherApp()
             self.addCleanup(app.destroy)
@@ -63,11 +67,31 @@ class LauncherLayoutTests(unittest.TestCase):
             app.update()
             self.assertGreaterEqual(button.winfo_rooty(), app._canvas.winfo_rooty())
 
-    def test_compact_layout_threshold_is_the_minimum_window_width(self) -> None:
-        self.assertEqual(COMPACT_LAYOUT_WIDTH, 880)
+    def test_refreshing_shorter_cards_restores_them_from_an_old_scroll_position(self) -> None:
+        with patch("ndex_launcher.main.gather_workflow_state", return_value=self._steps(
+            description="A longer workflow explanation. " * 40,
+        )) as gather:
+            app = LauncherApp()
+            self.addCleanup(app.destroy)
+            app.geometry("880x520")
+            app.update()
+            app._canvas.yview_moveto(1.0)
+            app.update()
+            self.assertGreater(app._canvas.canvasy(0), app._canvas.winfo_height())
+            gather.return_value = self._steps(description="Short", last_folder="", launch_args=["--open"])
+            app.refresh_status()
+            app.update()
+            self.assertTrue(app._body.winfo_ismapped())
+            scrollregion = tuple(float(value) for value in app._canvas.cget("scrollregion").split())
+            self.assertEqual(scrollregion[3], max(app._body.winfo_reqheight(), app._canvas.winfo_height()))
+            self._assert_cards_fit(app)
+
+    def test_compact_layout_accounts_for_the_available_heading_width(self) -> None:
+        self.assertGreater(COMPACT_LAYOUT_WIDTH, 880)
         self.assertTrue(uses_compact_card_layout(COMPACT_LAYOUT_WIDTH - 1))
         self.assertFalse(uses_compact_card_layout(COMPACT_LAYOUT_WIDTH))
         self.assertFalse(uses_compact_card_layout(1040))
+        self.assertTrue(uses_compact_card_layout(1040, required_width=1200))
 
     def test_creates_four_workflow_cards(self) -> None:
         app = LauncherApp()
@@ -79,10 +103,10 @@ class LauncherLayoutTests(unittest.TestCase):
             ["ndex_one", "image_manager", "auto_selector", "frame"],
         )
 
-    def test_one_row_layout_is_used_from_the_minimum_width_up(self) -> None:
+    def test_one_row_layout_is_used_when_all_headings_fit(self) -> None:
         app = LauncherApp()
         self.addCleanup(app.destroy)
-        for size in ("880x520", "1040x620"):
+        for size in ("1040x620", "1200x680"):
             with self.subTest(size=size):
                 app.geometry(size)
                 app.update()
@@ -104,6 +128,38 @@ class LauncherLayoutTests(unittest.TestCase):
         ]
         self.assertEqual(positions, [(0, 0), (0, 1), (1, 0), (1, 1)])
         self.assertEqual(app._arrows, [])
+
+    def test_large_fonts_reflow_cards_and_keep_titles_and_actions_reachable(self) -> None:
+        original_init = tk.Tk.__init__
+
+        def scaled_init(root, *args, **kwargs):
+            original_init(root, *args, **kwargs)
+            root.original_scaling = root.tk.call("tk", "scaling")
+            root.tk.call("tk", "scaling", 2.0)
+
+        with patch.object(tk.Tk, "__init__", scaled_init):
+            app = LauncherApp()
+
+        def cleanup():
+            app.tk.call("tk", "scaling", app.original_scaling)
+            app.destroy()
+
+        self.addCleanup(cleanup)
+        app.geometry("880x520")
+        app.update()
+        self.assertTrue(app._compact_layout)
+        for number, title in app._card_headings.values():
+            self.assertGreaterEqual(number.winfo_width(), number.winfo_reqwidth())
+            self.assertGreaterEqual(title.winfo_width(), title.winfo_reqwidth())
+        self._assert_cards_fit(app)
+
+    def test_wide_window_does_not_stretch_card_content_apart(self) -> None:
+        app = LauncherApp()
+        self.addCleanup(app.destroy)
+        app.geometry("1200x800")
+        app.update()
+        for card in app._cards.values():
+            self.assertLess(card.winfo_height(), app._canvas.winfo_height() - 100)
 
 
 class CardWordingTests(unittest.TestCase):
@@ -145,7 +201,7 @@ class CardWordingTests(unittest.TestCase):
                         created_at="2026-10-10T08:30:00Z", counts={"copied": 2, "failed": 1})
         good = JobReport(manifest_path=Path("g.json"), type="backup", app="ndex_one",
                          created_at="2026-10-10T08:30:00Z", counts={"copied": 2})
-        for report, style in ((bad, "CardDanger.TLabel"), (good, "CardFaint.TLabel")):
+        for report, style in ((bad, "CardDanger.TLabel"), (good, "CardMuted.TLabel")):
             with self.subTest(style=style):
                 step = StepState(key="ndex_one", title="1. Backup", description="d", last_result=report)
                 app = self._app_with([step])

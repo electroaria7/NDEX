@@ -9,7 +9,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from PySide6.QtCore import QPoint, Qt
-from PySide6.QtGui import QImage, QPixmap
+from PySide6.QtGui import QFontDatabase, QImage, QPixmap
 from PySide6.QtWidgets import QApplication, QFileDialog
 
 from ndex_frame.core.geometry import build_render_plan, project_render_plan
@@ -25,6 +25,11 @@ class MainWindowTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.app = QApplication.instance() or QApplication([])
+        # Windows' offscreen platform does not discover system fonts itself.
+        if os.name == "nt":
+            font_directory = Path(os.environ.get("WINDIR", "C:/Windows")) / "Fonts"
+            for filename in ("segoeui.ttf", "segoeuib.ttf", "seguisb.ttf"):
+                QFontDatabase.addApplicationFont(str(font_directory / filename))
 
     def setUp(self) -> None:
         frame = FramePreset("frame", "White 3:4", 1, AspectRatio(3, 4), "#FFFFFF", 1.0, 0.0, 0.0)
@@ -86,12 +91,88 @@ class MainWindowTests(unittest.TestCase):
         self.assertFalse(window.export_progress_bar.isHidden())
         self.assertEqual(window.export_progress_bar.maximum(), 3)
         self.assertEqual(window.export_progress_bar.value(), 1)
-        self.assertIn("one.jpg", window.export_progress_bar.format())
+        self.assertEqual(window.export_progress_bar.format(), "%v / %m")
+        self.assertEqual(window.export_progress_bar.toolTip(), "one.jpg")
         window._export_progress(ExportProgress(2, 3, Path("two.jpg"), "exported"))
         self.assertEqual(window.export_progress_bar.value(), 2)
         window.set_interactive_dialogs(False)
         window._export_finished(ExportResult(2, 0, 0, False, ()))
         self.assertTrue(window.export_progress_bar.isHidden())
+
+    def test_long_output_path_does_not_expand_window_or_hide_export_actions(self) -> None:
+        window = MainWindow(controller=self.controller)
+        self.addCleanup(window.close)
+        window.show()
+        window.resize(960, 640)
+        self.app.processEvents()
+        original_minimum = window.minimumSizeHint().width()
+        path = Path("C:/Photos") / "/".join(["Client approved autumn photographs"] * 12) / "Final Export"
+        self.state.output_directory = path
+        window.sync_output_folder_label()
+        self.app.processEvents()
+
+        self.assertEqual(window.width(), 960)
+        self.assertEqual(window.minimumSizeHint().width(), original_minimum)
+        self.assertEqual(window.output_folder_label.text(), str(path))
+        self.assertEqual(window.output_folder_label.toolTip(), str(path))
+        self.assertEqual(window.output_folder_label.accessibleDescription(), str(path))
+        for button in (window.output_folder_button, window.export_selected_button, window.export_all_button):
+            position = button.mapTo(window, QPoint())
+            self.assertTrue(window.rect().contains(position))
+            self.assertTrue(window.rect().contains(position + button.rect().bottomRight()))
+
+    def test_short_window_keeps_cancel_visible_and_settings_scrollable(self) -> None:
+        window = MainWindow(controller=self.controller)
+        self.addCleanup(window.close)
+        window.show()
+        window.resize(900, 600)
+        with patch.object(self.controller, "_export_thread", object()):
+            window._busy_changed(True)
+            filename = "approved-autumn-photo-" * 12 + ".jpg"
+            window._export_progress(ExportProgress(1, 3, Path(filename), "started"))
+            self.app.processEvents()
+            self.assertEqual(window.size().toTuple(), (900, 600))
+            for widget in (window.cancel_button, window.export_progress_bar, window.export_all_button):
+                position = widget.mapTo(window, QPoint())
+                self.assertTrue(widget.isVisible())
+                self.assertTrue(window.rect().contains(position + widget.rect().bottomRight()))
+            self.assertGreater(window.frame_scroll.verticalScrollBar().maximum(), 0)
+            window.frame_scroll.ensureWidgetVisible(window.save_frame_button)
+            self.app.processEvents()
+            position = window.save_frame_button.mapTo(window.frame_scroll.viewport(), QPoint())
+            self.assertTrue(window.frame_scroll.viewport().rect().contains(position))
+            self.assertTrue(window.frame_scroll.viewport().rect().contains(
+                position + window.save_frame_button.rect().bottomRight()
+            ))
+        window._busy_changed(False)
+
+    def test_selected_controls_require_a_photo_and_reset_only_that_photo(self) -> None:
+        window = MainWindow(controller=self.controller)
+        self.addCleanup(window.close)
+        self.assertFalse(window.scale_spin.isEnabled())
+        self.assertFalse(window.reset_override_button.isEnabled())
+        self.assertTrue(window.ratio_width_spin.isEnabled())
+
+        first = SourceItem(Path("first.jpg"), 3000, 4000, True)
+        second = SourceItem(Path("second.jpg"), 3000, 4000, True)
+        self.state.replace_sources([first, second])
+        window._refresh_sources()
+        self.assertTrue(window.scale_spin.isEnabled())
+        window.photo_size_preset_buttons[0].click()
+        self.state.select(second.path)
+        window._sync_controls()
+        window.photo_size_preset_buttons[1].click()
+        window.ratio_preset_buttons[2].click()
+        window.background_preset_buttons[3].click()
+        self.assertEqual(self.state.working_frame.ratio, AspectRatio(1, 1))
+        self.assertEqual(self.state.working_frame.background, "#000000")
+        self.assertEqual(self.state.effective_framing(first.path)[0], 0.8)
+        self.assertEqual(self.state.effective_framing(second.path)[0], 0.9)
+        self.assertTrue(window.reset_override_button.isEnabled())
+        window.reset_override_button.click()
+        self.assertEqual(self.state.effective_framing(first.path)[0], 0.8)
+        self.assertEqual(self.state.effective_framing(second.path)[0], 1.0)
+        self.assertFalse(window.reset_override_button.isEnabled())
 
     def test_ratio_and_background_presets_update_working_frame(self) -> None:
         window = MainWindow(controller=self.controller)
