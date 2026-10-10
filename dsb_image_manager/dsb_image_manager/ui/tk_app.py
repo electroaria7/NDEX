@@ -8,6 +8,7 @@ import tkinter as tk
 from dataclasses import replace
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
+from tkinter import font as tkfont
 
 from PIL import Image, ImageOps, ImageTk
 
@@ -453,13 +454,14 @@ class ImageManagerApp(tk.Tk):
 
         columns = tuple(TREE_COLUMNS.keys())
         self.tree = ttk.Treeview(self.left_pane, columns=columns, show="headings", selectmode="extended")
+        self._col_widths = self._measure_columns()
         for column in columns:
             config = TREE_COLUMNS[column]
             self.tree.heading(column, text=config["label"], command=lambda name=column: self.sort_by_column(name))
             self.tree.column(
                 column,
-                width=self._scaled(config["width"]),
-                minwidth=self._scaled(config["minwidth"]),
+                width=self._col_widths[column][0],
+                minwidth=self._col_widths[column][1],
                 stretch=config["stretch"],
                 anchor=config.get("anchor", tk.W),
             )
@@ -481,11 +483,10 @@ class ImageManagerApp(tk.Tk):
         # The details block is packed first (bottom) so a small window shrinks the
         # preview before it clips the stars or EXIF text.
         self.details_frame = tk.Frame(self.right_pane, bg=CARD_BG, bd=0, highlightthickness=0)
-        self.details_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=(1, 0))
 
         preview_frame = tk.Frame(
             self.right_pane, bg=self._preview_background_color(), bd=0, highlightthickness=0,
-            width=200, height=120,
+            width=200, height=self._scaled(72),
         )
         preview_frame.pack_propagate(False)
         preview_frame.pack(fill=tk.BOTH, expand=True)
@@ -504,6 +505,9 @@ class ImageManagerApp(tk.Tk):
         self.preview_label.pack(fill=tk.BOTH, expand=True)
         self.preview_label.bind("<Double-Button-1>", lambda event: self.open_fullscreen_viewer())
         self.preview_label.bind("<Configure>", lambda event: self._schedule_preview_refresh())
+        # Preview keeps its minimum height; the details block gives way (its text
+        # area is the bottom-most part and clips first).
+        self.details_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=(1, 0))
 
         details_header = tk.Frame(self.details_frame, bg=CARD_BG, bd=0, highlightthickness=0)
         details_header.pack(fill=tk.X, padx=12, pady=(10, 4))
@@ -541,9 +545,9 @@ class ImageManagerApp(tk.Tk):
             star = tk.Label(
                 rating_row,
                 text=STAR_EMPTY,
-                font=("Segoe UI Symbol", 16),
+                font=("Segoe UI Symbol", 15),
                 cursor="hand2",
-                padx=1,
+                padx=0,
                 bg=CARD_BG,
                 fg="#6b7280",
                 bd=0,
@@ -625,6 +629,31 @@ class ImageManagerApp(tk.Tk):
 
     # ---- filters, arrows, menu hints, empty state ----
 
+    def _measure_columns(self) -> dict[str, tuple[int, int]]:
+        """(width, minwidth) per column, measured from the real fonts so text never clips."""
+        style = ttk.Style(self)
+        body = tkfont.Font(self, font=style.lookup("Treeview", "font") or "TkDefaultFont")
+        head = tkfont.Font(self, font=style.lookup("Treeview.Heading", "font") or "TkDefaultFont")
+        pad = self._scaled(8)
+
+        def fit(sample: str, header: str = "") -> int:
+            # Only the sorted column carries an arrow; give Date room for it.
+            arrow = " \u2191" if header == "Date" else ""
+            header_width = head.measure(header + arrow) + pad if header else 0
+            return max(body.measure(sample) + pad, header_width)
+
+        fixed = {
+            "state": body.measure("\u2715") + pad,
+            "type": fit("RAW", "Type"),
+            "pick": fit("Unrated", "Pick"),
+            "rating": fit(STAR_FILLED * 5, STAR_FILLED),
+            "date": fit("00-00 00:00", "Date"),
+        }
+        widths = {key: (value, value) for key, value in fixed.items()}
+        name_min = body.measure("IMG_0000.CR3") + pad
+        widths["name"] = (int(name_min * 1.3), name_min)
+        return widths
+
     def _scaled(self, pixels: int) -> int:
         """Column widths are pixels while fonts follow Windows display scaling."""
         try:
@@ -634,7 +663,7 @@ class ImageManagerApp(tk.Tk):
         return int(round(pixels * max(factor, 1.0)))
 
     def _list_needed_width(self) -> int:
-        return sum(self._scaled(config["minwidth"]) for config in TREE_COLUMNS.values()) + self._scaled(16)
+        return sum(minimum for _width, minimum in self._col_widths.values()) + self._scaled(16)
 
     def _layout_footer_hint(self, _event=None) -> None:
         """Keep the shortcut hint beside the selection count, or below it if too narrow."""
@@ -655,7 +684,7 @@ class ImageManagerApp(tk.Tk):
         if self.image_layout.get() != "50%" or len(self.paned.panes()) < 2:
             return
         width = self.paned.winfo_width()
-        needed = min(self._list_needed_width(), int(width * 0.68))
+        needed = min(self._list_needed_width(), int(width * 0.72))
         try:
             if width > 1 and self.paned.sashpos(0) < needed:
                 self.paned.sashpos(0, needed)
@@ -664,9 +693,9 @@ class ImageManagerApp(tk.Tk):
 
     def _fit_name_column(self, _event=None) -> None:
         """Let the File column take whatever the fixed columns leave over."""
-        others = sum(self._scaled(config["width"]) for key, config in TREE_COLUMNS.items() if key != "name")
+        others = sum(width for key, (width, _minimum) in self._col_widths.items() if key != "name")
         available = self.tree.winfo_width() - others - 4
-        self.tree.column("name", width=max(self._scaled(TREE_COLUMNS["name"]["minwidth"]), available))
+        self.tree.column("name", width=max(self._col_widths["name"][1], available))
 
     def _sync_filter_labels(self, *_args) -> None:
         self.file_filter_label.set(label_for(FILE_FILTER_LABELS, self.file_filter.get()))
@@ -982,7 +1011,7 @@ class ImageManagerApp(tk.Tk):
             record.display_name,
             record.type_label,
             record.pick_status,
-            _rating_text(record.rating),
+            STAR_FILLED * record.rating if record.rating > 0 else "",
             record.short_datetime,
         )
 
@@ -1521,7 +1550,7 @@ class ImageManagerApp(tk.Tk):
             if not left_present:
                 self.paned.insert(0, self.left_pane, weight=1)
             if not self.details_frame.winfo_manager():
-                self.details_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=(1, 0), before=self.preview_frame)
+                self.details_frame.pack(side=tk.BOTTOM, fill=tk.X, pady=(1, 0))
             self.after(50, self._position_sash_for_layout)
 
         self.after(80, lambda: self._show_preview(self.current_record))
@@ -1543,7 +1572,7 @@ class ImageManagerApp(tk.Tk):
         left_width = int(width * (1 - image_fraction))
         if self.image_layout.get() == "50%":
             # Never clip the list columns; the preview gives way instead.
-            left_width = max(left_width, min(self._list_needed_width(), int(width * 0.68)))
+            left_width = max(left_width, min(self._list_needed_width(), int(width * 0.72)))
         self.paned.sashpos(0, max(220, left_width))
 
     def open_fullscreen_viewer(self) -> None:
@@ -1808,7 +1837,7 @@ class ImageManagerApp(tk.Tk):
 
 
 def _rating_text(rating: int) -> str:
-    return STAR_EMPTY if rating <= 0 else STAR_FILLED * rating
+    return "none" if rating <= 0 else STAR_FILLED * rating
 
 
 def _resolution_text(record: ImageRecord) -> str:
