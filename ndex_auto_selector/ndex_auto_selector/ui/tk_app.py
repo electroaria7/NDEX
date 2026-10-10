@@ -12,7 +12,7 @@ from ndex_common.settings import get_section, update_section
 from ndex_common.theme import apply_tk_theme, apply_window_icon, build_app_header, style_text_widget
 
 from ..core.models import AnalysisSummary
-from ..services.selector import AutoSelectorService
+from ..services.selector import AutoSelectorService, load_handoff
 
 SETTINGS_SECTION = "auto_selector"
 
@@ -24,8 +24,13 @@ class AutoSelectorApp(tk.Tk):
         initial_selected_jpg=None,
         initial_work_folder=None,
         retry_manifest: Path | None = None,
+        initial_handoff: Path | None = None,
     ):
         super().__init__()
+        self._initial_handoff = initial_handoff
+        # Exactly the JPGs an Image Manager handoff picked; None = scan the folder.
+        self.handoff_files: list[Path] | None = None
+        self._handoff_display = ""
         self._initial_raw_source = initial_raw_source
         self._initial_selected_jpg = initial_selected_jpg
         self._initial_work_folder = initial_work_folder
@@ -56,6 +61,7 @@ class AutoSelectorApp(tk.Tk):
         self._build_ui()
         self._bind_events()
         self._apply_initial_paths()
+        self._apply_initial_handoff()
         self._update_buttons()
         self.after(100, self._process_queue)
         if retry_manifest is not None:
@@ -88,6 +94,23 @@ class AutoSelectorApp(tk.Tk):
             self.work_folder_var.set(str(self._initial_work_folder))
         if self._initial_selected_jpg and not self._initial_raw_source:
             self.status_var.set("셀렉 JPG 폴더가 연동되었습니다. 원본 CR3 폴더를 선택하세요.")
+
+    def _apply_initial_handoff(self) -> None:
+        if self._initial_handoff is None:
+            return
+        try:
+            source, files = load_handoff(Path(self._initial_handoff))
+        except ValueError as exc:
+            messagebox.showerror(NDEX_AUTO_SELECTOR_TITLE, str(exc))
+            return
+        if not files:
+            messagebox.showinfo(NDEX_AUTO_SELECTOR_TITLE, "The handoff has no JPG files.")
+            return
+        display = str(source or files[0].parent)
+        self._handoff_display = display
+        self.handoff_files = files
+        self.selected_jpg_var.set(display)
+        self.status_var.set(f"Image Manager handoff: {len(files)} picked JPG(s).")
 
     def _build_ui(self) -> None:
         header = build_app_header(
@@ -201,6 +224,20 @@ class AutoSelectorApp(tk.Tk):
     def _bind_events(self) -> None:
         for variable in (self.raw_source_var, self.selected_jpg_var, self.work_folder_var):
             variable.trace_add("write", lambda *_: self._update_buttons())
+        # A changed source folder makes the stored analysis stale.
+        self.raw_source_var.trace_add("write", lambda *_: self._invalidate_analysis())
+        self.selected_jpg_var.trace_add("write", lambda *_: self._invalidate_analysis())
+
+    def _invalidate_analysis(self) -> None:
+        if self.handoff_files is not None and self.selected_jpg_var.get() != self._handoff_display:
+            # The user typed a different JPG folder: leave handoff mode.
+            self.handoff_files = None
+        if self.summary is None:
+            return
+        self.summary = None
+        self._clear_matches()
+        self._render_summary()
+        self._update_buttons()
 
     def _browse_raw_source(self) -> None:
         selected = filedialog.askdirectory(title="원본 CR3 폴더 선택")
@@ -279,7 +316,10 @@ class AutoSelectorApp(tk.Tk):
             # 다시 분석해야 한다. 사용자가 그 사이 빠진 CR3를 넣었거나
             # 중복을 정리했을 수 있고, 그것이 재실행의 이유다.
             summary = self.service.analyze(
-                Path(raw_source), Path(selected_jpg), recursive=options["recursive"]
+                Path(raw_source),
+                Path(selected_jpg),
+                recursive=options["recursive"],
+                exclude=Path(work_folder),
             )
             matches, dropped = self.service.matches_for(summary.matches, list(plan.paths))
             result = self._copy(matches, Path(work_folder), options)
@@ -305,14 +345,29 @@ class AutoSelectorApp(tk.Tk):
         self._log("분석 시작")
         self.worker_thread = threading.Thread(
             target=self._analysis_worker,
-            args=(Path(raw_source), Path(selected_jpg), self.recursive_var.get()),
+            args=(
+                Path(raw_source),
+                Path(selected_jpg),
+                self.recursive_var.get(),
+                Path(self.work_folder_var.get().strip()) if self.work_folder_var.get().strip() else None,
+                list(self.handoff_files) if self.handoff_files is not None else None,
+            ),
             daemon=True,
         )
         self.worker_thread.start()
 
-    def _analysis_worker(self, raw_source: Path, selected_jpg: Path, recursive: bool) -> None:
+    def _analysis_worker(
+        self,
+        raw_source: Path,
+        selected_jpg: Path,
+        recursive: bool,
+        exclude: Path | None = None,
+        jpg_files: list[Path] | None = None,
+    ) -> None:
         try:
-            summary = self.service.analyze(raw_source, selected_jpg, recursive=recursive)
+            summary = self.service.analyze(
+                raw_source, selected_jpg, recursive=recursive, exclude=exclude, jpg_files=jpg_files
+            )
             self.ui_queue.put(("analysis_done", summary))
         except Exception as exc:
             self.ui_queue.put(("error", str(exc)))
@@ -365,6 +420,14 @@ class AutoSelectorApp(tk.Tk):
         if self.summary is None:
             messagebox.showwarning("분석 필요", "먼저 매칭 분석을 실행하세요.")
             return
+        if (
+            Path(self.raw_source_var.get().strip()) != self.summary.raw_source_dir
+            or Path(self.selected_jpg_var.get().strip()) != self.summary.selected_jpg_dir
+        ):
+            self.summary = None
+            self._update_buttons()
+            messagebox.showwarning(NDEX_AUTO_SELECTOR_TITLE, "Folders changed. Run the match analysis again.")
+            return
         work_folder = self.work_folder_var.get().strip()
         if not work_folder:
             messagebox.showwarning("작업 폴더 필요", "CR3 파일을 복제할 작업용 폴더를 선택하세요.")
@@ -410,22 +473,46 @@ class AutoSelectorApp(tk.Tk):
     def _process_queue(self) -> None:
         try:
             while True:
-                event = self.ui_queue.get_nowait()
-                kind = event[0]
-                if kind == "analysis_done":
-                    self._handle_analysis_done(event[1])
-                elif kind == "copy_done":
-                    _, result, job = event
-                    self._handle_copy_done(result, job)
-                elif kind == "progress":
-                    _, current, total, name = event
-                    self.progress_var.set((current / total) * 100 if total else 0)
-                    self.status_var.set(f"복제 중: {current}/{total} {name}")
-                elif kind == "error":
-                    self._handle_error(event[1])
-        except queue.Empty:
+                try:
+                    event = self.ui_queue.get_nowait()
+                except queue.Empty:
+                    break
+                try:
+                    self._dispatch_event(event)
+                except Exception:
+                    self._report_handler_failure()
+        finally:
+            self.after(100, self._process_queue)
+
+    def _dispatch_event(self, event) -> None:
+        kind = event[0]
+        if kind == "analysis_done":
+            self._handle_analysis_done(event[1])
+        elif kind == "copy_done":
+            _, result, job = event
+            self._handle_copy_done(result, job)
+        elif kind == "progress":
+            _, current, total, name = event
+            self.progress_var.set((current / total) * 100 if total else 0)
+            self.status_var.set(f"\ubcf5\uc81c \uc911: {current}/{total} {name}")
+        elif kind == "error":
+            self._handle_error(event[1])
+
+    def _report_handler_failure(self) -> None:
+        """A handler crashed: log it and unfreeze the UI instead of leaving it busy."""
+        import sys
+
+        from ndex_common.crashlog import write_crash_log
+
+        exc_type, exc, tb = sys.exc_info()
+        write_crash_log("NDEX Auto Selector", exc_type, exc, tb)
+        try:
+            self.status_var.set("Job failed")
+            self._log(f"Error: {exc}")
+            self._set_busy(False)
+            messagebox.showerror(NDEX_AUTO_SELECTOR_TITLE, str(exc))
+        except Exception:
             pass
-        self.after(100, self._process_queue)
 
     def _handle_analysis_done(self, summary: AnalysisSummary) -> None:
         self.summary = summary
@@ -526,11 +613,13 @@ def run_app(
     initial_selected_jpg=None,
     initial_work_folder=None,
     retry_manifest: Path | None = None,
+    initial_handoff: Path | None = None,
 ) -> None:
     app = AutoSelectorApp(
         initial_raw_source=initial_raw_source,
         initial_selected_jpg=initial_selected_jpg,
         initial_work_folder=initial_work_folder,
         retry_manifest=retry_manifest,
+        initial_handoff=initial_handoff,
     )
     app.mainloop()

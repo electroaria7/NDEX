@@ -673,9 +673,34 @@ class ImageManagerApp(tk.Tk):
             messagebox.showinfo("XMP Export", message)
 
     def send_to_auto_selector(self) -> None:
-        args: list[str] = ["--open"]
+        if not self.catalog:
+            messagebox.showinfo(NDEX_IMAGE_MANAGER_TITLE, "Scan a folder first.")
+            return
+        from ndex_common.manifest import frame_ready_paths
+        from ndex_common.workflow import record_select_handoff
+
+        # Hand over exactly the picked JPGs. Passing the whole folder would let
+        # Auto Selector scan .dsb_cache thumbnails and select every RAW.
+        records = self.catalog.list_images(pick_filter="Pick")
+        files = frame_ready_paths(
+            record.file_path
+            for record in records
+            if record.media_type == "jpg" and Path(record.file_path).suffix.casefold() in (".jpg", ".jpeg")
+        )
+        if not files:
+            messagebox.showinfo(NDEX_IMAGE_MANAGER_TITLE, "No picked JPG files to send to Auto Selector.")
+            return
+        handoff = record_select_handoff(self.source_dir or files[0].parent, files)
+        if handoff is None:
+            messagebox.showerror(
+                NDEX_IMAGE_MANAGER_TITLE,
+                "Could not write the handoff file, so the picks were not sent. "
+                "Check that %LOCALAPPDATA%\\NDEX is writable.",
+            )
+            return
+        args: list[str] = ["--open", "--handoff", str(handoff)]
         if self.source_dir is not None:
-            args.extend(["--selected-jpg", str(self.source_dir)])
+            args.extend(["--raw-source", str(self.source_dir)])
         launched = launch_app("auto_selector", args)
         if not launched:
             messagebox.showerror(

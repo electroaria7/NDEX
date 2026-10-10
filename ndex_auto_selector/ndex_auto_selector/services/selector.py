@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import re
 from pathlib import Path
 
@@ -7,18 +8,65 @@ from ndex_common.filecopy import copy_verified
 
 from ndex_common.rating import read_jpg_rating
 from ndex_common.retry import path_key
-from ndex_common.xmp import write_xmp_sidecar
+from ndex_common.xmp import sidecar_paths_for_read, write_xmp_sidecar
 
 from ..core.models import AnalysisSummary, CopyResult, DuplicatePolicy, SelectionMatch
 
 JPG_EXTENSIONS = {".jpg", ".jpeg"}
 RAW_EXTENSIONS = {".cr3", ".cr2", ".arw", ".srf", ".sr2", ".nef", ".nrw"}
+# An ID must not sit inside a longer token: no letter/digit before it and no
+# further digit after it (IMG_1234 must not match IMG_12345).
 CAMERA_ID_PATTERNS = (
-    re.compile(r"IMG_\d{4}", re.IGNORECASE),   # Canon: IMG_0001
-    re.compile(r"_DSC\d{4}", re.IGNORECASE),   # Nikon (Adobe RGB): _DSC0001
-    re.compile(r"DSC_\d{4}", re.IGNORECASE),   # Nikon (sRGB): DSC_0001
-    re.compile(r"DSC\d{5}", re.IGNORECASE),    # Sony: DSC00001
+    re.compile(r"(?<![A-Za-z0-9])IMG_\d{4}(?!\d)", re.IGNORECASE),   # Canon: IMG_0001
+    re.compile(r"(?<![A-Za-z0-9])_DSC\d{4}(?!\d)", re.IGNORECASE),   # Nikon (Adobe RGB): _DSC0001
+    re.compile(r"(?<![A-Za-z0-9])DSC_\d{4}(?!\d)", re.IGNORECASE),   # Nikon (sRGB): DSC_0001
+    re.compile(r"(?<![A-Za-z0-9])DSC\d{5}(?!\d)", re.IGNORECASE),    # Sony: DSC00001
 )
+CACHE_DIR_NAME = ".dsb_cache"
+
+
+def load_handoff(manifest_path: Path) -> tuple[Path | None, list[Path]]:
+    """Read an Image Manager select_handoff: (source folder, picked JPG files)."""
+    from ndex_common.manifest import handoff_files, load_manifest
+
+    manifest = load_manifest(Path(manifest_path))
+    if manifest is None:
+        raise ValueError(f"Not a valid handoff manifest: {manifest_path}")
+    source = manifest.get("source") or (manifest.get("folders") or {}).get("source")
+    files = [path for path in handoff_files(manifest) if path.suffix.casefold() in JPG_EXTENSIONS]
+    return (Path(str(source)) if source else None), files
+
+
+def _sha256(path: Path) -> bytes:
+    value = hashlib.sha256()
+    with path.open("rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            value.update(block)
+    return value.digest()
+
+
+def _identical_files(first: Path, second: Path) -> bool:
+    try:
+        if first.stat().st_size != second.stat().st_size:
+            return False
+        return _sha256(first) == _sha256(second)
+    except OSError:
+        return False
+
+
+def _resolved(path: Path) -> Path:
+    try:
+        return Path(path).resolve()
+    except OSError:
+        return Path(path).absolute()
+
+
+def _is_within(path: Path, folder: Path) -> bool:
+    try:
+        _resolved(path).relative_to(folder)
+    except ValueError:
+        return False
+    return True
 SELECTED_LABEL = "NDEX Selected"
 
 
@@ -28,14 +76,35 @@ class AutoSelectorService:
         raw_source_dir: Path,
         selected_jpg_dir: Path,
         recursive: bool = True,
+        exclude: Path | None = None,
+        jpg_files: list[Path] | None = None,
     ) -> AnalysisSummary:
+        """Match selected JPGs to RAWs.
+
+        ``exclude`` (the work folder) is not indexed for RAWs, so copies made
+        there never make later analyses ambiguous. ``jpg_files`` restricts the
+        selection to exactly those files (an Image Manager handoff) instead of
+        scanning ``selected_jpg_dir``.
+        """
         raw_source_dir = Path(raw_source_dir)
         selected_jpg_dir = Path(selected_jpg_dir)
         self._require_dir(raw_source_dir, "CR3 source folder")
         self._require_dir(selected_jpg_dir, "selected JPG folder")
 
-        raw_by_stem = self._index_cr3_files(raw_source_dir, recursive=recursive)
-        jpg_files = self._list_jpg_files(selected_jpg_dir, recursive=recursive)
+        raw_by_stem = self._index_cr3_files(raw_source_dir, recursive=recursive, exclude=exclude)
+        if jpg_files is None:
+            jpg_files = self._list_jpg_files(selected_jpg_dir, recursive=recursive)
+        else:
+            jpg_files = sorted(
+                (
+                    Path(path)
+                    for path in jpg_files
+                    if Path(path).suffix.casefold() in JPG_EXTENSIONS
+                    and not Path(path).name.startswith("._")
+                    and Path(path).is_file()
+                ),
+                key=lambda path: str(path).casefold(),
+            )
         matches = []
         for jpg_path in jpg_files:
             raw_path, status = self._find_matching_raw(raw_by_stem, jpg_path.stem)
@@ -66,6 +135,7 @@ class AutoSelectorService:
         work_folder = Path(work_folder)
         work_folder.mkdir(parents=True, exist_ok=True)
         result = CopyResult(total=len(matches))
+        copied_sources: set[str] = set()
 
         for index, match in enumerate(matches, start=1):
             try:
@@ -86,6 +156,18 @@ class AutoSelectorService:
                     )
                     continue
 
+                source_key = path_key(match.raw_path)
+                if source_key in copied_sources:
+                    result.skipped += 1
+                    result.messages.append(
+                        f"skipped {match.raw_path.name} for {match.jpg_path.name}: already copied in this run"
+                    )
+                    result.items.append(
+                        {"path": str(match.jpg_path), "status": "skipped", "detail": "already copied in this run"}
+                    )
+                    continue
+                copied_sources.add(source_key)
+
                 effective_rating = xmp_rating
                 if rating_from_jpg:
                     jpg_rating = read_jpg_rating(match.jpg_path)
@@ -93,6 +175,35 @@ class AutoSelectorService:
                         effective_rating = jpg_rating
 
                 destination_path = work_folder / match.raw_path.name
+                if (
+                    duplicate_policy == "rename"
+                    and destination_path.exists()
+                    and _identical_files(match.raw_path, destination_path)
+                ):
+                    # A re-run (or a retry after an XMP failure) must not clone
+                    # the RAW as _001. Existing sidecars stay untouched; only a
+                    # missing one is created, so a failed XMP write can recover.
+                    detail = "identical copy already in work folder"
+                    if write_xmp and not any(p.exists() for p in sidecar_paths_for_read(destination_path)):
+                        try:
+                            self._write_selected_xmp(destination_path, effective_rating, xmp_label)
+                            result.xmp_written += 1
+                            detail += "; XMP written"
+                        except Exception as exc:
+                            result.errors += 1
+                            result.messages.append(f"{match.file_stem}: XMP write failed: {exc}")
+                            result.items.append(
+                                {
+                                    "path": str(match.jpg_path),
+                                    "status": "failed",
+                                    "detail": f"RAW already at {destination_path}; XMP write failed: {exc}",
+                                }
+                            )
+                            continue
+                    result.skipped += 1
+                    result.messages.append(f"skipped existing {destination_path.name}: {detail}")
+                    result.items.append({"path": str(destination_path), "status": "skipped", "detail": detail})
+                    continue
                 final_path, action = self._resolve_duplicate(destination_path, duplicate_policy)
                 if action == "skip":
                     result.skipped += 1
@@ -102,13 +213,27 @@ class AutoSelectorService:
                     )
                     continue
                 copy_verified(match.raw_path, final_path, overwrite=action == "overwrite")
+                if write_xmp:
+                    try:
+                        self._write_selected_xmp(final_path, effective_rating, xmp_label)
+                    except Exception as exc:
+                        # The RAW is in the work folder; report one failure for
+                        # this JPG rather than copied + failed.
+                        result.errors += 1
+                        result.messages.append(f"{match.file_stem}: XMP write failed: {exc}")
+                        result.items.append(
+                            {
+                                "path": str(match.jpg_path),
+                                "status": "failed",
+                                "detail": f"RAW copied to {final_path}; XMP write failed: {exc}",
+                            }
+                        )
+                        continue
+                    result.xmp_written += 1
                 if action == "overwrite":
                     result.overwritten += 1
                 result.copied += 1
                 result.items.append({"path": str(final_path), "status": "copied"})
-                if write_xmp:
-                    self._write_selected_xmp(final_path, effective_rating, xmp_label)
-                    result.xmp_written += 1
             except Exception as exc:  # pragma: no cover - filesystem errors vary
                 result.errors += 1
                 result.messages.append(f"{match.file_stem}: {exc}")
@@ -153,15 +278,23 @@ class AutoSelectorService:
             result.items.append({"path": str(path), "status": "missing", "detail": detail})
 
     @staticmethod
-    def _index_cr3_files(root: Path, recursive: bool) -> dict[str, list[Path]]:
+    def _index_cr3_files(root: Path, recursive: bool, exclude: Path | None = None) -> dict[str, list[Path]]:
         files = root.rglob("*") if recursive else root.glob("*")
+        excluded = _resolved(exclude) if exclude is not None else None
         raw_files = sorted(
-            (path for path in files if path.is_file() and path.suffix.casefold() in RAW_EXTENSIONS),
+            (
+                path
+                for path in files
+                if path.suffix.casefold() in RAW_EXTENSIONS
+                and not path.name.startswith("._")
+                and path.is_file()
+                and not (excluded is not None and _is_within(path, excluded))
+            ),
             key=lambda path: (path.stem.casefold(), len(path.parts), str(path).casefold()),
         )
         index: dict[str, list[Path]] = {}
         for path in raw_files:
-            for key in AutoSelectorService._match_keys(path.stem):
+            for key in AutoSelectorService._match_keys(path.stem, anchored=True):
                 bucket = index.setdefault(key, [])
                 if path not in bucket:
                     bucket.append(path)
@@ -171,8 +304,15 @@ class AutoSelectorService:
     def _find_matching_raw(
         raw_by_stem: dict[str, list[Path]], jpg_stem: str
     ) -> tuple[Path | None, str]:
+        stem_key = jpg_stem.casefold()
+        # The exact file name wins over any camera-ID overlap.
+        exact = [path for path in raw_by_stem.get(stem_key, ()) if path.stem.casefold() == stem_key]
+        if exact:
+            return (exact[0], "matched") if len(exact) == 1 else (None, "ambiguous")
         candidates: list[Path] = []
         for key in AutoSelectorService._match_keys(jpg_stem):
+            if key == stem_key:
+                continue
             for path in raw_by_stem.get(key, ()):
                 if path not in candidates:
                     candidates.append(path)
@@ -183,17 +323,32 @@ class AutoSelectorService:
         return None, "missing"
 
     @staticmethod
-    def _match_keys(stem: str) -> list[str]:
+    def _match_keys(stem: str, anchored: bool = False) -> list[str]:
+        """Lookup keys for a file stem: the stem, plus camera IDs inside it.
+
+        ``anchored`` (RAW side) keeps only IDs at the start of the stem, so a
+        RAW named ``Trip_IMG_1234`` is not claimed by ``IMG_1234.jpg``.
+        """
         keys = [stem.casefold()]
         for pattern in CAMERA_ID_PATTERNS:
-            keys.extend(match.group(0).casefold() for match in pattern.finditer(stem))
+            for match in pattern.finditer(stem):
+                if anchored and match.start() != 0:
+                    continue
+                keys.append(match.group(0).casefold())
         return list(dict.fromkeys(keys))
 
     @staticmethod
     def _list_jpg_files(root: Path, recursive: bool) -> list[Path]:
         files = root.rglob("*") if recursive else root.glob("*")
         return sorted(
-            (path for path in files if path.is_file() and path.suffix.casefold() in JPG_EXTENSIONS),
+            (
+                path
+                for path in files
+                if path.suffix.casefold() in JPG_EXTENSIONS
+                and not path.name.startswith("._")
+                and CACHE_DIR_NAME not in path.relative_to(root).parts
+                and path.is_file()
+            ),
             key=lambda path: str(path).casefold(),
         )
 
