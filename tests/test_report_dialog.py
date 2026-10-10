@@ -65,6 +65,16 @@ class JobReportWindowTests(unittest.TestCase):
         listing = window.item_text.get("1.0", tk.END)
         self.assertLess(listing.index("failed"), listing.index("copied"))
 
+    def test_success_and_skip_details_remain_visible(self) -> None:
+        report = _report(items=(
+            JobItem(path="a.CR3", status="copied", detail="chosen by user"),
+            JobItem(path="b.CR3", status="skipped", detail="already exists; RAW and XMP preserved"),
+        ))
+        window = self._open([report])
+        listing = window.item_text.get("1.0", tk.END)
+        self.assertIn("a.CR3 — chosen by user", listing)
+        self.assertIn("b.CR3 — already exists; RAW and XMP preserved", listing)
+
     def test_jobs_with_problems_are_flagged_in_the_list(self) -> None:
         clean = _report(counts={"copied": 3}, items=(JobItem(path="a.CR3", status="copied"),))
         window = self._open([_report(), clean])
@@ -371,6 +381,91 @@ class SelectOnOpenTests(unittest.TestCase):
         read.assert_called_once_with(Path("C:/m/backup-0.json"))
         self.assertIs(window.current, aged)
 
+
+
+
+class LayoutAndSelectionTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.root = tk.Tk()
+        self.root.withdraw()
+        self.addCleanup(self._close_root)
+
+    def _close_root(self) -> None:
+        self.root.destroy()
+        del self.root
+        gc.collect()
+
+    def _open(self, reports, **kwargs):
+        window = report_dialog.JobReportWindow(self.root, title="NDEX One", reports=reports, **kwargs)
+        # The hidden root would keep a transient child hidden, and nothing
+        # about layout or key handling can be checked on an unmapped window.
+        window.transient("")
+        window.deiconify()
+        window.update()
+        self.addCleanup(window.destroy)
+        return window
+
+    def _clean(self, name="clean.json"):
+        return _report(manifest_path=Path(name), counts={"copied": 3},
+                       items=(JobItem(path="a.CR3", status="copied"),))
+
+    def test_newest_job_with_problems_is_preselected(self) -> None:
+        window = self._open([self._clean("new.json"), _report(manifest_path=Path("bad.json"))])
+        self.assertEqual(window.job_list.selection(), ("1",))
+        self.assertEqual(window.current.manifest_path, Path("bad.json"))
+
+    def test_newest_job_is_preselected_when_nothing_failed(self) -> None:
+        window = self._open([self._clean("new.json"), self._clean("old.json")])
+        self.assertEqual(window.job_list.selection(), ("0",))
+
+    def test_problem_rows_keep_a_warning_prefix_in_their_text(self) -> None:
+        window = self._open([_report(), self._clean()])
+        self.assertTrue(window.job_list.set("0", "job").startswith("\u26a0"))
+        self.assertFalse(window.job_list.set("1", "job").startswith("\u26a0"))
+
+    def test_problem_items_read_name_dash_reason_with_folder_below(self) -> None:
+        bad = _report(items=(JobItem(path="E:/DCIM/b.CR3", status="failed", detail="disk full"),))
+        window = self._open([bad])
+        listing = window.item_text.get("1.0", tk.END)
+        self.assertIn("\u26a0 b.CR3 \u2014 disk full\nE:/DCIM\n", listing)
+
+    def test_actions_are_on_two_rows_and_close_is_bottom_right(self) -> None:
+        window = self._open([_report()], retry=lambda _plan: None)
+        window.geometry("760x460")
+        window.update()
+        top = {window.retry_button.winfo_rooty(), window.copy_button.winfo_rooty()}
+        bottom = {window.source_button.winfo_rooty(), window.destination_button.winfo_rooty(),
+                  window.manifest_button.winfo_rooty()}
+        self.assertEqual(len(top), 1)
+        self.assertEqual(len(bottom), 1)
+        self.assertLess(max(top), min(bottom))
+        for button in (window.retry_button, window.copy_button, window.manifest_button, window.close_button):
+            self.assertLessEqual(button.winfo_rootx() + button.winfo_width(), window.winfo_rootx() + window.winfo_width())
+            self.assertLessEqual(button.winfo_rooty() + button.winfo_height(), window.winfo_rooty() + window.winfo_height())
+        self.assertGreater(window.close_button.winfo_rooty(), window.manifest_button.winfo_rooty())
+        self.assertGreater(window.close_button.winfo_rootx(), window.winfo_rootx() + window.winfo_width() // 2)
+
+    def test_detail_pane_is_wider_than_the_job_list(self) -> None:
+        window = self._open([_report(), self._clean()])
+        window.geometry("760x460")
+        window.update()
+        list_width = window.job_list.winfo_width()
+        text_width = window.item_text.winfo_width()
+        self.assertGreater(text_width, list_width * 0.9)
+        self.assertGreater(text_width, 250)
+
+    def test_escape_closes_the_window(self) -> None:
+        window = self._open([_report()])
+        window.focus_force()
+        window.update()
+        window.event_generate("<Escape>")
+        window.update()
+        self.assertFalse(window.winfo_exists())
+
+    def test_empty_state_dialog_is_titled_job_results(self) -> None:
+        with patch.object(report_dialog.messagebox, "showinfo") as info:
+            report_dialog.open_job_reports(self.root, title="NDEX One", reports=[])
+        self.assertEqual(info.call_args.args[0], "Job Results")
 
 
 if __name__ == "__main__":

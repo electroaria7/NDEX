@@ -325,7 +325,7 @@ class TkTaskSafetyTests(unittest.TestCase):
         self.assertFalse(self.app._closing)
         warning.assert_called_once()
         self.assertEqual(len(list(self.work.glob("*.CR3"))), 3)
-        self.assertIn("저장하지 못했습니다", self.app.status_var.get())
+        self.assertIn("Couldn't save the job record", self.app.status_var.get())
         self.assertTrue(all(str(widget.cget("state")) == state
                             for widget, state in self.app._input_widgets))
 
@@ -348,7 +348,7 @@ class TkTaskSafetyTests(unittest.TestCase):
             self._pump_until(lambda: not self.app._busy)
         self.assertFalse(self.app._closed)
         self.assertFalse(self.app._closing)
-        error.assert_called_once_with("오류", "destination unavailable")
+        error.assert_called_once_with("Error", "destination unavailable")
         self.assertTrue(all(str(widget.cget("state")) == state
                             for widget, state in self.app._input_widgets))
 

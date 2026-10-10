@@ -55,9 +55,34 @@ class ThemedLauncherTests(unittest.TestCase):
         app.refresh_status()
 
         first_card = app._cards["ndex_one"]
-        button_texts = [child.cget("text") for child in first_card.winfo_children() if child.winfo_class() == "TButton"]
-        self.assertIn("Open", button_texts)
+        def buttons_in(widget):
+            found = []
+            for child in widget.winfo_children():
+                if child.winfo_class() == "TButton":
+                    found.append(child.cget("text"))
+                found.extend(buttons_in(child))
+            return found
+
+        button_texts = buttons_in(first_card)
+        self.assertTrue({"Open", "Continue"} & set(button_texts))
         self.assertEqual(app.cget("bg"), theme.APP_BG)
+
+    def test_secondary_buttons_are_visibly_buttons(self) -> None:
+        root = tk.Tk()
+        self.addCleanup(root.destroy)
+        style = theme.apply_tk_theme(root)
+        face = style.lookup("TButton", "background")
+        self.assertNotIn(face.lower(), (theme.APP_BG.lower(), theme.CARD_BG.lower()))
+        self.assertEqual(style.lookup("TButton", "bordercolor"), theme.BUTTON_BORDER)
+        self.assertNotEqual(style.lookup("TButton", "bordercolor"), theme.BORDER)
+        self.assertEqual(style.lookup("Accent.TButton", "background"), theme.ACCENT)
+
+    def test_tooltip_resolves_callable_text(self) -> None:
+        root = tk.Tk()
+        self.addCleanup(root.destroy)
+        label = tk.Label(root, text="x")
+        tip = theme.add_tooltip(label, lambda: "full path")
+        self.assertEqual(tip.current_text(), "full path")
 
 
 if __name__ == "__main__":

@@ -1,23 +1,273 @@
 from __future__ import annotations
 
+import os
 import queue
+import subprocess
+import sys
 import threading
 import tkinter as tk
+from datetime import datetime
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 from src.branding import NDEX_AUTO_SELECTOR_TITLE
 
 from ndex_common.settings import get_section, update_section
-from ndex_common.theme import apply_tk_theme, apply_window_icon, build_app_header, style_text_widget
+from ndex_common.theme import (
+    apply_tk_theme,
+    apply_window_icon,
+    build_app_header,
+    style_text_widget,
+)
 
-from ..core.models import AnalysisSummary, CopyResult
-from ..services.selector import AnalysisCancelled, AutoSelectorService, load_handoff
+from ..core.models import AnalysisSummary, CopyResult, SelectionMatch
+from ..services.selector import AnalysisCancelled, AutoSelectorService, load_handoff, shared_camera_id
 
 SETTINGS_SECTION = "auto_selector"
 
+STATUS_LABELS = {
+    "matched": "✔ Matched",
+    "ambiguous": "⚠ Multiple RAW found",
+    "missing": "✖ No RAW found",
+    "chosen": "✔ Chosen",
+}
+
+# Policy key (stored in settings and passed to the service) -> label shown to the user.
+DUPLICATE_LABELS = {
+    "rename": "Keep both (add _001)",
+    "skip": "Skip existing",
+    "overwrite": "Replace existing (cannot be undone)",
+}
+PLACEHOLDER_TEXT = "Choose folders, then press Analyze Matches."
+
+
+# --- Wording helpers (pure, unit-tested) -------------------------------------
+
+
+def relative_folder(raw_path: Path | None, raw_root: Path | None) -> str:
+    """Folder of ``raw_path`` relative to the RAW folder; an em dash for the top level."""
+    if raw_path is None:
+        return ""
+    folder = raw_path.parent
+    if raw_root is not None:
+        try:
+            relative = folder.relative_to(raw_root)
+        except ValueError:
+            return str(folder)
+        return str(relative) if str(relative) != "." else "—"
+    return str(folder)
+
+
+def banner_for_analysis(summary: AnalysisSummary) -> str:
+    return (
+        f"{summary.selected_count} picked · {summary.copyable_count} will copy · "
+        f"{summary.ambiguous_count} need your choice · {summary.missing_count} RAW not found"
+    )
+
+
+def banner_for_copy(result: CopyResult) -> str:
+    return (
+        f"Copied {result.copied} · Skipped {result.skipped + result.ambiguous} · "
+        f"Not found {result.missing} · Failed {result.errors}"
+    )
+
+
+def hint_for_match(match: SelectionMatch | None, recursive: bool = True) -> str:
+    """The line under the tree that explains the selected row."""
+    if match is None:
+        return ""
+    if match.status == "missing":
+        advice = "Check the folder." if recursive else "Check the folder or turn on Include subfolders."
+        return f"No RAW named {match.file_stem} in the RAW folder. {advice}"
+    if match.status == "ambiguous":
+        return "Several RAW files match this photo. Choose one with Choose RAW…"
+    if match.raw_path is None:
+        return ""
+    if match.status == "chosen":
+        return f"{match.raw_path} — chosen by you"
+    if match.match_kind == "camera_id":
+        camera = shared_camera_id(match.jpg_path.stem, match.raw_path.stem)
+        kind = f"camera number {camera}" if camera else "camera number"
+    else:
+        kind = "exact name"
+    return f"{match.raw_path} — {kind}"
+
+
+def format_size(size: int) -> str:
+    value = float(size)
+    for unit in ("B", "KB", "MB", "GB"):
+        if value < 1024 or unit == "GB":
+            return f"{int(value)} {unit}" if unit == "B" else f"{value:.1f} {unit}"
+        value /= 1024
+    return f"{size} B"
+
+
+def candidate_rows(match: SelectionMatch, raw_root: Path | None) -> list[tuple[str, str, str, str]]:
+    """(folder, file, size, modified) for each RAW that could belong to the photo."""
+    rows = []
+    for path in match.candidates:
+        try:
+            info = path.stat()
+            size = format_size(info.st_size)
+            modified = datetime.fromtimestamp(info.st_mtime).strftime("%Y-%m-%d %H:%M")
+        except OSError:
+            size = modified = "?"
+        rows.append((relative_folder(path, raw_root), path.name, size, modified))
+    return rows
+
+
+def handoff_text(count: int, folder: str) -> str:
+    noun = "photo" if count == 1 else "photos"
+    return f"{count} {noun} picked in Image Manager (from {folder})"
+
+
+def open_folder(folder: str | Path) -> None:
+    folder = str(folder)
+    try:
+        if sys.platform == "win32":
+            os.startfile(folder)  # noqa: S606 - opens the folder in Explorer
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", folder])
+        else:
+            subprocess.Popen(["xdg-open", folder])
+    except OSError as exc:
+        messagebox.showerror("Error", f"Couldn't open the folder: {exc}")
+
+
+# --- Dialogs -----------------------------------------------------------------
+
+
+class ChooseRawDialog(tk.Toplevel):
+    """Modal list of the RAW files that fit one photo. ``result`` is set on exit."""
+
+    def __init__(self, parent: tk.Misc, match: SelectionMatch, raw_root: Path | None):
+        super().__init__(parent)
+        self.match = match
+        # ("choose", Path) | ("skip", None) | None (cancelled)
+        self.result: tuple[str, Path | None] | None = None
+        self.title("Choose RAW")
+        self.configure(bg="#FFFFFF")
+        self.transient(parent)
+        self.resizable(True, False)
+
+        frame = ttk.Frame(self, padding=16, style="CardInner.TFrame")
+        frame.pack(fill=tk.BOTH, expand=True)
+        frame.columnconfigure(0, weight=1)
+        ttk.Label(
+            frame,
+            text=f"Several RAW files match {match.jpg_path.name}. Choose the one to copy.",
+            style="Card.TLabel",
+            wraplength=540,
+        ).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 8))
+
+        columns = ("folder", "file", "size", "modified")
+        self.tree = ttk.Treeview(frame, columns=columns, show="headings", height=min(max(len(match.candidates), 3), 8))
+        for column, text, width in (
+            ("folder", "Folder", 190), ("file", "File", 130), ("size", "Size", 70), ("modified", "Modified", 120),
+        ):
+            self.tree.heading(column, text=text)
+            self.tree.column(column, width=width, anchor="w")
+        self.tree.grid(row=1, column=0, sticky="nsew")
+        scroll = ttk.Scrollbar(frame, orient="vertical", command=self.tree.yview)
+        scroll.grid(row=1, column=1, sticky="ns")
+        self.tree.configure(yscrollcommand=scroll.set)
+        for index, row in enumerate(candidate_rows(match, raw_root)):
+            self.tree.insert("", tk.END, iid=str(index), values=row)
+        current = match.candidates.index(match.raw_path) if match.raw_path in match.candidates else 0
+        if match.candidates:
+            self.tree.selection_set(str(current))
+            self.tree.focus(str(current))
+
+        buttons = ttk.Frame(frame, style="CardInner.TFrame")
+        buttons.grid(row=2, column=0, columnspan=2, sticky="e", pady=(12, 0))
+        self.use_button = ttk.Button(buttons, text="Use Selected RAW", style="Accent.TButton", command=self._choose)
+        self.use_button.pack(side=tk.LEFT, padx=(0, 8))
+        ttk.Button(buttons, text="Skip this photo", command=self._skip).pack(side=tk.LEFT, padx=(0, 8))
+        ttk.Button(buttons, text="Cancel", command=self.destroy).pack(side=tk.LEFT)
+
+        self.tree.bind("<Double-1>", lambda _e: self._choose())
+        self.tree.bind("<Return>", lambda _e: self._choose())
+        self.bind("<Escape>", lambda _e: self.destroy())
+        self.update_idletasks()
+        self._center(parent)
+        self.tree.focus_set()
+        try:
+            self.grab_set()
+        except tk.TclError:
+            pass
+
+    def _center(self, parent: tk.Misc) -> None:
+        try:
+            x = parent.winfo_rootx() + max((parent.winfo_width() - self.winfo_reqwidth()) // 2, 0)
+            y = parent.winfo_rooty() + max((parent.winfo_height() - self.winfo_reqheight()) // 3, 0)
+            self.geometry(f"+{x}+{y}")
+        except tk.TclError:
+            pass
+
+    def _choose(self) -> None:
+        selection = self.tree.selection()
+        if not selection:
+            return
+        self.result = ("choose", self.match.candidates[int(selection[0])])
+        self.destroy()
+
+    def _skip(self) -> None:
+        self.result = ("skip", None)
+        self.destroy()
+
+
+class CopyDoneDialog(tk.Toplevel):
+    """Non-blocking completion message with the two obvious next steps."""
+
+    def __init__(self, parent: tk.Misc, result: CopyResult, work_folder: str, on_results):
+        super().__init__(parent)
+        problems = result.errors > 0
+        self.title("Copy finished with problems" if problems else "Copy complete")
+        self.configure(bg="#FFFFFF")
+        self.transient(parent)
+        self.resizable(False, False)
+        frame = ttk.Frame(self, padding=16, style="CardInner.TFrame")
+        frame.pack(fill=tk.BOTH, expand=True)
+        ttk.Label(frame, text=banner_for_copy(result), style="CardSection.TLabel").pack(anchor="w")
+        notes = []
+        if result.ambiguous:
+            notes.append(f"{result.ambiguous} photo(s) have several RAW matches and were skipped. "
+                         "Choose a RAW for them, then copy again.")
+        if result.missing:
+            notes.append(f"{result.missing} photo(s) have no RAW in the RAW folder.")
+        if result.skipped:
+            notes.append(f"{result.skipped} RAW file(s) were already in the work folder.")
+        if result.errors:
+            notes.append(f"{result.errors} file(s) failed. Open Job Results to retry them.")
+        for note in notes:
+            ttk.Label(frame, text=note, style="CardMuted.TLabel", wraplength=420, justify="left").pack(
+                anchor="w", pady=(6, 0)
+            )
+        buttons = ttk.Frame(frame, style="CardInner.TFrame")
+        buttons.pack(anchor="e", pady=(14, 0))
+        open_button = ttk.Button(
+            buttons, text="Open Work Folder", style="Accent.TButton",
+            command=lambda: (open_folder(work_folder), self.destroy()),
+        )
+        open_button.pack(side=tk.LEFT, padx=(0, 8))
+        ttk.Button(
+            buttons, text="Job Results…", command=lambda: (self.destroy(), on_results()),
+        ).pack(side=tk.LEFT, padx=(0, 8))
+        ttk.Button(buttons, text="Close", command=self.destroy).pack(side=tk.LEFT)
+        self.bind("<Escape>", lambda _e: self.destroy())
+        self.update_idletasks()
+        try:
+            x = parent.winfo_rootx() + max((parent.winfo_width() - self.winfo_reqwidth()) // 2, 0)
+            y = parent.winfo_rooty() + max((parent.winfo_height() - self.winfo_reqheight()) // 3, 0)
+            self.geometry(f"+{x}+{y}")
+        except tk.TclError:
+            pass
+        open_button.focus_set()
+
 
 class AutoSelectorApp(tk.Tk):
+    show_completion_dialog = True
+
     def __init__(
         self,
         initial_raw_source=None,
@@ -50,17 +300,24 @@ class AutoSelectorApp(tk.Tk):
         self._closed = False
         self._analysis_context = None
         self._input_widgets: list[tuple[ttk.Widget, str]] = []
+        self._xmp_dependents: list[ttk.Widget] = []
+        self._wrapped_labels: list[ttk.Label] = []
+        self._label_indent: dict[ttk.Label, int] = {}
+        self._completion_dialog: tk.Toplevel | None = None
 
         self.raw_source_var = tk.StringVar()
         self.selected_jpg_var = tk.StringVar()
+        self.selected_display_var = tk.StringVar()
         self.work_folder_var = tk.StringVar()
         self.recursive_var = tk.BooleanVar(value=True)
         self.duplicate_var = tk.StringVar(value="rename")
+        self.duplicate_label_var = tk.StringVar(value=DUPLICATE_LABELS["rename"])
         self.write_xmp_var = tk.BooleanVar(value=True)
         self.xmp_rating_var = tk.StringVar(value="5")
         self.rating_from_jpg_var = tk.BooleanVar(value=False)
-        self.status_var = tk.StringVar(value="원본 RAW 폴더와 셀렉 JPG 폴더를 선택하세요.")
-        self.summary_var = tk.StringVar(value="분석 전입니다.")
+        self.status_var = tk.StringVar(value="Choose the RAW folder and the selected-JPGs folder.")
+        self.banner_var = tk.StringVar(value="")
+        self.hint_var = tk.StringVar(value="")
         self.progress_var = tk.DoubleVar(value=0.0)
 
         apply_tk_theme(self)
@@ -69,11 +326,12 @@ class AutoSelectorApp(tk.Tk):
         self._apply_initial_paths()
         self._apply_initial_handoff()
         self._update_buttons()
+        self._sync_placeholder()
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         self._queue_after_id = self.after(100, self._process_queue)
         if retry_manifest is not None:
-            # Launcher에서 넘어온 job. 여기서 열고, 재실행은 설정이 보이는
-            # 이 창에서 사용자가 직접 누른다.
+            # A job handed over by the launcher. It opens here; the retry itself is
+            # started by the user in this window, where the settings are visible.
             self.after(150, lambda: self.open_job_results(select=Path(retry_manifest)))
 
     def _apply_initial_paths(self) -> None:
@@ -92,7 +350,7 @@ class AutoSelectorApp(tk.Tk):
             self.rating_from_jpg_var.set(bool(stored["rating_from_jpg"]))
         if "recursive" in stored:
             self.recursive_var.set(bool(stored["recursive"]))
-        if stored.get("duplicate_policy"):
+        if stored.get("duplicate_policy") in DUPLICATE_LABELS:
             self.duplicate_var.set(stored["duplicate_policy"])
 
         if self._initial_raw_source:
@@ -102,7 +360,7 @@ class AutoSelectorApp(tk.Tk):
         if self._initial_work_folder:
             self.work_folder_var.set(str(self._initial_work_folder))
         if self._initial_selected_jpg and not self._initial_raw_source:
-            self.status_var.set("셀렉 JPG 폴더가 연동되었습니다. 원본 RAW 폴더를 선택하세요.")
+            self.status_var.set("Selected JPGs folder linked. Choose the RAW folder.")
 
     def _apply_initial_handoff(self) -> None:
         if self._initial_handoff is None:
@@ -119,7 +377,10 @@ class AutoSelectorApp(tk.Tk):
         self._handoff_display = display
         self.handoff_files = files
         self.selected_jpg_var.set(display)
-        self.status_var.set(f"Image Manager handoff: {len(files)} picked JPG(s).")
+        self._refresh_handoff_ui()
+        self.status_var.set(f"Image Manager handoff: {len(files)} photos picked.")
+
+    # --- layout ---------------------------------------------------------------
 
     def _build_ui(self) -> None:
         header = build_app_header(
@@ -132,117 +393,176 @@ class AutoSelectorApp(tk.Tk):
 
         body = ttk.Panedwindow(self, orient=tk.HORIZONTAL)
         body.pack(fill=tk.BOTH, expand=True, padx=16, pady=(0, 16))
-        left = ttk.Frame(body, padding=16, style="Card.TFrame")
-        right = ttk.Frame(body, padding=16, style="Card.TFrame")
+        left = ttk.Frame(body, padding=(14, 10), style="Card.TFrame")
+        right = ttk.Frame(body, padding=(14, 10), style="Card.TFrame")
         body.add(left, weight=2)
         body.add(right, weight=3)
+        self.left_panel = left
 
-        left.columnconfigure(1, weight=1)
-        self._path_row(left, 0, "원본 RAW 폴더 (CR3/CR2/ARW/NEF)", self.raw_source_var, self._browse_raw_source)
-        self._path_row(left, 2, "셀렉 JPG 폴더", self.selected_jpg_var, self._browse_selected_jpg)
-        self._path_row(left, 4, "작업용 폴더", self.work_folder_var, self._browse_work_folder)
+        left.columnconfigure(0, weight=1)
+        self.raw_entry, _ = self._path_row(
+            left, 0, "RAW folder (CR3, CR2, ARW, NEF…)", self.raw_source_var, self._browse_raw_source)
+        self.selected_entry, self.selected_browse = self._path_row(
+            left, 2, "Selected JPGs folder", self.selected_jpg_var, self._browse_selected_jpg)
+        self.work_entry, _ = self._path_row(
+            left, 4, "Work folder (RAW copies go here)", self.work_folder_var, self._browse_work_folder)
+        # Handoff mode swaps the browse button for this one.
+        self.use_folder_button = ttk.Button(
+            left, text="Use a folder instead", command=self._leave_handoff)
+        self.use_folder_button.grid(row=2, column=0, columnspan=3, sticky="e")
+        self.use_folder_button.grid_remove()
 
         recursive_check = ttk.Checkbutton(
-            left, text="하위 폴더까지 검색", variable=self.recursive_var, style="Card.TCheckbutton"
+            left, text="Include subfolders", variable=self.recursive_var, style="Card.TCheckbutton"
         )
-        recursive_check.grid(row=6, column=0, columnspan=3, sticky="w", pady=(8, 10))
+        recursive_check.grid(row=6, column=0, columnspan=3, sticky="w", pady=(0, 6))
         self._input_widgets.append((recursive_check, "normal"))
 
-        ttk.Label(left, text="중복 파일 처리", style="CardSection.TLabel").grid(row=7, column=0, sticky="w")
+        ttk.Label(left, text="If a file already exists", style="Card.TLabel").grid(row=7, column=0, sticky="w")
         duplicate_combo = ttk.Combobox(
             left,
-            textvariable=self.duplicate_var,
-            values=["rename", "skip", "overwrite"],
+            textvariable=self.duplicate_label_var,
+            values=list(DUPLICATE_LABELS.values()),
             state="readonly",
         )
-        duplicate_combo.grid(row=8, column=0, columnspan=3, sticky="ew", pady=(4, 12))
+        duplicate_combo.grid(row=8, column=0, columnspan=3, sticky="ew", pady=(2, 2))
         self._input_widgets.append((duplicate_combo, "readonly"))
+        self._muted_note(left, 9, "Identical files already in the work folder are always skipped.", pady=(0, 6))
 
+        xmp_row = ttk.Frame(left, style="CardInner.TFrame")
+        xmp_row.grid(row=10, column=0, columnspan=3, sticky="ew")
         xmp_check = ttk.Checkbutton(
-            left,
-            text="선택 RAW에 XMP 사이드카 생성",
+            xmp_row,
+            text="Write XMP sidecar for copied RAW",
             variable=self.write_xmp_var,
             style="Card.TCheckbutton",
         )
-        xmp_check.grid(row=9, column=0, columnspan=3, sticky="w", pady=(0, 8))
+        xmp_check.pack(side=tk.LEFT)
         self._input_widgets.append((xmp_check, "normal"))
 
-        ttk.Label(left, text="XMP rating", style="CardSection.TLabel").grid(row=10, column=0, sticky="w")
+        rating_row = ttk.Frame(xmp_row, style="CardInner.TFrame")
+        rating_row.pack(side=tk.RIGHT)
+        ttk.Label(rating_row, text="Star rating", style="Card.TLabel").pack(side=tk.LEFT, padx=(0, 6))
         rating_combo = ttk.Combobox(
-            left,
+            rating_row,
             textvariable=self.xmp_rating_var,
             values=["0", "1", "2", "3", "4", "5"],
             state="readonly",
+            width=4,
         )
-        rating_combo.grid(row=11, column=0, columnspan=3, sticky="ew", pady=(4, 8))
+        rating_combo.pack(side=tk.LEFT)
         self._input_widgets.append((rating_combo, "readonly"))
 
         jpg_rating_check = ttk.Checkbutton(
             left,
-            text="JPG 별점을 RAW XMP에 복사 (없으면 위 값 사용)",
+            text="Use each JPG's star rating (fallback: rating above)",
             variable=self.rating_from_jpg_var,
             style="Card.TCheckbutton",
         )
-        jpg_rating_check.grid(row=12, column=0, columnspan=3, sticky="w", pady=(0, 8))
+        jpg_rating_check.grid(row=12, column=0, columnspan=3, sticky="w", padx=(22, 0))
         self._input_widgets.append((jpg_rating_check, "normal"))
+        self._xmp_dependents = [rating_combo, jpg_rating_check]
+        self._muted_note(
+            left, 13, "Writes rating, label 'NDEX Selected' and keyword next to each copied RAW.",
+            padx=(22, 0), pady=(0, 6))
+
+        ttk.Label(left, textvariable=self.status_var, style="CardMuted.TLabel", wraplength=330).grid(
+            row=14, column=0, columnspan=3, sticky="w", pady=(2, 0))
+        self._wrapped_labels.append(left.grid_slaves(row=14, column=0)[0])
+        progress_row = ttk.Frame(left, style="CardInner.TFrame")
+        progress_row.grid(row=15, column=0, columnspan=3, sticky="ew", pady=(4, 6))
+        progress_row.columnconfigure(0, weight=1)
+        self.progress_bar = ttk.Progressbar(progress_row, variable=self.progress_var, maximum=100)
+        self.progress_bar.grid(row=0, column=0, sticky="ew", padx=(0, 8))
+        self.cancel_button = ttk.Button(progress_row, text="Cancel", command=self.cancel_work, state="disabled")
+        self.cancel_button.grid(row=0, column=1)
 
         buttons = ttk.Frame(left, style="CardInner.TFrame")
-        buttons.grid(row=13, column=0, columnspan=3, sticky="ew", pady=(8, 8))
+        buttons.grid(row=16, column=0, columnspan=3, sticky="ew")
         buttons.columnconfigure(0, weight=1)
         buttons.columnconfigure(1, weight=1)
-        self.analyze_button = ttk.Button(buttons, text="매칭 분석", command=self.start_analysis)
+        self.analyze_button = ttk.Button(buttons, text="Analyze Matches", command=self.start_analysis)
         self.copy_button = ttk.Button(
-            buttons, text="RAW 복제 시작", style="Accent.TButton", command=self.start_copy
+            buttons, text="Copy RAW Files", style="Accent.TButton", command=self.start_copy
         )
         self.analyze_button.grid(row=0, column=0, sticky="ew", padx=(0, 6))
         self.copy_button.grid(row=0, column=1, sticky="ew", padx=(6, 0))
-        self.cancel_button = ttk.Button(buttons, text="작업 취소", command=self.cancel_work, state="disabled")
-        self.cancel_button.grid(row=1, column=0, sticky="ew", padx=(0, 6), pady=(6, 0))
-        ttk.Button(buttons, text="작업 결과...", command=self.open_job_results).grid(
-            row=1, column=1, sticky="ew", padx=(6, 0), pady=(6, 0)
-        )
 
-        self.progress_bar = ttk.Progressbar(left, variable=self.progress_var, maximum=100)
-        self.progress_bar.grid(row=14, column=0, columnspan=3, sticky="ew", pady=(14, 6))
-        ttk.Label(left, textvariable=self.status_var, style="CardMuted.TLabel", wraplength=330).grid(
-            row=15, column=0, columnspan=3, sticky="w"
-        )
-        ttk.Label(left, textvariable=self.summary_var, style="Card.TLabel", justify="left").grid(
-            row=16, column=0, columnspan=3, sticky="w", pady=(18, 0)
-        )
-
-        right.rowconfigure(1, weight=3)
-        right.rowconfigure(3, weight=2)
+        right.rowconfigure(2, weight=3)
+        right.rowconfigure(5, weight=2)
         right.columnconfigure(0, weight=1)
-        ttk.Label(right, text="매칭 결과", style="CardSection.TLabel").grid(row=0, column=0, sticky="w")
-        columns = ("jpg", "cr3", "status")
-        self.match_tree = ttk.Treeview(right, columns=columns, show="headings", height=14)
-        self.match_tree.grid(row=1, column=0, sticky="nsew", pady=(6, 10))
-        self.match_tree.heading("jpg", text="셀렉 JPG")
-        self.match_tree.heading("cr3", text="매칭 RAW")
-        self.match_tree.heading("status", text="상태")
-        self.match_tree.column("jpg", width=220, anchor="w")
-        self.match_tree.column("cr3", width=260, anchor="w")
-        self.match_tree.column("status", width=100, anchor="w")
-        match_scroll = ttk.Scrollbar(right, orient="vertical", command=self.match_tree.yview)
-        match_scroll.grid(row=1, column=1, sticky="ns", pady=(6, 10))
-        self.match_tree.configure(yscrollcommand=match_scroll.set)
+        title_row = ttk.Frame(right, style="CardInner.TFrame")
+        title_row.grid(row=0, column=0, columnspan=2, sticky="ew")
+        title_row.columnconfigure(0, weight=1)
+        ttk.Label(title_row, text="Match results", style="CardSection.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Button(title_row, text="Job Results…", command=self.open_job_results).grid(row=0, column=1, sticky="e")
+        ttk.Label(right, textvariable=self.banner_var, style="Card.TLabel").grid(
+            row=1, column=0, columnspan=2, sticky="w", pady=(4, 4))
 
-        ttk.Label(right, text="로그", style="CardSection.TLabel").grid(row=2, column=0, sticky="w")
-        self.log_text = tk.Text(right, height=9, wrap="word")
+        columns = ("jpg", "raw", "location", "status")
+        self.match_tree = ttk.Treeview(right, columns=columns, show="headings", height=8, selectmode="browse")
+        self.match_tree.grid(row=2, column=0, sticky="nsew")
+        for column, text, width, stretch in (
+            ("jpg", "Selected JPG", 150, True),
+            ("raw", "Matched RAW", 120, True),
+            ("location", "RAW location", 100, True),
+            ("status", "Status", 145, False),
+        ):
+            self.match_tree.heading(column, text=text)
+            self.match_tree.column(column, width=width, minwidth=70, anchor="w", stretch=stretch)
+        self.match_tree.tag_configure("missing", foreground="#B91C1C")
+        self.match_tree.tag_configure("ambiguous", foreground="#B45309")
+        match_scroll = ttk.Scrollbar(right, orient="vertical", command=self.match_tree.yview)
+        match_scroll.grid(row=2, column=1, sticky="ns")
+        self.match_tree.configure(yscrollcommand=match_scroll.set)
+        self.placeholder_label = ttk.Label(
+            self.match_tree, text=PLACEHOLDER_TEXT, style="CardMuted.TLabel", anchor="center")
+
+        hint_row = ttk.Frame(right, style="CardInner.TFrame")
+        hint_row.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(6, 6))
+        hint_row.columnconfigure(0, weight=1)
+        self.hint_label = ttk.Label(
+            hint_row, textvariable=self.hint_var, style="CardMuted.TLabel", wraplength=380, justify="left")
+        self.hint_label.grid(row=0, column=0, sticky="w", padx=(0, 8))
+        self._wrapped_labels.append(self.hint_label)
+        self.choose_button = ttk.Button(hint_row, text="Choose RAW…", command=self.choose_raw, state="disabled")
+        self.choose_button.grid(row=0, column=1, sticky="ne")
+
+        ttk.Label(right, text="Log", style="CardSection.TLabel").grid(row=4, column=0, sticky="w")
+        self.log_text = tk.Text(right, height=5, wrap="word")
         style_text_widget(self.log_text)
-        self.log_text.grid(row=3, column=0, sticky="nsew", pady=(6, 0))
+        self.log_text.grid(row=5, column=0, sticky="nsew", pady=(4, 0))
         log_scroll = ttk.Scrollbar(right, orient="vertical", command=self.log_text.yview)
-        log_scroll.grid(row=3, column=1, sticky="ns", pady=(6, 0))
+        log_scroll.grid(row=5, column=1, sticky="ns", pady=(4, 0))
         self.log_text.configure(yscrollcommand=log_scroll.set)
 
-    def _path_row(self, parent: ttk.Frame, row: int, label: str, variable: tk.StringVar, command) -> None:
+        left.bind("<Configure>", self._on_left_resize)
+        right.bind("<Configure>", self._on_right_resize)
+
+    def _muted_note(self, parent, row: int, text: str, padx=(0, 0), pady=(0, 0)) -> ttk.Label:
+        label = ttk.Label(parent, text=text, style="CardMuted.TLabel", wraplength=330, justify="left")
+        label.grid(row=row, column=0, columnspan=3, sticky="w", padx=padx, pady=pady)
+        self._wrapped_labels.append(label)
+        self._label_indent[label] = int(padx[0]) if isinstance(padx, tuple) else 0
+        return label
+
+    def _on_left_resize(self, event) -> None:
+        for label in self._wrapped_labels:
+            if label is not self.hint_label:
+                label.configure(wraplength=max(event.width - 36 - self._label_indent.get(label, 0), 160))
+
+    def _on_right_resize(self, event) -> None:
+        self.hint_label.configure(wraplength=max(event.width - 170, 160))
+        self._place_placeholder()
+
+    def _path_row(self, parent: ttk.Frame, row: int, label: str, variable: tk.StringVar, command):
         ttk.Label(parent, text=label, style="Card.TLabel").grid(row=row, column=0, sticky="w")
         entry = ttk.Entry(parent, textvariable=variable)
-        entry.grid(row=row + 1, column=0, columnspan=2, sticky="ew", pady=(4, 8))
-        browse = ttk.Button(parent, text="찾기", command=command)
-        browse.grid(row=row + 1, column=2, sticky="ew", padx=(8, 0), pady=(4, 8))
+        entry.grid(row=row + 1, column=0, columnspan=2, sticky="ew", pady=(1, 4))
+        browse = ttk.Button(parent, text="Browse…", command=command)
+        browse.grid(row=row + 1, column=2, sticky="ew", padx=(8, 0), pady=(1, 4))
         self._input_widgets.extend(((entry, "normal"), (browse, "normal")))
+        return entry, browse
 
     def _bind_events(self) -> None:
         for variable in (self.raw_source_var, self.selected_jpg_var, self.work_folder_var):
@@ -250,6 +570,25 @@ class AutoSelectorApp(tk.Tk):
         # All inputs that change matching or RAW exclusions invalidate it.
         for variable in (self.raw_source_var, self.selected_jpg_var, self.work_folder_var, self.recursive_var):
             variable.trace_add("write", lambda *_: self._invalidate_analysis())
+        # The combobox shows labels; the rest of the app speaks policy keys.
+        self.duplicate_label_var.trace_add("write", lambda *_: self._duplicate_label_changed())
+        self.duplicate_var.trace_add("write", lambda *_: self._duplicate_key_changed())
+        self._duplicate_key_changed()
+        self.write_xmp_var.trace_add("write", lambda *_: self._apply_input_states())
+        self.match_tree.bind("<<TreeviewSelect>>", lambda _e: self._on_match_select())
+        self.match_tree.bind("<Double-1>", self._on_match_activate)
+        self.match_tree.bind("<Return>", self._on_match_activate)
+
+    def _duplicate_label_changed(self) -> None:
+        label = self.duplicate_label_var.get()
+        for key, text in DUPLICATE_LABELS.items():
+            if text == label and self.duplicate_var.get() != key:
+                self.duplicate_var.set(key)
+
+    def _duplicate_key_changed(self) -> None:
+        label = DUPLICATE_LABELS.get(self.duplicate_var.get())
+        if label and self.duplicate_label_var.get() != label:
+            self.duplicate_label_var.set(label)
 
     def _current_analysis_context(self) -> tuple:
         return (
@@ -260,33 +599,68 @@ class AutoSelectorApp(tk.Tk):
 
     def _invalidate_analysis(self) -> None:
         if self.handoff_files is not None and self.selected_jpg_var.get() != self._handoff_display:
-            # The user typed a different JPG folder: leave handoff mode.
+            # The JPG folder changed from outside the form: leave handoff mode.
             self.handoff_files = None
+            self._refresh_handoff_ui()
         if self.summary is None:
             return
         self.summary = None
         self._clear_matches()
         self._render_summary()
-        self.status_var.set("검색 조건이 바뀌었습니다. 매칭 분석을 다시 실행하세요.")
+        self.status_var.set("Settings changed. Run Analyze Matches again.")
         self._update_buttons()
 
+    # --- handoff ----------------------------------------------------------------
+
+    def _refresh_handoff_ui(self) -> None:
+        """Show the handoff as a persistent read-only value, or the normal folder field."""
+        if self.handoff_files is not None:
+            self.selected_display_var.set(handoff_text(len(self.handoff_files), self._handoff_display))
+            self.selected_entry.configure(textvariable=self.selected_display_var)
+            self.selected_browse.grid_remove()
+            self.use_folder_button.grid()
+            self._set_resting_state(self.selected_entry, "readonly")
+            self.selected_entry.grid_configure(columnspan=3)
+        else:
+            self.selected_entry.configure(textvariable=self.selected_jpg_var)
+            self.selected_entry.grid_configure(columnspan=2)
+            self.use_folder_button.grid_remove()
+            self.selected_browse.grid()
+            self._set_resting_state(self.selected_entry, "normal")
+
+    def _leave_handoff(self) -> None:
+        if self.handoff_files is None or self._busy or self._closing:
+            return
+        self.handoff_files = None
+        self._handoff_display = ""
+        self._refresh_handoff_ui()
+        self._invalidate_analysis()
+        self.status_var.set("Using the Selected JPGs folder. Run Analyze Matches.")
+        self._update_buttons()
+
+    def _set_resting_state(self, widget, state: str) -> None:
+        self._input_widgets = [(w, state if w is widget else s) for w, s in self._input_widgets]
+        self._apply_input_states()
+
+    # --- browse ------------------------------------------------------------------
+
     def _browse_raw_source(self) -> None:
-        selected = filedialog.askdirectory(title="원본 RAW 폴더 선택")
+        selected = filedialog.askdirectory(title="Choose the RAW folder")
         if selected:
             self.raw_source_var.set(selected)
 
     def _browse_selected_jpg(self) -> None:
-        selected = filedialog.askdirectory(title="셀렉 JPG 폴더 선택")
+        selected = filedialog.askdirectory(title="Choose the selected-JPGs folder")
         if selected:
             self.selected_jpg_var.set(selected)
 
     def _browse_work_folder(self) -> None:
-        selected = filedialog.askdirectory(title="작업용 폴더 선택")
+        selected = filedialog.askdirectory(title="Choose the work folder")
         if selected:
             self.work_folder_var.set(selected)
 
     def open_job_results(self, select: Path | None = None) -> None:
-        """추출 job이 실제로 복제/건너뜀/실패한 내역을 보여준다."""
+        """Show what each copy job actually copied, skipped or failed."""
         from ndex_common.report_dialog import open_job_reports
 
         open_job_reports(
@@ -298,38 +672,41 @@ class AutoSelectorApp(tk.Tk):
         )
 
     def _retry_extract(self, plan) -> None:
-        """실패/누락/중복이었던 JPG만 다시 추출한다.
+        """Copy again only the JPGs that failed, were missing or were skipped.
 
-        폴더는 그 작업의 manifest에서 가져온다. 지금 창에 떠 있는 폴더가
-        그때와 다를 수 있기 때문이다.
+        The folders come from that job's manifest: the ones in this window may
+        be different from the ones the job used.
         """
         if self._busy or self._closing:
-            messagebox.showinfo(NDEX_AUTO_SELECTOR_TITLE, "실행 중인 작업이 끝난 뒤 다시 시도하세요.")
+            messagebox.showinfo(NDEX_AUTO_SELECTOR_TITLE, "Wait for the current job to finish, then try again.")
             return
 
         selected_jpg = plan.report.source
         work_folder = plan.report.destination
-        # 원본 폴더는 manifest의 folders에 있다. 그 전 manifest에는 없으니
-        # 그때는 창에 있는 값을 쓴다.
+        # The RAW folder is in the manifest's folders. Older manifests don't
+        # have it, so fall back to the value in this window.
         raw_source = str(plan.report.folders.get("raw_source") or "").strip()
         raw_source = raw_source or self.raw_source_var.get().strip()
 
-        for label, folder in (("원본 RAW", raw_source), ("셀렉 JPG", selected_jpg)):
+        for label, folder in (("RAW", raw_source), ("selected JPGs", selected_jpg)):
             if not folder or not Path(folder).is_dir():
-                messagebox.showerror("폴더 없음", f"그 작업의 {label} 폴더를 찾을 수 없습니다: {folder}")
+                messagebox.showerror(
+                    "Folder not found", f"Folder not found — can't find this job's {label} folder: {folder}")
                 return
         if not work_folder:
-            messagebox.showerror("폴더 없음", "그 작업의 작업용 폴더가 기록되어 있지 않습니다.")
+            messagebox.showerror("Folder not found", "This job has no work folder recorded.")
             return
 
         options = self._copy_options()
+        if not self._confirm_replace(len(plan.paths), options):
+            return
         # The original run decided which folders were searched. Using the
         # checkbox as it stands now could drop JPGs the job found.
         options["recursive"] = bool(plan.report.context.get("recursive", True))
         self._set_busy(True)
         self.progress_var.set(0)
-        self.status_var.set(f"실패 {len(plan.paths)}개 다시 복제 중...")
-        self._log(f"재실행 시작: {len(plan.paths)}개")
+        self.status_var.set(f"Retrying {len(plan.paths)} unfinished files…")
+        self._log(f"Retry started: {len(plan.paths)} files")
         job = {
             "selected_jpg": selected_jpg,
             "raw_source": raw_source,
@@ -344,8 +721,8 @@ class AutoSelectorApp(tk.Tk):
         plan, options = job["plan"], job["options"]
         selected_jpg, raw_source, work_folder = job["selected_jpg"], job["raw_source"], job["work_folder"]
         try:
-            # 다시 분석해야 한다. 사용자가 그 사이 빠진 CR3를 넣었거나
-            # 중복을 정리했을 수 있고, 그것이 재실행의 이유다.
+            # Analyze again: the user may have added a missing RAW or tidied up
+            # duplicates since the job ran, which is the reason to retry.
             summary = self.service.analyze(
                 Path(raw_source),
                 Path(selected_jpg),
@@ -376,7 +753,7 @@ class AutoSelectorApp(tk.Tk):
         raw_source = self.raw_source_var.get().strip()
         selected_jpg = self.selected_jpg_var.get().strip()
         if not raw_source or not selected_jpg:
-            messagebox.showwarning("폴더 필요", "원본 RAW 폴더와 셀렉 JPG 폴더를 선택하세요.")
+            messagebox.showwarning("Folders required", "Choose the RAW folder and the selected-JPGs folder.")
             return
         self._set_busy(True)
         self._analysis_context = self._current_analysis_context()
@@ -385,9 +762,9 @@ class AutoSelectorApp(tk.Tk):
         self.progress_var.set(0)
         self.progress_bar.configure(mode="indeterminate")
         self.progress_bar.start(15)
-        self.status_var.set("매칭 분석 중...")
+        self.status_var.set("Analyzing…")
         self._clear_matches()
-        self._log("분석 시작")
+        self._log("Analysis started")
         self.worker_thread = threading.Thread(
             target=self._analysis_worker,
             args=(
@@ -464,11 +841,30 @@ class AutoSelectorApp(tk.Tk):
         except OSError:
             pass
 
+    def _confirm_replace(self, count: int, options: dict, matches=None, work_folder: str = "") -> bool:
+        """Replacing cannot be undone, so say how many files it may touch."""
+        if options["duplicate_policy"] != "overwrite" or count <= 0:
+            return True
+        if matches is not None and work_folder:
+            existing = sum(
+                1 for match in matches
+                if match.raw_path is not None and (Path(work_folder) / match.raw_path.name).exists()
+            )
+            if existing == 0:
+                return True
+            count = existing
+        return messagebox.askyesno(
+            NDEX_AUTO_SELECTOR_TITLE,
+            f"Replace up to {count} existing RAW files in the work folder?\n\nThis cannot be undone.",
+            default="no",
+            icon="warning",
+        )
+
     def start_copy(self) -> None:
         if self._busy or self._closing:
             return
         if self.summary is None:
-            messagebox.showwarning("분석 필요", "먼저 매칭 분석을 실행하세요.")
+            messagebox.showwarning("Analysis required", "Analysis required — run Analyze Matches first.")
             return
         if (
             Path(self.raw_source_var.get().strip()) != self.summary.raw_source_dir
@@ -477,11 +873,16 @@ class AutoSelectorApp(tk.Tk):
         ):
             self.summary = None
             self._update_buttons()
-            messagebox.showwarning(NDEX_AUTO_SELECTOR_TITLE, "검색 조건이 바뀌었습니다. 매칭 분석을 다시 실행하세요.")
+            messagebox.showwarning(NDEX_AUTO_SELECTOR_TITLE, "Settings changed. Run Analyze Matches again.")
             return
         work_folder = self.work_folder_var.get().strip()
         if not work_folder:
-            messagebox.showwarning("작업 폴더 필요", "RAW 파일을 복제할 작업용 폴더를 선택하세요.")
+            messagebox.showwarning(
+                "Work folder required", "Work folder required — choose a folder to copy the RAW files into.")
+            return
+        options = self._copy_options()
+        copyable = [m for m in self.summary.matches if m.status in ("matched", "chosen")]
+        if not self._confirm_replace(len(copyable), options, copyable, work_folder):
             return
         # Fixed now, not read when the job ends: the form can change while
         # the copy runs, and the manifest must say what the job used.
@@ -489,14 +890,14 @@ class AutoSelectorApp(tk.Tk):
             "selected_jpg": str(self.summary.selected_jpg_dir),
             "raw_source": str(self.summary.raw_source_dir),
             "work_folder": work_folder,
-            "options": self._copy_options(),
+            "options": options,
             "matches": list(self.summary.matches),
             "plan": None,
         }
         self._set_busy(True)
         self.progress_var.set(0)
-        self.status_var.set("RAW 복제 중...")
-        self._log("복제 시작")
+        self.status_var.set("Copying RAW files…")
+        self._log("Copy started")
         self.worker_thread = threading.Thread(target=self._copy_worker, args=(job,), daemon=False)
         self.worker_thread.start()
 
@@ -521,10 +922,11 @@ class AutoSelectorApp(tk.Tk):
                 recursive=job["options"]["recursive"],
                 context=plan.context() if plan is not None else None,
             )
+            job["manifest"] = manifest
             if manifest is None:
-                job["record_error"] = "작업 결과 파일을 저장하지 못했습니다. 로그의 처리 결과를 확인하세요."
+                job["record_error"] = "Couldn't save the job record. Check the log for what was processed."
         except Exception as exc:
-            job["record_error"] = f"작업 결과 저장 실패: {exc}"
+            job["record_error"] = f"Couldn't save the job record: {exc}"
 
     def _copy(self, matches, work_folder: Path, options: dict):
         return self.service.copy_matches(
@@ -562,8 +964,8 @@ class AutoSelectorApp(tk.Tk):
         elif kind == "analysis_cancelled":
             self.summary = None
             self._render_summary()
-            self.status_var.set("매칭 분석이 취소되었습니다.")
-            self._log("분석 취소")
+            self.status_var.set("Analysis cancelled.")
+            self._log("Analysis cancelled")
             self._set_busy(False)
         elif kind == "copy_done":
             _, result, job = event
@@ -572,14 +974,12 @@ class AutoSelectorApp(tk.Tk):
             _, current, total, name = event
             self.progress_var.set((current / total) * 100 if total else 0)
             if not self.cancel_event.is_set():
-                self.status_var.set(f"복제 중: {current}/{total} {name}")
+                self.status_var.set(f"Copying {current} of {total}: {name}")
         elif kind == "error":
             self._handle_error(event[1])
 
     def _report_handler_failure(self) -> None:
         """A handler crashed: log it and unfreeze the UI instead of leaving it busy."""
-        import sys
-
         from ndex_common.crashlog import write_crash_log
 
         exc_type, exc, tb = sys.exc_info()
@@ -597,83 +997,194 @@ class AutoSelectorApp(tk.Tk):
         if self.cancel_event.is_set() or self._analysis_context != self._current_analysis_context():
             self.summary = None
             self._render_summary()
-            self.status_var.set("분석 취소 또는 검색 조건 변경: 매칭 분석을 다시 실행하세요.")
+            self.status_var.set("Analysis cancelled or settings changed. Run Analyze Matches again.")
             self._set_busy(False)
             return
         self.summary = summary
         self._render_summary()
         self._render_matches()
         self.progress_var.set(100)
-        self.status_var.set("매칭 분석 완료")
-        self._log(f"분석 완료: JPG {summary.selected_count}, 매칭 {summary.matched_count}, 누락 {summary.missing_count}")
+        self.status_var.set("Analysis complete")
+        self._log(
+            f"Analysis complete: {summary.selected_count} JPGs, {summary.matched_count} matched, "
+            f"{summary.ambiguous_count} ambiguous, {summary.missing_count} no RAW"
+        )
         self._set_busy(False)
 
     def _handle_copy_done(self, result, job: dict) -> None:
         """``job`` is what the run was started with; ``job["plan"]`` marks a retry."""
         completed = result.total - sum(item.get("detail") == "not run: cancelled" for item in result.items)
         self.progress_var.set(completed / result.total * 100 if result.total else 0)
-        self.status_var.set("복제 취소: 미처리 항목은 작업 결과에서 재시도할 수 있습니다."
-                            if result.cancelled else "RAW 복제 완료")
+        self.status_var.set("Copy cancelled. Unprocessed files can be retried from Job Results."
+                            if result.cancelled else "Copy complete")
+        self.banner_var.set(banner_for_copy(result))
         self._log(
-            f"복제 완료: copied={result.copied}, xmp={result.xmp_written}, skipped={result.skipped}, "
+            f"Copy finished: copied={result.copied}, xmp={result.xmp_written}, skipped={result.skipped}, "
             f"overwritten={result.overwritten}, ambiguous={result.ambiguous}, "
-            f"missing={result.missing}, errors={result.errors}"
+            f"not found={result.missing}, errors={result.errors}"
         )
         for message in result.messages[:80]:
             self._log(message)
         if len(result.messages) > 80:
-            self._log(f"... 추가 메시지 {len(result.messages) - 80}개 생략")
+            self._log(f"... {len(result.messages) - 80} more messages not shown")
         if job.get("record_error"):
             # A failed report must remain visible even if Close was requested
             # while the worker was saving it.
             self._closing = False
             self._log(job["record_error"])
             self.status_var.set(job["record_error"])
+        was_closing = self._closing
         self._set_busy(False)
         if job.get("record_error"):
             messagebox.showwarning(NDEX_AUTO_SELECTOR_TITLE, job["record_error"])
+        elif self.show_completion_dialog and not result.cancelled and not was_closing and not self._closed:
+            self._show_completion(result, job)
+
+    def _show_completion(self, result: CopyResult, job: dict) -> None:
+        if self._completion_dialog is not None:
+            try:
+                self._completion_dialog.destroy()
+            except tk.TclError:
+                pass
+        manifest = job.get("manifest")
+        self._completion_dialog = CopyDoneDialog(
+            self, result, job["work_folder"], lambda: self.open_job_results(select=manifest)
+        )
 
     def _handle_error(self, message: str) -> None:
-        self.status_var.set("작업 실패")
-        self._log(f"오류: {message}")
+        self.status_var.set("Job failed")
+        self._log(f"Error: {message}")
         self._closing = False
         self._set_busy(False)
-        messagebox.showerror("오류", message)
+        messagebox.showerror("Error", message)
+
+    # --- results view -------------------------------------------------------------
 
     def _render_summary(self) -> None:
+        """The one-line banner above the tree."""
+        self.banner_var.set("" if self.summary is None else banner_for_analysis(self.summary))
         if self.summary is None:
-            self.summary_var.set("분석 전입니다.")
-            return
-        self.summary_var.set(
-            "요약\n"
-            f"셀렉 JPG: {self.summary.selected_count}\n"
-            f"매칭 RAW: {self.summary.matched_count}\n"
-            f"후보 중복: {self.summary.ambiguous_count}\n"
-            f"RAW 누락: {self.summary.missing_count}"
-        )
+            self.hint_var.set("")
+            self._update_choose_button()
 
     def _render_matches(self) -> None:
         self._clear_matches()
         if self.summary is None:
             return
-        for match in self.summary.matches:
-            self.match_tree.insert(
-                "",
-                tk.END,
-                values=(
-                    match.jpg_path.name,
-                    match.raw_path.name if match.raw_path else "",
-                    {"matched": "매칭", "ambiguous": "후보 중복", "missing": "누락"}.get(match.status, match.status),
-                ),
-            )
+        for index, match in enumerate(self.summary.matches):
+            self.match_tree.insert("", tk.END, iid=str(index), values=self._row_values(match),
+                                   tags=(match.status,))
+        self._sync_placeholder()
+
+    def _row_values(self, match: SelectionMatch) -> tuple[str, str, str, str]:
+        root = self.summary.raw_source_dir if self.summary is not None else None
+        if match.status == "ambiguous":
+            raw_cell, location = f"({len(match.candidates)} candidates)", ""
+        else:
+            raw_cell = match.raw_path.name if match.raw_path else ""
+            location = relative_folder(match.raw_path, root)
+        return (match.jpg_path.name, raw_cell, location, STATUS_LABELS.get(match.status, match.status))
 
     def _clear_matches(self) -> None:
         for item_id in self.match_tree.get_children():
             self.match_tree.delete(item_id)
+        self.hint_var.set("")
+        self._update_choose_button()
+        self._sync_placeholder()
+
+    def _sync_placeholder(self) -> None:
+        if self.match_tree.get_children():
+            self.placeholder_label.place_forget()
+            return
+        if self.summary is not None:
+            self.placeholder_label.configure(text="No selected JPGs were found.")
+        else:
+            self.placeholder_label.configure(text=PLACEHOLDER_TEXT)
+        self._place_placeholder()
+
+    def _place_placeholder(self) -> None:
+        if not self.match_tree.get_children():
+            self.placeholder_label.place(relx=0.5, rely=0.45, anchor="center")
+
+    def _selected_match(self) -> tuple[int, SelectionMatch] | None:
+        if self.summary is None:
+            return None
+        selection = self.match_tree.selection()
+        if not selection:
+            return None
+        try:
+            index = int(selection[0])
+            return index, self.summary.matches[index]
+        except (ValueError, IndexError):
+            return None
+
+    def _on_match_select(self) -> None:
+        picked = self._selected_match()
+        self.hint_var.set(hint_for_match(picked[1] if picked else None, self.recursive_var.get()))
+        self._update_choose_button()
+
+    def _update_choose_button(self) -> None:
+        picked = self._selected_match()
+        can_choose = (
+            picked is not None and bool(picked[1].candidates)
+            and not self._busy and not self._closing
+        )
+        self.choose_button.configure(state="normal" if can_choose else "disabled")
+
+    def _on_match_activate(self, _event=None):
+        self.choose_raw()
+        return "break"
+
+    def choose_raw(self) -> None:
+        picked = self._selected_match()
+        if picked is None or not picked[1].candidates or self._busy or self._closing:
+            return
+        index, match = picked
+        result = self._run_choose_dialog(match)
+        if result is not None:
+            self._apply_choice(index, result)
+
+    def _run_choose_dialog(self, match: SelectionMatch):
+        dialog = ChooseRawDialog(self, match, self.summary.raw_source_dir if self.summary else None)
+        self.wait_window(dialog)
+        return dialog.result
+
+    def _apply_choice(self, index: int, result: tuple[str, Path | None]) -> None:
+        """Record the user's pick (or skip) on the match and refresh the row."""
+        if self.summary is None:
+            return
+        match = self.summary.matches[index]
+        action, path = result
+        if action == "choose" and path is not None:
+            match.raw_path, match.status, match.match_kind = path, "chosen", ""
+        else:
+            match.raw_path, match.status, match.match_kind = None, "ambiguous", ""
+        iid = str(index)
+        self.match_tree.item(iid, values=self._row_values(match), tags=(match.status,))
+        self._render_summary()
+        self.match_tree.selection_set(iid)
+        self._on_match_select()
+        label = f"chose {path.name}" if action == "choose" and path else "skipped"
+        self._log(f"{match.jpg_path.name}: {label}")
+        self._update_buttons()
 
     def _log(self, message: str) -> None:
         self.log_text.insert(tk.END, message + "\n")
         self.log_text.see(tk.END)
+
+    # --- busy / closing -----------------------------------------------------------
+
+    def _input_state(self, widget, resting: str) -> str:
+        if self._busy or self._closing:
+            return "disabled"
+        if widget in self._xmp_dependents and not self.write_xmp_var.get():
+            return "disabled"
+        return resting
+
+    def _apply_input_states(self) -> None:
+        for widget, state in self._input_widgets:
+            widget.configure(state=self._input_state(widget, state))
+        self.use_folder_button.configure(state="disabled" if self._busy or self._closing else "normal")
 
     def _set_busy(self, busy: bool) -> None:
         self._busy = busy
@@ -682,8 +1193,7 @@ class AutoSelectorApp(tk.Tk):
         else:
             self.progress_bar.stop()
         self.progress_bar.configure(mode="determinate")
-        for widget, state in self._input_widgets:
-            widget.configure(state="disabled" if busy or self._closing else state)
+        self._apply_input_states()
         self.cancel_button.configure(state="normal" if busy and not self._closing else "disabled")
         self._update_buttons()
         if not busy and self._closing:
@@ -694,7 +1204,7 @@ class AutoSelectorApp(tk.Tk):
             return
         self.cancel_event.set()
         self.cancel_button.configure(state="disabled")
-        self.status_var.set("취소 요청: 현재 파일의 복사·검증을 마친 뒤 중지합니다.")
+        self.status_var.set("Cancelling after the current file finishes copying and verifying…")
 
     def _on_close(self) -> None:
         if self._closing or self._closed:
@@ -702,7 +1212,7 @@ class AutoSelectorApp(tk.Tk):
         self._closing = True
         if self._busy:
             self.cancel_work()
-            self.status_var.set("종료 대기: 현재 파일을 마치고 작업 결과를 저장합니다.")
+            self.status_var.set("Closing after the current file; saving the job record…")
             self._update_buttons()
         else:
             self._finish_close()
@@ -719,6 +1229,7 @@ class AutoSelectorApp(tk.Tk):
         available = not self._busy and not self._closing
         self.analyze_button.configure(state=tk.NORMAL if available and self._can_analyze() else tk.DISABLED)
         self.copy_button.configure(state=tk.NORMAL if available and self._can_copy() else tk.DISABLED)
+        self._update_choose_button()
 
     def _can_analyze(self) -> bool:
         return bool(self.raw_source_var.get().strip() and self.selected_jpg_var.get().strip())

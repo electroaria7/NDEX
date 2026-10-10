@@ -1,14 +1,14 @@
 # Development Progress
 
-updated: 2026-09-06
+updated: 2026-10-10
 type: progress-note
 
 ## Summary
 
-현재 릴리스는 0.9.3 Beta. 0.9.2의 Phase 0~6, 동시 기록 보호, Launcher 개선에
-PR #18의 파일 복사 안전성과 백업 상태 정확성 수정을 포함한다.
-다음 패치는 [[Roadmap]]의 7B 작업 취소·백그라운드 처리·안전한 종료를 우선한다.
-7B 이후는 계획이며 완료로 간주하지 않는다.
+0.9.5 Beta의 빌드·소스/패키지 검증을 완료했다. 0.9.4의 작업 취소·백그라운드 실행·안전 종료에
+Launcher/One/Manager/Selector의 UI 개선과 통합 검수 수정 4건을 더했다.
+PR #21과 [[14_0.9.5_UIUX_패치노트_2026-10-10]]에 사용자 변화와 검증 범위를 정리했다.
+One 용량 요약과 RAW 후보 선택은 구현했으며, CSV/HTML 리포트·전체 언어 통일·실카메라 및 설치 업그레이드 검증은 남아 있다.
 
 NDEX는 기존 DSB 백업 도구에서 출발해 사진 백업/선별/원본 추출/내보내기 workflow를 분리한 프로그램 시리즈다. 각 앱은 독립 실행이 가능하고, [[Programs/NDEX Launcher]]가 4단계 순서를 묶는다.
 
@@ -117,14 +117,14 @@ Phase 2는 PR #9로 병합되었으나, 이후 코드 리뷰에서 6건의 결�
 ## Verified Test Coverage
 
 ```powershell
-python -m unittest discover -s tests                      # 157
-python -m unittest discover -s dsb_image_manager\tests    # 11
-python -m unittest discover -s ndex_auto_selector\tests   # 19
-python -m unittest discover -s ndex_launcher\tests        # 13
-python -m unittest discover -s ndex_frame\tests           # 155
+python -m unittest discover -s tests                      # 244
+python -m unittest discover -s dsb_image_manager\tests    # 43
+python -m unittest discover -s ndex_auto_selector\tests   # 71
+python -m unittest discover -s ndex_launcher\tests        # 23
+python -m unittest discover -s ndex_frame\tests           # 171
 ```
 
-2026-09-03 기준 355개 전부 통과.
+2026-10-10 기준 552개 전부 통과. 고정 의존성을 사용한 Python 3.12.10 로컬 환경과 GitHub CI Python 3.10/3.12에서 확인했다.
 
 ## Current Direction
 

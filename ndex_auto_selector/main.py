@@ -16,15 +16,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--raw-source",
         type=Path,
-        help="Folder containing original RAW files (CR3/CR2/ARW/SRF/SR2/NEF/NRW)",
+        help="Folder containing original RAW files (CR3, CR2, ARW, SRF, SR2, NEF, NRW)",
     )
     parser.add_argument("--selected-jpg", type=Path, help="Folder containing selected JPG files")
-    parser.add_argument("--work-folder", type=Path, help="Destination folder for matched CR3 copies")
+    parser.add_argument("--work-folder", type=Path, help="Destination folder for matched RAW copies")
     parser.add_argument("--recursive", action="store_true", default=True, help="Scan source folders recursively")
     parser.add_argument("--no-recursive", dest="recursive", action="store_false")
     parser.add_argument("--analyze", action="store_true", help="Analyze matches and print a summary")
-    parser.add_argument("--copy", action="store_true", help="Copy matched CR3 files into the work folder")
-    parser.add_argument("--write-xmp", action="store_true", help="Write XMP sidecars for selected CR3 files")
+    parser.add_argument("--copy", action="store_true", help="Copy matched RAW files into the work folder")
+    parser.add_argument("--write-xmp", action="store_true", help="Write XMP sidecars for copied RAW files")
     parser.add_argument("--xmp-rating", type=int, choices=range(0, 6), default=5, help="XMP star rating from 0 to 5")
     parser.add_argument("--xmp-label", default="NDEX Selected", help="XMP label and keyword for selected files")
     parser.add_argument(
@@ -32,14 +32,14 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help=(
             "Read the star rating from each selected JPG (sidecar, EXIF, or embedded XMP) "
-            "and copy it to the CR3 XMP. Falls back to --xmp-rating when none is found."
+            "and copy it to the RAW XMP. Falls back to --xmp-rating when none is found."
         ),
     )
     parser.add_argument(
         "--duplicate-policy",
         choices=["rename", "skip", "overwrite"],
         default="rename",
-        help="How to handle CR3 files that already exist in the work folder",
+        help="How to handle RAW files that already exist in the work folder",
     )
     parser.add_argument(
         "--handoff",
@@ -102,11 +102,11 @@ def main() -> int:
         exclude=args.work_folder,
         jpg_files=jpg_files,
     )
-    _emit(f"CR3 source: {summary.raw_source_dir}")
-    _emit(f"Selected JPG folder: {summary.selected_jpg_dir}")
+    _emit(f"RAW folder: {summary.raw_source_dir}")
+    _emit(f"Selected JPGs folder: {summary.selected_jpg_dir}")
     _emit(f"Selected JPG: {summary.selected_count}")
-    _emit(f"Matched CR3: {summary.matched_count}")
-    _emit(f"Missing CR3: {summary.missing_count}")
+    _emit(f"Matched RAW: {summary.matched_count}")
+    _emit(f"No RAW found: {summary.missing_count}")
     _emit(f"Ambiguous: {summary.ambiguous_count}")
 
     if args.copy:

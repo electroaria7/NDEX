@@ -2,7 +2,7 @@
 
 Reads explicit session documents (and legacy last-folder keys) to show where
 the user left off, and builds Continue handoff arguments. Missing folders
-fall back to Open Empty (``--open`` only). Each step also carries the most
+fall back to Start Fresh (``--open`` only). Each step also carries the most
 recent finished job for that app, read back from its manifest.
 """
 
@@ -14,6 +14,18 @@ from pathlib import Path
 from ndex_common import session as workflow_session
 from ndex_common.report import JobReport, latest_reports_by_app
 from ndex_common.settings import load_all
+
+
+def folder_display_name(path: str) -> str:
+    """The last component of a folder path, or the path itself for a drive root."""
+    text = str(path or "").strip()
+    if not text:
+        return ""
+    trimmed = text.rstrip("\\/")
+    name = trimmed.replace("\\", "/").rsplit("/", 1)[-1]
+    if not name or name.endswith(":"):
+        return text
+    return name
 
 
 @dataclass(slots=True)
@@ -37,6 +49,19 @@ class StepState:
         return self.last_result.headline
 
     @property
+    def result_is_problem(self) -> bool:
+        """True when the latest job left failed, ambiguous, or missing files."""
+        return self.last_result is not None and self.last_result.failed_count > 0
+
+    @property
+    def status_tooltip(self) -> str:
+        """The full path behind the short ``Last:`` line."""
+        folder_ready = bool(self.last_folder) and Path(self.last_folder).is_dir()
+        if self.handoff_ready and not folder_ready:
+            return self.last_manifest
+        return self.last_folder
+
+    @property
     def has_session(self) -> bool:
         return self.launch_args != ["--open"]
 
@@ -44,12 +69,12 @@ class StepState:
     def status_text(self) -> str:
         folder_ready = bool(self.last_folder) and Path(self.last_folder).is_dir()
         if self.handoff_ready and not folder_ready:
-            return f"Last handoff: {self.last_manifest}"
+            return f"Last handoff: {folder_display_name(self.last_manifest)}"
         if not self.last_folder:
             return "No previous session"
         if not folder_ready:
-            return f"Last folder missing: {self.last_folder}"
-        return f"Last: {self.last_folder}"
+            return f"Last folder missing: {folder_display_name(self.last_folder)}"
+        return f"Last: {folder_display_name(self.last_folder)}"
 
 
 def gather_workflow_state() -> list[StepState]:

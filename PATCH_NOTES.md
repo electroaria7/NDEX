@@ -1,5 +1,44 @@
 # NDEX Patch Notes
 
+## 0.9.5 Beta — 2026-10-10
+
+This release makes the backup, culling, and RAW extraction workflow easier to follow and includes four integration-review fixes. Packages: `NDEX_v0.9.5.zip` and `NDEX_Setup_0.9.5.exe`. The channel remains `beta`; previous releases remain available separately.
+
+### Launcher and Job Results
+
+- Fit the four workflow cards in one row at the Launcher's 880×520 minimum size. Show short folder names with full-path tooltips, highlight problem results, and label a new session **Start Fresh**.
+- Give secondary buttons clearer borders and backgrounds. Job Results uses separate action rows and a bottom-right Close button; Escape closes it.
+- Select the newest problem job by default, while an explicitly requested job takes priority. Show problem filenames and reasons together, with their folders below.
+- Preserve details for successful and skipped files, including a manually chosen RAW and the reason an existing RAW/XMP was preserved.
+
+### NDEX One
+
+- Simplify the analysis and backup layout, explain duplicate and verification choices, and make Enter trigger the next main action when appropriate.
+- Show source size, destination free space, date range, JPG/RAW counts, and files using modified dates. Warn when the estimated input size exceeds available space; this estimate does not subtract duplicates that may be skipped.
+- Confirm the actual analyzed destination before copying. Show concise per-file logs, clearer cancellation/completion status, and next-step buttons after a successful backup.
+- When a past job is retried, completion actions open or hand off that job's destination even if the current form shows another folder.
+
+### Image Manager
+
+- Move exactly one photo per arrow key. Pick, Reject, and star shortcuts can advance to the next photo; disable this behavior in **View → Advance after Pick/Reject/Rating**. Multiple selected rows are marked together.
+- Add readable file/pick/rating filters, pick symbols, compact dates and file types, blank unrated cells, font-measured list columns, and clearer empty/progress states.
+- Improve the preview/details layout and fullscreen position/pick indicators. Confirm backup and handoff actions and provide clearer completion feedback.
+- Keep typing and selection shortcuts inside filter/input widgets from changing photos' Pick, star rating, or list selection.
+
+### Auto Selector
+
+- Use English UI text and **RAW** consistently. Show match/copy counts, the relative RAW folder, and the reason each file matched.
+- Resolve ambiguous matches with **Choose RAW…**, including candidate folder, filename, size, and modified time. The chosen file is recorded as selected by the user.
+- Keep Image Manager's picked-file handoff visible and read-only until **Use a folder instead** is selected.
+- Explain duplicate handling, confirm replacement of existing RAW files, and disable XMP options when XMP writing is off.
+- Add a completion dialog that opens the work folder or the exact job just recorded, even when older failed jobs exist.
+
+### Validation and scope
+
+- Source review: **552 tests passed** across all five suites; compile checks passed. Tk event-loop and widget-size checks cover the minimum window sizes at 96 DPI.
+- NDEX Frame's application behavior is unchanged in this patch; it is rebuilt with the suite version and shared modules.
+- Source review and packaged validation are separate. See the [0.9.5 build and validation record](https://github.com/electroaria7/NDEX/blob/v0.9.5/docs/Release_Validation_0.9.5.md) for packaged checks and limitations. Real-camera RAW/SD-card benchmarks and Lightroom/Evoto compatibility remain follow-up work.
+
 ## 0.9.4 Beta — 2026-10-10
 
 Release scope: the October 9 audit fixes and October 10 UI/UX and task-safety changes below. `NDEX_VERSION` is `0.9.4`; the channel remains `beta`. Package names: `NDEX_v0.9.4.zip` and `NDEX_Setup_0.9.4.exe`. Existing 0.9.3 downloads are retained separately.

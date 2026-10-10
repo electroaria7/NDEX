@@ -16,16 +16,18 @@ import sys
 import tkinter as tk
 from pathlib import Path
 from tkinter import messagebox, ttk
-from typing import Callable, Iterable, Sequence
+from typing import Callable, Sequence
 
-from ndex_common.report import JobReport, including, index_of, recent_reports
+from ndex_common.report import JobReport, default_index, including, recent_reports
 from ndex_common.retry import RetryPlan, plan_retry, retryable, supports_retry
 from ndex_common.theme import (
     BODY_PAD,
     DANGER,
-    SPACE_LG,
+    FONT_FAMILY,
+    FONT_SIZE,
     SPACE_MD,
     SPACE_SM,
+    TEXT_MUTED,
     apply_tk_theme,
     apply_window_icon,
     style_text_widget,
@@ -51,12 +53,13 @@ def open_job_reports(
     failed files again. ``open_in_app`` is the Launcher's substitute: it cannot
     run anything, so it hands the job to the app that can. ``select`` picks a
     job on open, and is read in even when it has aged out of the recent list.
+    With no ``select``, the newest job that has problems is chosen (else the newest).
     """
     found = list(reports) if reports is not None else recent_reports(apps=apps, limit=_HISTORY_LIMIT)
     found = including(found, select, apps=apps)
     if not found:
         messagebox.showinfo(
-            title,
+            "Job Results",
             "No job results yet.\n\n"
             "Backups, extracts, exports, and picks sent to Frame are recorded "
             "once they finish, and show up here.",
@@ -101,18 +104,27 @@ class JobReportWindow(tk.Toplevel):
 
         body = ttk.Frame(self, padding=BODY_PAD)
         body.pack(fill=tk.BOTH, expand=True)
-        body.columnconfigure(0, weight=0, minsize=320)
-        body.columnconfigure(1, weight=1)
+        # 40% for the job list, 60% for the detail: uniform keeps the job
+        # column from claiming whatever width its rows ask for.
+        body.columnconfigure(0, weight=2, uniform="panes")
+        body.columnconfigure(1, weight=3, uniform="panes")
         body.rowconfigure(0, weight=1)
 
         self._build_job_list(body)
         self._build_detail(body)
 
-        first = str(index_of(self.reports, select))
+        footer = ttk.Frame(body, style="Footer.TFrame")
+        footer.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(SPACE_MD, 0))
+        self.close_button = ttk.Button(footer, text="Close", command=self.destroy)
+        self.close_button.pack(side=tk.RIGHT)
+        self.bind("<Escape>", lambda _event: self.destroy())
+
+        first = str(default_index(self.reports, select))
         self.job_list.selection_set(first)
         self.job_list.focus(first)
         self.job_list.see(first)
         self._show_selected()
+        self.job_list.focus_set()
 
     def destroy(self) -> None:
         # Release the icon images while Tk is still up. Left to the garbage
@@ -132,11 +144,15 @@ class JobReportWindow(tk.Toplevel):
             row=0, column=0, sticky="w", pady=(0, SPACE_SM)
         )
 
+        # The App column only earns its width when jobs from several apps mix
+        # (the Launcher); one app's window already says whose jobs these are.
+        mixed = len({report.app for report in self.reports}) > 1
         self.job_list = ttk.Treeview(card, columns=("app", "job"), show="headings", selectmode="browse")
         self.job_list.heading("app", text="App")
         self.job_list.heading("job", text="Job")
-        self.job_list.column("app", width=110, stretch=False)
-        self.job_list.column("job", width=380)
+        self.job_list.column("app", width=96, minwidth=60, stretch=False)
+        self.job_list.column("job", width=120, minwidth=100, stretch=True)
+        self.job_list.configure(displaycolumns=("app", "job") if mixed else ("job",))
         self.job_list.grid(row=1, column=0, sticky="nsew")
         self.job_list.tag_configure("problem", foreground=DANGER)
 
@@ -149,7 +165,7 @@ class JobReportWindow(tk.Toplevel):
                 "",
                 tk.END,
                 iid=str(index),
-                values=(report.app_label, report.headline),
+                values=(report.app_label, report.list_label),
                 tags=("problem",) if report.failed_count else (),
             )
         self.job_list.bind("<<TreeviewSelect>>", lambda _event: self._show_selected())
@@ -161,48 +177,62 @@ class JobReportWindow(tk.Toplevel):
         card.columnconfigure(0, weight=1)
 
         self.detail_title = ttk.Label(card, text="", style="CardTitle.TLabel")
-        self.detail_title.grid(row=0, column=0, sticky="w")
+        self.detail_title.grid(row=0, column=0, columnspan=2, sticky="w")
 
-        self.detail_counts = ttk.Label(card, text="", style="CardMuted.TLabel", wraplength=560, justify="left")
-        self.detail_counts.grid(row=1, column=0, sticky="w", pady=(SPACE_SM, 0))
+        self.detail_counts = ttk.Label(card, text="", style="CardMuted.TLabel", wraplength=420, justify="left")
+        self.detail_counts.grid(row=1, column=0, columnspan=2, sticky="w", pady=(SPACE_SM, 0))
 
-        self.detail_folders = ttk.Label(card, text="", style="CardFaint.TLabel", wraplength=560, justify="left")
-        self.detail_folders.grid(row=2, column=0, sticky="w", pady=(SPACE_SM, SPACE_MD))
+        self.detail_folders = ttk.Label(card, text="", style="CardFaint.TLabel", wraplength=420, justify="left")
+        self.detail_folders.grid(row=2, column=0, columnspan=2, sticky="w", pady=(SPACE_SM, SPACE_MD))
+        card.bind("<Configure>", self._wrap_detail)
 
-        self.item_text = tk.Text(card, wrap="none", height=16)
+        self.item_text = tk.Text(card, wrap="word", height=6)
         style_text_widget(self.item_text)
+        self.item_text.tag_configure("heading", font=(FONT_FAMILY, FONT_SIZE, "bold"), spacing1=6)
+        self.item_text.tag_configure("problem", foreground=DANGER)
+        self.item_text.tag_configure("muted", foreground=TEXT_MUTED, lmargin1=24, lmargin2=24)
+        self.item_text.tag_configure("row", lmargin1=12, lmargin2=24)
         self.item_text.grid(row=3, column=0, sticky="nsew")
         item_scroll = ttk.Scrollbar(card, orient=tk.VERTICAL, command=self.item_text.yview)
         item_scroll.grid(row=3, column=1, sticky="ns")
         self.item_text.configure(yscrollcommand=item_scroll.set, state=tk.DISABLED)
 
+        # Two rows so nothing is clipped however narrow the window: what to do
+        # about the problems first, then the folders to look at.
         actions = ttk.Frame(card, style="CardInner.TFrame")
-        actions.grid(row=4, column=0, columnspan=2, sticky="w", pady=(SPACE_MD, 0))
+        actions.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(SPACE_MD, 0))
+        first_row = ttk.Frame(actions, style="CardInner.TFrame")
+        first_row.pack(anchor="w", fill=tk.X)
+        second_row = ttk.Frame(actions, style="CardInner.TFrame")
+        second_row.pack(anchor="w", fill=tk.X, pady=(SPACE_SM, 0))
 
         self.retry_button = ttk.Button(
-            actions, text="Retry Failed", style="Accent.TButton", command=self._retry_failed
+            first_row, text="Retry Failed", style="Accent.TButton", command=self._retry_failed
         )
         if self.retry is not None:
             self.retry_button.pack(side=tk.LEFT, padx=(0, SPACE_SM))
 
         # The Launcher cannot run a job. Its button opens the app that can,
         # at this very job, and that app's own Retry button takes it from there.
-        self.open_app_button = ttk.Button(actions, text="Retry in app...", command=self._open_in_app)
+        self.open_app_button = ttk.Button(first_row, text="Retry in app...", command=self._open_in_app)
         if self.retry is None and self.open_in_app is not None:
             self.open_app_button.pack(side=tk.LEFT, padx=(0, SPACE_SM))
 
-        self.copy_button = ttk.Button(actions, text="Copy Problem Paths", command=self._copy_problems)
+        self.copy_button = ttk.Button(first_row, text="Copy Problem Paths", command=self._copy_problems)
         self.copy_button.pack(side=tk.LEFT)
-        self.source_button = ttk.Button(actions, text="Open Source Folder", command=self._open_source)
-        self.source_button.pack(side=tk.LEFT, padx=(SPACE_SM, 0))
-        self.destination_button = ttk.Button(
-            actions, text="Open Destination Folder", command=self._open_destination
-        )
+
+        ttk.Label(second_row, text="Open folder:", style="CardMuted.TLabel").pack(side=tk.LEFT, padx=(0, SPACE_SM))
+        self.source_button = ttk.Button(second_row, text="Source", command=self._open_source)
+        self.source_button.pack(side=tk.LEFT)
+        self.destination_button = ttk.Button(second_row, text="Destination", command=self._open_destination)
         self.destination_button.pack(side=tk.LEFT, padx=(SPACE_SM, 0))
-        ttk.Button(actions, text="Open Manifest Folder", command=self._open_manifest_folder).pack(
-            side=tk.LEFT, padx=(SPACE_SM, 0)
-        )
-        ttk.Button(actions, text="Close", command=self.destroy).pack(side=tk.LEFT, padx=(SPACE_LG, 0))
+        self.manifest_button = ttk.Button(second_row, text="Manifest", command=self._open_manifest_folder)
+        self.manifest_button.pack(side=tk.LEFT, padx=(SPACE_SM, 0))
+
+    def _wrap_detail(self, event: tk.Event) -> None:
+        wrap = max(120, event.width - 2 * SPACE_MD - 8)
+        self.detail_counts.configure(wraplength=wrap)
+        self.detail_folders.configure(wraplength=wrap)
 
     # ----------------------------------------------------------------- render
 
@@ -222,7 +252,11 @@ class JobReportWindow(tk.Toplevel):
 
         self.item_text.configure(state=tk.NORMAL)
         self.item_text.delete("1.0", tk.END)
-        self.item_text.insert("1.0", _item_listing(report))
+        for text, tag in _item_segments(report):
+            if tag:
+                self.item_text.insert(tk.END, text, tuple(tag.split()))
+            else:
+                self.item_text.insert(tk.END, text)
         self.item_text.configure(state=tk.DISABLED)
 
         problems = report.problem_paths()
@@ -336,28 +370,37 @@ def _folder_lines(report: JobReport) -> str:
     return "\n".join(lines)
 
 
-def _item_listing(report: JobReport) -> str:
-    """Items grouped by status, problems first."""
+def _item_segments(report: JobReport) -> list[tuple[str, str]]:
+    """The item pane as (text, tags) runs: items grouped by status, problems first.
+
+    A problem reads ``\u26a0 name \u2014 reason`` with its folder on a muted line
+    below; other items stay on one line so a thousand copies do not fill the pane.
+    """
     grouped = report.items_by_status()
     if not grouped:
-        return "This job recorded no per-file items."
+        return [("This job recorded no per-file items.", "")]
 
-    blocks = []
+    runs: list[tuple[str, str]] = []
     for status, items in grouped.items():
-        block = [f"{status} ({len(items)})"]
-        block.extend(f"    {line}" for line in _item_lines(items))
-        blocks.append("\n".join(block))
-    return "\n\n".join(blocks)
+        if runs:
+            runs.append(("\n", ""))
+        runs.append((f"{status} ({len(items)})\n", "heading"))
+        for item in items:
+            if item.is_problem:
+                runs.append((f"\u26a0 {item.problem_line}\n", "problem row"))
+                if item.folder:
+                    runs.append((f"{item.folder}\n", "muted"))
+            else:
+                line = item.path or "(no path)"
+                if item.detail:
+                    line += f" — {item.detail}"
+                runs.append((f"{line}\n", "row"))
+    return runs
 
 
-def _item_lines(items: Iterable) -> list[str]:
-    lines = []
-    for item in items:
-        text = item.path or "(no path)"
-        if item.detail:
-            text = f"{text}  -  {item.detail}"
-        lines.append(text)
-    return lines
+def _item_listing(report: JobReport) -> str:
+    """The item pane as plain text."""
+    return "".join(text for text, _tag in _item_segments(report)).rstrip("\n")
 
 
 def _is_dir(value: str) -> bool:

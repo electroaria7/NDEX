@@ -34,6 +34,7 @@ class CopySafetyTests(unittest.TestCase):
             with patch("dsb_image_manager.dsb_image_manager.ui.tk_app.filedialog.askdirectory",
                        return_value=str(root / "backup")), \
                  patch("dsb_image_manager.dsb_image_manager.ui.tk_app.messagebox.showinfo"), \
+                 patch("dsb_image_manager.dsb_image_manager.ui.tk_app.messagebox.askyesno", return_value=True), \
                  patch("ndex_common.workflow.record_job") as recorded:
                 ImageManagerApp.backup_picked(app)
             statuses = {record.file_path.name: record.backup_status for record in catalog.list_images()}

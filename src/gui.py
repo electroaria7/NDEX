@@ -12,8 +12,9 @@ from .backup_executor import execute_backup
 from .app_paths import get_user_data_dir
 from .branding import NDEX_ONE_TITLE
 from .config import ConfigManager
-from .file_types import FILE_TYPE_ORDER, RAW_BRANDS, get_file_type_definitions, get_file_type_label, get_visible_file_types
-from .logger import AppLogger
+from .file_types import FILE_TYPE_ORDER, RAW_BRANDS, get_file_type_group, get_file_type_label, get_visible_file_types
+from .folder_manager import build_preview
+from .logger import AppLogger, format_display_line
 from .metadata import MetadataExtractor
 from .scanner import analyze_source, build_scan_items, same_folder
 
@@ -21,19 +22,202 @@ from ndex_common.launch import launch_app
 from ndex_common.theme import apply_tk_theme, apply_window_icon, build_app_header, style_text_widget
 
 VERIFY_MODE_LABELS = {
-    "size": "Fast check (file size)",
-    "sha256": "Full check (SHA-256, slower)",
-    "none": "No verification",
+    "size": "Quick check (file size)",
+    "sha256": "Full check (every byte)",
+    "none": "No check",
 }
 VERIFY_LABEL_TO_MODE = {label: mode for mode, label in VERIFY_MODE_LABELS.items()}
+VERIFY_MODE_HINTS = {
+    "size": "Compares file sizes. Fast.",
+    "sha256": "Compares every byte. Slower, safest for memory cards.",
+    "none": "Fastest, but a bad copy would go unnoticed.",
+}
 
+# The internal keys ("rename", "smart", ...) are what the saved config holds.
 DUPLICATE_POLICY_LABELS = {
-    "rename": "Rename (keep both)",
-    "smart": "Smart skip (identical content)",
-    "skip": "Skip (same filename)",
+    "rename": "Keep both (rename new copy)",
+    "smart": "Skip identical files",
+    "skip": "Skip same-name files",
     "overwrite": "Overwrite existing",
 }
 DUPLICATE_LABEL_TO_POLICY = {label: policy for policy, label in DUPLICATE_POLICY_LABELS.items()}
+DUPLICATE_POLICY_HINTS = {
+    "rename": "If a file with the same name exists, the new copy is saved as IMG_0001_001.JPG.",
+    "smart": (
+        "Skips files whose content is exactly the same; a different photo with the "
+        "same name is saved as a renamed copy."
+    ),
+    "skip": "Leaves existing files alone, even if the photo differs.",
+    "overwrite": "Replaces existing files. The old version cannot be recovered.",
+}
+
+EMPTY_STATE_TEXT = (
+    "1. Choose the card or folder to copy from.\n"
+    "2. Choose where backups are kept.\n"
+    "3. Press Analyze."
+)
+RULE_HINT_BEFORE = "Photos go into Year\\Month\\MonthDay\\type folders by the date taken."
+INVALID_SOURCE_MESSAGE = (
+    "This folder doesn't exist. Reinsert the card or choose it again with Browse."
+)
+CANCEL_HINT = "Cancel is available while copying."
+ANALYZING_SUFFIX = "reading dates only; nothing is copied yet"
+STOPPING_STATUS = "Stopping after the current file… files already copied are kept."
+
+
+def format_size(num_bytes: int) -> str:
+    """Human size such as "1.8 GB" (1024-based, one decimal above bytes)."""
+    size = float(max(num_bytes, 0))
+    if size < 1024:
+        return f"{int(size)} B"
+    for unit in ("KB", "MB", "GB"):
+        size /= 1024
+        if size < 1024 or unit == "GB":
+            return f"{size:.1f} {unit}"
+    return f"{size:.1f} GB"  # pragma: no cover - the loop always returns
+
+
+def _plural(count: int, word: str) -> str:
+    return f"{count} {word}" if count == 1 else f"{count} {word}s"
+
+
+def grouped_counts(counts: dict[str, int]) -> dict[str, int]:
+    """Counts per file type folded into JPG and RAW, empty groups left out."""
+    grouped: dict[str, int] = {}
+    for file_type in FILE_TYPE_ORDER:
+        count = counts.get(file_type, 0)
+        if count:
+            group = get_file_type_group(file_type)
+            grouped[group] = grouped.get(group, 0) + count
+    return grouped
+
+
+def format_type_counts(counts: dict[str, int], pattern: str = "{group} {count}", separator: str = " · ") -> str:
+    """"JPG 24 · RAW 18", or "None" when there are no files."""
+    return separator.join(
+        pattern.format(group=group, count=count) for group, count in grouped_counts(counts).items()
+    ) or "None"
+
+
+def format_day_span(date_range) -> str:
+    """"3 days (2026-09-05 to 2026-09-07)", or "" when there are no dates."""
+    first, last = date_range
+    if not first or not last:
+        return ""
+    first_day, last_day = first.date(), last.date()
+    if first_day == last_day:
+        return f"1 day ({first_day:%Y-%m-%d})"
+    days = (last_day - first_day).days + 1
+    return f"{days} days ({first_day:%Y-%m-%d} to {last_day:%Y-%m-%d})"
+
+
+def free_space_warning(total_size: int, free_space: int | None) -> str:
+    """A warning when the destination disk is too small, else an empty string."""
+    if free_space is None or free_space >= total_size:
+        return ""
+    return (
+        f"Not enough free space: {format_size(total_size)} needed, "
+        f"only {format_size(free_space)} free on the destination."
+    )
+
+
+def fallback_note(count: int) -> str:
+    if count <= 0:
+        return ""
+    if count == 1:
+        return "1 file had no capture date; its modified date was used."
+    return f"{count} files had no capture date; their modified date was used."
+
+
+def example_folder_text(summary) -> str:
+    """A live example of where the first file will go."""
+    if not summary.items:
+        return RULE_HINT_BEFORE
+    first = min(summary.items, key=lambda item: (item.capture_datetime, str(item.source_path).lower()))
+    return f"Folders will look like: {first.destination_dir}"
+
+
+def build_confirmation(summary, policy_label: str, verify_label: str, dry_run: bool) -> tuple[str, str]:
+    """Title and body of the dialog shown before copying, built from the analysis."""
+    lines = [
+        f"Copy {_plural(len(summary.items), 'file')} ({format_size(summary.total_size)}) "
+        f"to {summary.backup_root}?"
+    ]
+    detail = format_type_counts(summary.counts, separator=", ") if summary.items else ""
+    span = format_day_span(summary.date_range)
+    if detail or span:
+        lines.append(" · ".join(part for part in (detail, span) if part))
+    lines.append(f"If a file already exists: {policy_label}")
+    lines.append(f"After copying: {verify_label}")
+    lines.append("Nothing is deleted from the source.")
+    if dry_run:
+        lines.append("Nothing will be copied.")
+    else:
+        warning = free_space_warning(summary.total_size, summary.free_space)
+        if warning:
+            lines.extend(["", warning])
+    return ("Start Dry Run" if dry_run else "Start Backup"), "\n".join(lines)
+
+
+def not_run_count(result) -> int:
+    """Files a stopped backup never reached (they stay retryable in Job Results)."""
+    return sum(1 for entry in result.items if entry.get("detail") == "not run: cancelled")
+
+
+def build_completion_status(result) -> str:
+    """The one-line outcome shown in the status bar after a backup finishes."""
+    if result.cancelled:
+        return (
+            f"Stopped: {result.copied} copied; {not_run_count(result)} not run "
+            "(see Job Results to retry)."
+        )
+    if result.dry_run:
+        return (
+            f"Dry run done: {_plural(result.copied, 'file')} would be copied, "
+            f"{result.skipped} skipped. Nothing was copied."
+        )
+    if result.total and result.skipped == result.total and not result.errors:
+        return f"Nothing new to copy: all {result.total} files were already in the backup."
+    if result.copied and result.verified == result.copied:
+        copied = f"{result.copied} copied and verified"
+    elif result.copied and not result.verified:
+        copied = f"{result.copied} copied (not verified)"
+    elif result.copied:
+        copied = f"{result.copied} copied, {result.verified} verified"
+    else:
+        copied = "0 copied"
+    return f"Done: {copied}, {result.skipped} skipped, {result.errors} errors."
+
+
+class Tooltip:
+    """A small hover hint for a widget."""
+
+    def __init__(self, widget: tk.Widget, text: str):
+        self.widget = widget
+        self.text = text
+        self._tip: tk.Toplevel | None = None
+        widget.bind("<Enter>", self._show, add="+")
+        widget.bind("<Leave>", self._hide, add="+")
+        widget.bind("<Destroy>", self._hide, add="+")
+
+    def _show(self, _event=None) -> None:
+        if self._tip is not None:
+            return
+        tip = tk.Toplevel(self.widget)
+        tip.wm_overrideredirect(True)
+        x = self.widget.winfo_rootx() + 8
+        y = self.widget.winfo_rooty() + self.widget.winfo_height() + 4
+        tip.wm_geometry(f"+{x}+{y}")
+        tk.Label(
+            tip, text=self.text, background="#FFFBE6", foreground="#222222",
+            relief="solid", borderwidth=1, padx=6, pady=3,
+        ).pack()
+        self._tip = tip
+
+    def _hide(self, _event=None) -> None:
+        if self._tip is not None:
+            self._tip.destroy()
+            self._tip = None
 
 
 class DSBApp(tk.Tk):
@@ -47,7 +231,7 @@ class DSBApp(tk.Tk):
         super().__init__()
         self.title(NDEX_ONE_TITLE)
         self.geometry("1220x820")
-        self.minsize(1080, 720)
+        self.minsize(1080, 770)
         self.brand_images: list[tk.PhotoImage] = []
         apply_window_icon(self, self.brand_images)
         apply_tk_theme(self)
@@ -56,7 +240,7 @@ class DSBApp(tk.Tk):
         self.config_manager = ConfigManager()
         self.settings = self.config_manager.load()
         self.ui_queue: queue.Queue = queue.Queue()
-        self.logger = AppLogger(sink=self._queue_log)
+        self.logger = AppLogger(sink=self._queue_log, display=self._display_log_line)
         self.metadata_extractor = MetadataExtractor.from_settings(self.settings)
 
         self.current_summary = None
@@ -98,9 +282,13 @@ class DSBApp(tk.Tk):
             for file_type in FILE_TYPE_ORDER
         }
         self.type_checkbuttons: dict[str, ttk.Checkbutton] = {}
-        self.status_var = tk.StringVar(value="Select a source and destination folder.")
-        self.summary_var = tk.StringVar(value="No analysis yet.")
-        self._summary_text = "No analysis yet."
+        self.status_var = tk.StringVar(value="Ready.")
+        self.summary_var = tk.StringVar(value=EMPTY_STATE_TEXT)
+        self._summary_text = EMPTY_STATE_TEXT
+        self.rule_var = tk.StringVar(value=RULE_HINT_BEFORE)
+        self.duplicate_hint_var = tk.StringVar()
+        self.verify_hint_var = tk.StringVar()
+        self._wrap_labels: list[tuple[ttk.Label, tk.Misc, int]] = []
         self.progress_var = tk.DoubleVar(value=0.0)
 
         self._build_layout()
@@ -138,23 +326,21 @@ class DSBApp(tk.Tk):
 
         ttk.Label(left, text="Source Folder", style="CardSection.TLabel").grid(row=0, column=0, sticky="w")
         source_entry = ttk.Entry(left, textvariable=self.source_var)
-        source_entry.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(4, 8))
+        source_entry.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(2, 6))
         source_browse = ttk.Button(left, text="Browse", command=self._browse_source)
         source_browse.grid(row=1, column=2, padx=(8, 0))
         self._input_controls.extend((source_entry, source_browse))
 
-        ttk.Label(left, text="Backup Destination", style="CardSection.TLabel").grid(row=2, column=0, sticky="w", pady=(8, 0))
+        ttk.Label(left, text="Backup Destination", style="CardSection.TLabel").grid(row=2, column=0, sticky="w")
         destination_entry = ttk.Entry(left, textvariable=self.destination_var)
-        destination_entry.grid(
-            row=3, column=0, columnspan=2, sticky="ew", pady=(4, 8)
-        )
+        destination_entry.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(2, 6))
         destination_browse = ttk.Button(left, text="Browse", command=self._browse_destination)
         destination_browse.grid(row=3, column=2, padx=(8, 0))
         self._input_controls.extend((destination_entry, destination_browse))
 
-        ttk.Label(left, text="File Types", style="CardSection.TLabel").grid(row=4, column=0, sticky="w", pady=(6, 0))
+        ttk.Label(left, text="File Types", style="CardSection.TLabel").grid(row=4, column=0, sticky="w")
         types_frame = ttk.Frame(left, style="CardInner.TFrame")
-        types_frame.grid(row=5, column=0, columnspan=3, sticky="w", pady=(4, 8))
+        types_frame.grid(row=5, column=0, columnspan=3, sticky="w", pady=(2, 6))
         self.brand_frame = ttk.Frame(types_frame, style="CardInner.TFrame")
         self.brand_frame.grid(row=0, column=0, sticky="w")
         for column, (brand_key, brand) in enumerate(RAW_BRANDS.items()):
@@ -169,7 +355,7 @@ class DSBApp(tk.Tk):
             self._input_controls.append(brand_button)
 
         self.types_frame = ttk.Frame(types_frame, style="CardInner.TFrame")
-        self.types_frame.grid(row=1, column=0, sticky="w", pady=(6, 0))
+        self.types_frame.grid(row=1, column=0, sticky="w", pady=(2, 0))
         for index, file_type in enumerate(FILE_TYPE_ORDER):
             checkbutton = ttk.Checkbutton(
                 self.types_frame,
@@ -179,29 +365,43 @@ class DSBApp(tk.Tk):
             )
             row = index // 3
             column = index % 3
-            checkbutton.grid(row=row, column=column, sticky="w", padx=(0, 12), pady=(2, 0))
+            checkbutton.grid(row=row, column=column, sticky="w", padx=(0, 12))
             self.type_checkbuttons[file_type] = checkbutton
             self._input_controls.append(checkbutton)
         self._refresh_file_type_options()
 
-        ttk.Label(left, text="Duplicate Handling", style="CardSection.TLabel").grid(row=6, column=0, sticky="w", pady=(6, 0))
+        # Each option is one row (label, combobox) with its hint underneath.
+        options = ttk.Frame(left, style="CardInner.TFrame")
+        options.grid(row=6, column=0, columnspan=3, sticky="ew")
+        options.columnconfigure(1, weight=1)
+        ttk.Label(options, text="Duplicates", style="CardSection.TLabel").grid(row=0, column=0, sticky="w", padx=(0, 10))
         duplicate_combo = ttk.Combobox(
-            left,
+            options,
             textvariable=self.duplicate_var,
             values=list(DUPLICATE_POLICY_LABELS.values()),
             state="readonly",
         )
-        duplicate_combo.grid(row=7, column=0, columnspan=3, sticky="ew", pady=(4, 8))
+        duplicate_combo.grid(row=0, column=1, sticky="ew")
+        duplicate_hint = ttk.Label(options, textvariable=self.duplicate_hint_var, style="CardMuted.TLabel", justify="left")
+        duplicate_hint.grid(row=1, column=0, columnspan=2, sticky="w", pady=(2, 6))
 
-        ttk.Label(left, text="Copy Verification", style="CardSection.TLabel").grid(row=8, column=0, sticky="w", pady=(6, 0))
+        ttk.Label(options, text="Verify copy", style="CardSection.TLabel").grid(row=2, column=0, sticky="w", padx=(0, 10))
         verify_combo = ttk.Combobox(
-            left,
+            options,
             textvariable=self.verify_var,
             values=list(VERIFY_MODE_LABELS.values()),
             state="readonly",
         )
-        verify_combo.grid(row=9, column=0, columnspan=3, sticky="ew", pady=(4, 8))
+        verify_combo.grid(row=2, column=1, sticky="ew")
+        verify_hint = ttk.Label(options, textvariable=self.verify_hint_var, style="CardMuted.TLabel", justify="left")
+        verify_hint.grid(row=3, column=0, columnspan=2, sticky="w", pady=(2, 4))
         self._input_controls.extend((duplicate_combo, verify_combo))
+        self._wrap_labels.extend(((duplicate_hint, left, 40), (verify_hint, left, 40)))
+        duplicate_combo.bind("<<ComboboxSelected>>", self._update_option_hints)
+        verify_combo.bind("<<ComboboxSelected>>", self._update_option_hints)
+        self.duplicate_var.trace_add("write", self._update_option_hints)
+        self.verify_var.trace_add("write", self._update_option_hints)
+        self._update_option_hints()
 
         dry_run_button = ttk.Checkbutton(
             left,
@@ -209,63 +409,64 @@ class DSBApp(tk.Tk):
             variable=self.dry_run_var,
             style="Card.TCheckbutton",
         )
-        dry_run_button.grid(row=10, column=0, columnspan=3, sticky="w", pady=(2, 10))
+        dry_run_button.grid(row=7, column=0, columnspan=3, sticky="w", pady=(0, 4))
         self._input_controls.append(dry_run_button)
 
-        ttk.Label(left, text="Backup Rule", style="CardSection.TLabel").grid(row=11, column=0, sticky="w")
-        ttk.Label(left, text="YYYY / MM / MMDD / file_type", style="CardMuted.TLabel").grid(
-            row=12, column=0, columnspan=3, sticky="w", pady=(2, 0)
-        )
-        ttk.Label(left, text="Example: 2026 / 05 / 0503 / cr3", style="CardMuted.TLabel").grid(
-            row=13, column=0, columnspan=3, sticky="w"
-        )
+        rule_label = ttk.Label(left, textvariable=self.rule_var, style="CardMuted.TLabel", justify="left")
+        rule_label.grid(row=8, column=0, columnspan=3, sticky="w")
+        self._wrap_labels.append((rule_label, left, 40))
+
+        left.rowconfigure(9, weight=1)  # spare height collects above the buttons
 
         buttons = ttk.Frame(left, style="CardInner.TFrame")
-        buttons.grid(row=14, column=0, columnspan=3, sticky="ew", pady=(16, 8))
-        for column in range(3):
-            buttons.columnconfigure(column, weight=1)
-        self.analyze_button = ttk.Button(buttons, text="Analyze Files", command=self._start_analysis)
-        self.preview_button = ttk.Button(buttons, text="Preview Tree", command=self._preview_tree)
-        self.backup_button = ttk.Button(
-            buttons, text="Start Backup", style="Accent.TButton", command=self._start_backup
-        )
+        buttons.grid(row=10, column=0, columnspan=3, sticky="ew", pady=(8, 6))
+        for column in range(2):
+            buttons.columnconfigure(column, weight=1, uniform="actions")
+        self.analyze_button = ttk.Button(buttons, text="Analyze", command=self._start_analysis)
+        self.backup_button = ttk.Button(buttons, text="Start Backup", command=self._start_backup)
         self.cancel_button = ttk.Button(buttons, text="Cancel", command=self._cancel_task)
+        self.results_button = ttk.Button(buttons, text="Job Results...", command=self._open_job_results)
         self.open_button = ttk.Button(buttons, text="Open Backup Folder", command=self._open_backup_folder)
         self.handoff_button = ttk.Button(
             buttons, text="Open in Image Manager", command=self._open_in_image_manager
         )
-        self.analyze_button.grid(row=0, column=0, sticky="ew", padx=(0, 6))
-        self.preview_button.grid(row=0, column=1, sticky="ew", padx=6)
-        self.backup_button.grid(row=0, column=2, sticky="ew", padx=(6, 0))
-        self.cancel_button.grid(row=1, column=0, sticky="ew", padx=(0, 6), pady=(6, 0))
-        self.open_button.grid(row=1, column=1, sticky="ew", padx=6, pady=(6, 0))
-        self.handoff_button.grid(row=1, column=2, sticky="ew", padx=(6, 0), pady=(6, 0))
-        ttk.Button(buttons, text="Job Results...", command=self._open_job_results).grid(
-            row=2, column=0, sticky="ew", padx=(0, 6), pady=(6, 0)
-        )
+        self.analyze_button.grid(row=0, column=0, sticky="ew", padx=(0, 4))
+        self.backup_button.grid(row=0, column=1, sticky="ew", padx=(4, 0))
+        self.cancel_button.grid(row=1, column=0, sticky="ew", padx=(0, 4), pady=(6, 0))
+        self.results_button.grid(row=1, column=1, sticky="ew", padx=(4, 0), pady=(6, 0))
+        self.open_button.grid(row=2, column=0, sticky="ew", padx=(0, 4), pady=(6, 0))
+        self.handoff_button.grid(row=2, column=1, sticky="ew", padx=(4, 0), pady=(6, 0))
+        Tooltip(self.cancel_button, CANCEL_HINT)
 
-        progress_frame = ttk.LabelFrame(left, text="Progress", padding=12)
-        progress_frame.grid(row=15, column=0, columnspan=3, sticky="ew", pady=(10, 0))
+        progress_frame = ttk.LabelFrame(left, text="Progress", padding=(10, 6))
+        progress_frame.grid(row=11, column=0, columnspan=3, sticky="ew", pady=(4, 0))
         progress_frame.columnconfigure(0, weight=1)
+        progress_frame.rowconfigure(1, minsize=38)  # room for two status lines
         ttk.Progressbar(progress_frame, variable=self.progress_var, maximum=100).grid(row=0, column=0, sticky="ew")
-        ttk.Label(progress_frame, textvariable=self.status_var, style="CardMuted.TLabel").grid(
-            row=1, column=0, sticky="w", pady=(8, 0)
-        )
+        status_label = ttk.Label(progress_frame, textvariable=self.status_var, style="CardMuted.TLabel", justify="left")
+        status_label.grid(row=1, column=0, sticky="nw", pady=(6, 0))
+        self._wrap_labels.append((status_label, left, 56))
+        left.bind("<Configure>", self._rewrap_labels, add="+")
 
-        right.rowconfigure(3, weight=2)
-        right.rowconfigure(5, weight=3)
+        right.rowconfigure(3, weight=2, minsize=80)
+        right.rowconfigure(5, weight=3, minsize=64)
 
         ttk.Label(right, text="Summary", style="CardSection.TLabel").grid(row=0, column=0, sticky="w")
         summary_label = ttk.Label(right, textvariable=self.summary_var, justify="left", style="Card.TLabel")
         summary_label.grid(row=1, column=0, sticky="ew", pady=(4, 12))
+        self._wrap_labels.append((summary_label, right, 56))
+        right.bind("<Configure>", self._rewrap_labels, add="+")
+        # Start narrow so long paths cannot widen a pane; the real width is applied on resize.
+        for wrapped, _container, _margin in self._wrap_labels:
+            wrapped.configure(wraplength=300)
 
         ttk.Label(right, text="Date Preview", style="CardSection.TLabel").grid(row=2, column=0, sticky="w")
         columns = ("date", "folder", "files", "status")
         self.preview_treeview = ttk.Treeview(right, columns=columns, show="headings", height=10)
         self.preview_treeview.grid(row=3, column=0, sticky="nsew", pady=(6, 0))
-        for column, width in zip(columns, (110, 220, 220, 100)):
+        for column, width in zip(columns, (90, 140, 140, 70)):
             self.preview_treeview.heading(column, text=column.title())
-            self.preview_treeview.column(column, width=width, anchor="w")
+            self.preview_treeview.column(column, width=width, minwidth=50, anchor="w")
         tree_scroll = ttk.Scrollbar(right, orient="vertical", command=self.preview_treeview.yview)
         tree_scroll.grid(row=3, column=1, sticky="ns", pady=(6, 0))
         self.preview_treeview.configure(yscrollcommand=tree_scroll.set)
@@ -273,7 +474,7 @@ class DSBApp(tk.Tk):
         ttk.Label(right, text="Folder Tree Preview", style="CardSection.TLabel").grid(
             row=4, column=0, sticky="w", pady=(12, 0)
         )
-        self.folder_preview = tk.Text(right, height=10, wrap="none")
+        self.folder_preview = tk.Text(right, height=10, width=20, wrap="none")
         style_text_widget(self.folder_preview)
         self.folder_preview.grid(row=5, column=0, sticky="nsew", pady=(6, 0))
         folder_scroll = ttk.Scrollbar(right, orient="vertical", command=self.folder_preview.yview)
@@ -281,23 +482,57 @@ class DSBApp(tk.Tk):
         self.folder_preview.configure(yscrollcommand=folder_scroll.set)
 
         ttk.Label(right, text="Log", style="CardSection.TLabel").grid(row=6, column=0, sticky="w", pady=(12, 0))
-        self.log_text = tk.Text(right, height=12, wrap="word")
+        self.log_text = tk.Text(right, height=12, width=20, wrap="word")
         style_text_widget(self.log_text)
         self.log_text.grid(row=7, column=0, sticky="nsew", pady=(6, 0))
         log_scroll = ttk.Scrollbar(right, orient="vertical", command=self.log_text.yview)
         log_scroll.grid(row=7, column=1, sticky="ns", pady=(6, 0))
         self.log_text.configure(yscrollcommand=log_scroll.set)
-        right.rowconfigure(7, weight=2)
+        right.rowconfigure(7, weight=2, minsize=80)
 
     def _bind_events(self) -> None:
         for variable in (self.source_var, self.destination_var, *self.type_vars.values(), *self.brand_vars.values()):
             variable.trace_add("write", self._invalidate_analysis)
+        self.bind("<Return>", self._on_enter)
+        self.bind("<KP_Enter>", self._on_enter)
+
+    def _rewrap_labels(self, _event=None) -> None:
+        for label, container, margin in self._wrap_labels:
+            width = container.winfo_width() - margin
+            if width > 100:
+                label.configure(wraplength=width)
+
+    def _update_option_hints(self, *_args) -> None:
+        self.duplicate_hint_var.set(DUPLICATE_POLICY_HINTS[self._selected_duplicate_policy()])
+        self.verify_hint_var.set(VERIFY_MODE_HINTS[self._selected_verify_mode()])
+
+    def _primary_action(self):
+        """(button, command) the Enter key triggers: Analyze first, Start Backup once analyzed."""
+        if self.current_summary is not None:
+            return self.backup_button, self._start_backup
+        return self.analyze_button, self._start_analysis
+
+    def _on_enter(self, event=None) -> str | None:
+        focused = self.focus_get()
+        # Enter in the logs or on another button keeps its usual meaning.
+        if isinstance(focused, (tk.Text, ttk.Button, ttk.Combobox)):
+            return None
+        button, command = self._primary_action()
+        if str(button.cget("state")) == "disabled":
+            return None
+        command()
+        return "break"
 
     def _invalidate_analysis(self, *_args) -> None:
+        had_plan = self.current_summary is not None
         self.current_summary = None
         if not self.is_busy:
-            self.summary_var.set("Folders or file types changed. Run Analyze Files again.")
-            self.status_var.set("Run Analyze Files to update the backup plan.")
+            if had_plan:
+                self.summary_var.set("Folders or file types changed. Press Analyze to update the plan.")
+                self.status_var.set("Press Analyze to update the backup plan.")
+            else:
+                self.summary_var.set(EMPTY_STATE_TEXT)
+            self.rule_var.set(RULE_HINT_BEFORE)
         self._update_button_states()
 
     def _browse_source(self) -> None:
@@ -376,7 +611,7 @@ class DSBApp(tk.Tk):
         source = Path(self.source_var.get().strip())
         destination = Path(self.destination_var.get().strip())
         if not source.is_dir():
-            messagebox.showerror("Invalid Source", "Select a valid source folder.")
+            messagebox.showerror("Invalid Source", INVALID_SOURCE_MESSAGE)
             return
         if not self._destination_usable(destination):
             return
@@ -400,7 +635,7 @@ class DSBApp(tk.Tk):
         }
         # The analysis loop has no cancellation point, so Cancel stays disabled.
         self.is_analyzing = True
-        self._set_busy(True, "Analyzing files...")
+        self._set_busy(True, f"Analyzing files — {ANALYZING_SUFFIX}. {CANCEL_HINT}")
         self._run_worker(self._analyze_worker)
 
     def _destination_usable(self, destination: Path) -> bool:
@@ -424,27 +659,18 @@ class DSBApp(tk.Tk):
         )
         self.ui_queue.put(("analysis_done", summary))
 
-    def _preview_tree(self) -> None:
-        if not self.current_summary:
-            messagebox.showinfo("Preview", "Run Analyze Files first.")
-            return
-        self.folder_preview.focus_set()
-        self.status_var.set("Folder preview refreshed.")
-
     def _start_backup(self) -> None:
         if self.is_busy or self._closing:
             return
         if not self.current_summary:
-            messagebox.showinfo("Backup", "Run Analyze Files first.")
+            messagebox.showinfo("Backup", "Press Analyze first.")
             return
 
-        total = len(self.current_summary.items)
-        destination = str(self.current_summary.backup_root)
-        confirmed = messagebox.askyesno(
-            "Start Backup",
-            f"{total} files will be processed.\n\nDestination:\n{destination}\n\nContinue?",
+        dry_run = self.dry_run_var.get()
+        title, body = build_confirmation(
+            self.current_summary, self.duplicate_var.get(), self.verify_var.get(), dry_run
         )
-        if not confirmed:
+        if not messagebox.askyesno(title, body):
             return
 
         self._save_settings()
@@ -454,10 +680,10 @@ class DSBApp(tk.Tk):
             "destination": str(self.current_summary.backup_root),
             "duplicate_policy": self._selected_duplicate_policy(),
             "verify_mode": self._selected_verify_mode(),
-            "dry_run": self.dry_run_var.get(),
+            "dry_run": dry_run,
             "retry": None,
         }
-        self._set_busy(True, "Starting backup...")
+        self._set_busy(True, "Starting dry run..." if dry_run else "Starting backup...")
         self._run_worker(self._backup_worker)
 
     def _backup_worker(self) -> None:
@@ -474,11 +700,20 @@ class DSBApp(tk.Tk):
             if self._record_backup_session(result) is None:
                 self.ui_queue.put(("record_warning", "Backup finished, but Job Results could not be saved."))
         self.ui_queue.put(("backup_done", result))
+        if not result.dry_run and self.pending_backup["retry"] is None:
+            # The folders now exist: refresh the "new" markers in the previews.
+            try:
+                rows, lines = build_preview(
+                    self.pending_backup["items"], Path(self.pending_backup["destination"])
+                )
+            except (OSError, ValueError):
+                return
+            self.ui_queue.put(("preview_refresh", self.pending_backup["destination"], rows, lines))
 
     def _cancel_task(self) -> None:
         if self.is_busy and not self.is_analyzing:
             self.cancel_event.set()
-            self.status_var.set("Cancel requested. Waiting for current file to finish...")
+            self.status_var.set(STOPPING_STATUS)
             self._update_button_states()
 
     def _request_close(self) -> None:
@@ -498,8 +733,8 @@ class DSBApp(tk.Tk):
         self.status_var.set("Closing safely. Waiting for the running task and its results...")
         self._update_button_states()
 
-    def _open_in_image_manager(self) -> None:
-        destination = self.destination_var.get().strip()
+    def _open_in_image_manager(self, destination: str | None = None) -> None:
+        destination = self.destination_var.get().strip() if destination is None else destination
         if not destination or not Path(destination).is_dir():
             messagebox.showerror("Missing Folder", "Backup destination does not exist.")
             return
@@ -568,8 +803,8 @@ class DSBApp(tk.Tk):
         self.pending_backup["items"] = items
         self._backup_worker()
 
-    def _open_backup_folder(self) -> None:
-        destination = Path(self.destination_var.get())
+    def _open_backup_folder(self, destination: str | None = None) -> None:
+        destination = Path(self.destination_var.get() if destination is None else destination)
         if destination.exists():
             os.startfile(destination)  # type: ignore[attr-defined]
         else:
@@ -587,6 +822,15 @@ class DSBApp(tk.Tk):
             target()
         except Exception as exc:  # pragma: no cover - UI/runtime specific
             self.ui_queue.put(("error", str(exc)))
+
+    def _display_log_line(self, level: str, message: str) -> str | None:
+        job = getattr(self, "pending_backup", None) or {}
+        return format_display_line(
+            level,
+            message,
+            destination=job.get("destination"),
+            verify_mode=job.get("verify_mode"),
+        )
 
     def _queue_log(self, line: str) -> None:
         self.ui_queue.put(("log", line))
@@ -615,7 +859,7 @@ class DSBApp(tk.Tk):
                 progress = 0 if total == 0 else (current / total) * 100
                 self.progress_var.set(progress)
                 if not self.cancel_event.is_set() and not self._closing:
-                    self.status_var.set(f"{stage.title()} {current}/{total}: {name}")
+                    self.status_var.set(self._progress_text(stage, current, total, name))
             elif kind == "analysis_done":
                 summary = item[1]
                 job = self.pending_analysis
@@ -624,35 +868,37 @@ class DSBApp(tk.Tk):
                         and job["enabled_types"] == self._selected_types()):
                     self.current_summary = summary
                     self._render_summary()
-                    self._set_busy(False, "Analysis completed.")
+                    self._set_busy(False, self._analysis_done_status(summary))
                 else:
                     self.current_summary = None
-                    self._set_busy(False, "Inputs changed. Run Analyze Files again.")
+                    self._set_busy(False, "Inputs changed. Press Analyze again.")
             elif kind == "backup_done":
                 result = item[1]
-                if result.cancelled:
-                    status = "Backup cancelled."
-                elif result.dry_run:
-                    status = f"Dry run completed. Planned copies: {result.copied}"
-                else:
-                    status = (
-                        f"Backup completed. Copied: {result.copied}, "
-                        f"Verified: {result.verified}, "
-                        f"Verify failed: {result.verification_failed}, "
-                        f"Skipped: {result.skipped}, "
-                        f"Errors: {result.errors}"
-                    )
+                status = build_completion_status(result)
                 self._render_backup_result(result)
-                self._set_busy(False, status)
-                if not self._closing and not result.dry_run and (result.verification_failed or result.errors):
-                    messagebox.showwarning(
+                # A finished run stays at 100%; a stopped one keeps where it got to.
+                self._set_busy(False, status, progress=None if result.cancelled else 100.0)
+                if self._closing or result.dry_run or result.cancelled:
+                    pass
+                elif result.verification_failed or result.errors:
+                    if messagebox.askyesno(
                         "Backup Warnings",
                         f"{result.verification_failed} file(s) failed verification and "
                         f"{result.errors} total error(s) occurred.\n\n"
-                        "Failed files were NOT written to the backup destination — "
-                        "existing backups are untouched. Open Job Results and use "
-                        "Retry Failed to run just those files again.",
-                    )
+                        "Failed files were NOT written to the backup destination, "
+                        "so existing backups are untouched.\n\n"
+                        "Open Job Results now? Use Retry Failed there to run just "
+                        "those files again.",
+                    ):
+                        self._open_job_results()
+                elif result.total:
+                    self._show_completion_dialog(status)
+            elif kind == "preview_refresh":
+                _, destination, rows, lines = item
+                if self.current_summary is not None and same_folder(
+                    self.current_summary.backup_root, destination
+                ):
+                    self._render_preview(rows, lines)
             elif kind == "error":
                 self._closing = False
                 self._set_busy(False, item[1])
@@ -669,53 +915,110 @@ class DSBApp(tk.Tk):
 
     def _render_summary(self) -> None:
         summary = self.current_summary
-        total = sum(summary.counts.values())
-        if summary.date_range[0] and summary.date_range[1]:
-            date_range = (
-                f"{summary.date_range[0]:%Y-%m-%d} ~ "
-                f"{summary.date_range[1]:%Y-%m-%d}"
-            )
-        else:
-            date_range = "No supported files found"
-
-        summary_text = (
-            f"Source: {summary.source_dir}\n"
-            f"Destination: {summary.backup_root}\n"
-            f"Total: {total}\n"
-            f"Files: {self._format_type_counts(summary.counts)}\n"
-            f"Date Range: {date_range}\n"
-            f"Log File: {self.logger.log_path}"
-        )
+        total = len(summary.items)
+        span = format_day_span(summary.date_range)
+        lines = [
+            f"Source: {summary.source_dir}",
+            f"Destination: {summary.backup_root}",
+            f"Total: {_plural(total, 'file')} ({format_size(summary.total_size)})",
+            f"Files: {format_type_counts(summary.counts)}",
+            f"Dates: {span}" if span else "Dates: No supported files found",
+        ]
+        if summary.free_space is not None:
+            lines.append(f"Free space at destination: {format_size(summary.free_space)}")
+        for note in (
+            free_space_warning(summary.total_size, summary.free_space),
+            fallback_note(summary.fallback_count),
+        ):
+            if note:
+                lines.append(note)
+        lines.append(f"Log File: {self.logger.log_path}")
+        summary_text = "\n".join(lines)
         self._summary_text = summary_text
         self.summary_var.set(summary_text)
+        self.rule_var.set(example_folder_text(summary))
+        self._render_preview(summary.preview_rows, summary.folder_tree_lines)
 
+    def _render_preview(self, preview_rows, folder_tree_lines) -> None:
         for row_id in self.preview_treeview.get_children():
             self.preview_treeview.delete(row_id)
-        for row in summary.preview_rows:
+        for row in preview_rows:
             self.preview_treeview.insert(
                 "",
                 "end",
                 values=(
                     row.date_label,
                     row.folder_rel_path.as_posix(),
-                    self._format_type_counts(row.type_counts),
+                    format_type_counts(row.type_counts),
                     row.status,
                 ),
             )
 
         self.folder_preview.delete("1.0", "end")
-        self.folder_preview.insert("1.0", "\n".join(summary.folder_tree_lines))
+        self.folder_preview.insert("1.0", "\n".join(folder_tree_lines))
         self.folder_preview.see("1.0")
 
-    def _format_type_counts(self, counts: dict[str, int]) -> str:
-        parts = []
-        definitions = get_file_type_definitions()
-        for file_type in FILE_TYPE_ORDER:
-            count = counts.get(file_type, 0)
-            if count:
-                label = "JPG" if file_type == "jpg" else definitions[file_type]["label"].split(" ")[-1]
-                parts.append(f"{label}: {count}")
-        return " / ".join(parts) if parts else "None"
+    def _progress_text(self, stage: str, current: int, total: int, name: str) -> str:
+        if stage == "analyze":
+            return f"Analyzing {current}/{total}: {name} — {ANALYZING_SUFFIX}"
+        verb = "Checking" if self.pending_backup and self.pending_backup.get("dry_run") else "Copying"
+        return f"{verb} {current}/{total}: {name}"
+
+    def _analysis_done_status(self, summary) -> str:
+        count = len(summary.items)
+        if not count:
+            return "Analysis done: no supported files found in the source folder."
+        return (
+            f"Analysis done: {_plural(count, 'file')} ready to copy. "
+            "Press Start Backup when you are ready."
+        )
+
+    def _show_completion_dialog(self, status: str) -> None:
+        """A small "all done" dialog with the next steps a photographer wants."""
+        # A retry uses its recorded destination even if the form shows another job.
+        destination = (self.pending_backup or {}).get("destination", self.destination_var.get().strip())
+        dialog = tk.Toplevel(self)
+        dialog.title(NDEX_ONE_TITLE)
+        dialog.transient(self)
+        dialog.resizable(False, False)
+        frame = ttk.Frame(dialog, padding=20, style="Card.TFrame")
+        frame.pack(fill="both", expand=True)
+        ttk.Label(frame, text="Backup complete", style="CardSection.TLabel").pack(anchor="w")
+        ttk.Label(frame, text=status, style="Card.TLabel", wraplength=380, justify="left").pack(
+            anchor="w", pady=(6, 14)
+        )
+        ttk.Label(frame, text=f"Destination: {destination}", style="CardMuted.TLabel",
+                  wraplength=380, justify="left").pack(anchor="w", pady=(0, 14))
+        row = ttk.Frame(frame, style="CardInner.TFrame")
+        row.pack(fill="x")
+
+        def run(command) -> None:
+            dialog.destroy()
+            command()
+
+        ttk.Button(
+            row, text="Open Backup Folder",
+            command=lambda: run(lambda: self._open_backup_folder(destination)),
+        ).pack(
+            side="left", padx=(0, 6)
+        )
+        ttk.Button(
+            row, text="Open in Image Manager",
+            command=lambda: run(lambda: self._open_in_image_manager(destination)),
+        ).pack(
+            side="left", padx=(0, 6)
+        )
+        close = ttk.Button(row, text="Close", style="Accent.TButton", command=dialog.destroy)
+        close.pack(side="right")
+        dialog.bind("<Escape>", lambda _e: dialog.destroy())
+        dialog.bind("<Return>", lambda _e: dialog.destroy())
+        dialog.update_idletasks()
+        x = self.winfo_rootx() + (self.winfo_width() - dialog.winfo_reqwidth()) // 2
+        y = self.winfo_rooty() + (self.winfo_height() - dialog.winfo_reqheight()) // 2
+        dialog.geometry(f"+{max(x, 0)}+{max(y, 0)}")
+        close.focus_set()
+        dialog.grab_set()
+        self.wait_window(dialog)
 
     def _record_backup_session(self, result) -> Path | None:
         from ndex_common.workflow import record_backup
@@ -732,22 +1035,26 @@ class DSBApp(tk.Tk):
         )
 
     def _render_backup_result(self, result) -> None:
-        header = "Dry Run Result" if result.dry_run else "Backup Result"
+        header = "Dry run result (nothing was copied)" if result.dry_run else "Backup result"
+        verb = "would be copied" if result.dry_run else "copied"
         lines = [
-            f"{header}: {result.copied} of {result.total} copied",
-            f"  Verified: {result.verified} / Verify failed: {result.verification_failed}",
-            f"  Skipped: {result.skipped} / Overwritten: {result.overwritten} / Errors: {result.errors}",
+            f"{header}: {result.copied} of {result.total} {verb}",
+            f"  Verified {result.verified} · Verify failed {result.verification_failed}",
+            f"  Skipped {result.skipped} · Overwritten {result.overwritten} · Errors {result.errors}",
         ]
         if result.cancelled:
-            lines.append("  Cancelled by user before completion.")
+            lines.append(f"  Stopped early; {not_run_count(result)} files not run.")
         self.summary_var.set(self._summary_text + "\n\n" + "\n".join(lines))
 
-    def _set_busy(self, busy: bool, status: str) -> None:
+    def _set_busy(self, busy: bool, status: str, progress: float | None = 0.0) -> None:
+        """Switch between working and idle. ``progress`` is the bar value once idle
+        (None leaves it where it is)."""
         self.is_busy = busy
         self.status_var.set(status)
         if not busy:
             self.is_analyzing = False
-            self.progress_var.set(0.0)
+            if progress is not None:
+                self.progress_var.set(progress)
         self._update_button_states()
 
     def _update_button_states(self) -> None:
@@ -758,8 +1065,10 @@ class DSBApp(tk.Tk):
         for control in self._input_controls:
             control.state(["disabled"] if blocked else ["!disabled"])
         self.analyze_button.config(state="disabled" if blocked or not has_paths else "normal")
-        self.preview_button.config(state="disabled" if blocked or not has_analysis else "normal")
         self.backup_button.config(state="disabled" if blocked or not has_analysis else "normal")
+        # One accent button at a time: the next step the user should take.
+        self.analyze_button.config(style="TButton" if has_analysis else "Accent.TButton")
+        self.backup_button.config(style="Accent.TButton" if has_analysis else "TButton")
         self.cancel_button.config(
             state="normal" if self.is_busy and not self.is_analyzing and not self.cancel_event.is_set() else "disabled"
         )

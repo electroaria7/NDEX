@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 from pathlib import Path
 
 from .file_types import get_extensions_for_types
@@ -56,6 +57,29 @@ def same_folder(first: Path | str, second: Path | str) -> bool:
     return key(first) == key(second)
 
 
+def get_free_space(path: Path) -> int | None:
+    """Free bytes on the disk that holds ``path`` (or its nearest existing parent)."""
+    probe = Path(path)
+    try:
+        while not probe.exists():
+            if probe.parent == probe:
+                return None
+            probe = probe.parent
+        return shutil.disk_usage(probe).free
+    except OSError:
+        return None
+
+
+def total_size_of(items: list[ScanItem]) -> int:
+    total = 0
+    for item in items:
+        try:
+            total += item.source_path.stat().st_size
+        except OSError:
+            pass
+    return total
+
+
 def analyze_source(
     source_dir: Path,
     backup_root: Path,
@@ -98,6 +122,9 @@ def analyze_source(
         date_range=date_range,
         preview_rows=preview_rows,
         folder_tree_lines=folder_tree_lines,
+        total_size=total_size_of(items),
+        free_space=get_free_space(backup_root),
+        fallback_count=sum(1 for item in items if item.fallback_used),
     )
 
 

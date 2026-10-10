@@ -40,6 +40,36 @@ def _report(app: str, type: str, created_at: str, counts: dict) -> JobReport:
     )
 
 
+class FolderNameTests(unittest.TestCase):
+    def test_shows_only_the_last_path_component(self) -> None:
+        self.assertEqual(launcher_state.folder_display_name("C:/Photos/2026-10-10 Trip"), "2026-10-10 Trip")
+        self.assertEqual(launcher_state.folder_display_name("C:\\Photos\\Trip\\"), "Trip")
+        self.assertEqual(launcher_state.folder_display_name("/mnt/card/DCIM"), "DCIM")
+
+    def test_drive_roots_and_blanks_are_left_alone(self) -> None:
+        self.assertEqual(launcher_state.folder_display_name("E:\\"), "E:\\")
+        self.assertEqual(launcher_state.folder_display_name(""), "")
+
+    def test_status_text_and_tooltip(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp) / "Trip"
+            folder.mkdir()
+            step = launcher_state.StepState(key="k", title="t", description="d", last_folder=str(folder),
+                                            launch_args=["--continue"])
+            self.assertEqual(step.status_text, "Last: Trip")
+            self.assertEqual(step.status_tooltip, str(folder))
+            gone = launcher_state.StepState(key="k", title="t", description="d", last_folder="Z:/gone/Trip")
+            self.assertEqual(gone.status_text, "Last folder missing: Trip")
+
+    def test_problem_results_are_flagged(self) -> None:
+        step = launcher_state.StepState(key="k", title="t", description="d")
+        self.assertFalse(step.result_is_problem)
+        step.last_result = _report("ndex_one", "backup", "2026-10-10T08:00:00Z", {"copied": 3})
+        self.assertFalse(step.result_is_problem)
+        step.last_result = _report("ndex_one", "backup", "2026-10-10T08:00:00Z", {"copied": 3, "failed": 1})
+        self.assertTrue(step.result_is_problem)
+
+
 class LauncherStateTests(unittest.TestCase):
     def test_gather_state_with_empty_settings(self) -> None:
         with patch.object(launcher_state, "load_all", return_value={}):
@@ -108,7 +138,7 @@ class LauncherStateTests(unittest.TestCase):
 
         self.assertTrue(steps[3].has_session)
         self.assertEqual(steps[3].launch_args[:3], ["--open", "--handoff", str(handoff)])
-        self.assertEqual(steps[3].status_text, f"Last handoff: {handoff}")
+        self.assertEqual(steps[3].status_text, f"Last handoff: {handoff.name}")
 
     def test_frame_status_reports_missing_folder_when_handoff_is_stale(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
