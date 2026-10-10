@@ -47,7 +47,7 @@ class ImageScanner:
                 file_ext=path.suffix.lower().lstrip("."),
                 base_name=path.stem,
                 media_type=media_type_for_path(path),
-                pair_group_id=path.stem.lower(),
+                pair_group_id=_pair_group_id(path),
                 pair_status=pair_status.get(path, "unknown"),
                 display_source=display_source,
                 proxy_path=display_source if path.suffix.lower() not in {".jpg", ".jpeg"} else None,
@@ -74,6 +74,7 @@ class ImageScanner:
             records.append(record)
 
         saved = catalog.upsert_images(records)
+        catalog.remove_missing_under(source_dir, {record.file_path for record in records}, recursive=recursive)
         catalog.set_setting("last_opened_folder", str(source_dir))
         catalog.close()
         return ScanResult(source_dir=source_dir, catalog_path=cache_dir / "catalog.sqlite", records=saved)
@@ -94,7 +95,7 @@ class ImageScanner:
     def _pair_status_by_path(paths: list[Path]) -> dict[Path, PairStatus]:
         groups: dict[str, list[Path]] = defaultdict(list)
         for path in paths:
-            groups[path.stem.lower()].append(path)
+            groups[_pair_group_id(path)].append(path)
 
         statuses: dict[Path, PairStatus] = {}
         for group_paths in groups.values():
@@ -111,3 +112,8 @@ class ImageScanner:
             for path in group_paths:
                 statuses[path] = status
         return statuses
+
+
+def _pair_group_id(path: Path) -> str:
+    # RAW/JPG pairs only count within one folder: camera counters roll over across cards.
+    return f"{str(path.parent).casefold()}|{path.stem.casefold()}"
