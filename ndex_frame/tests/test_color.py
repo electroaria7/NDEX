@@ -207,9 +207,11 @@ class ColorPreparationTests(unittest.TestCase):
         self.assertEqual(exif.get(COPYRIGHT_TAG), "Joseph")
         self.assertNotIn(GPS_TAG, exif)
 
-    def test_mismatched_non_rgb_profile_reports_transform_error(self) -> None:
-        with self.assertRaises(ImageCms.PyCMSError):
-            prepare_master(self.lab_profile_path, MetadataPolicy())
+    def test_mismatched_non_rgb_profile_falls_back_with_warning(self) -> None:
+        prepared = prepare_master(self.lab_profile_path, MetadataPolicy())
+        self.addCleanup(prepared.image.close)
+        self.assertEqual(prepared.image.mode, "RGB")
+        self.assertIn("색상 프로필 변환 실패, 기본 변환 사용", prepared.warnings)
 
     def test_prepared_bytes_round_trip_with_icc_and_without_gps(self) -> None:
         prepared = prepare_master(self.exif_path, MetadataPolicy(remove_gps=True))
