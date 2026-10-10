@@ -14,6 +14,7 @@ Path rules:
 from __future__ import annotations
 
 import os
+import uuid
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from pathlib import Path
@@ -64,21 +65,29 @@ def write_xmp_sidecar(
     rating: int | None = None,
     label: str | None = None,
     keywords: Iterable[str] = (),
+    remove_keywords: Iterable[str] = (),
+    clear_label_if: Iterable[str] = (),
 ) -> Path:
     """Write or merge an XMP sidecar next to ``target_path``.
 
     Existing sidecars are merged: unknown fields are preserved, and the
-    fields passed here are updated. Returns the sidecar path.
+    fields passed here are updated. ``remove_keywords`` drops those keywords
+    first, and ``clear_label_if`` clears the current label only when it is
+    one of the given values (so labels the user chose are never deleted).
+    Returns the sidecar path.
     """
     xmp_path = sidecar_path_for(target_path)
     tree, description = _load_or_create(target_path, xmp_path)
 
+    _remove_subject_keywords(description, {(k or "").strip() for k in remove_keywords})
+    _clear_label_if(description, {(v or "").strip() for v in clear_label_if})
+
     if rating is not None:
         clamped = max(0, min(5, int(rating)))
-        description.set(f"{{{XMP_NS}}}Rating", str(clamped))
+        _set_simple_property(description, "Rating", str(clamped))
     if label:
-        description.set(f"{{{XMP_NS}}}Label", label.strip())
-    description.set(f"{{{XMP_NS}}}MetadataDate", datetime.now(timezone.utc).isoformat())
+        _set_simple_property(description, "Label", label.strip())
+    _set_simple_property(description, "MetadataDate", datetime.now(timezone.utc).isoformat())
 
     for keyword in keywords:
         keyword = (keyword or "").strip()
@@ -92,7 +101,7 @@ def write_xmp_sidecar(
 
 def _write_atomic(xmp_path: Path, tree: ET.ElementTree) -> None:
     xmp_path.parent.mkdir(parents=True, exist_ok=True)
-    temp_path = xmp_path.with_name(f".{xmp_path.name}.ndex_tmp")
+    temp_path = xmp_path.with_name(f".{xmp_path.name}.{uuid.uuid4().hex}.ndex_tmp")
     try:
         tree.write(temp_path, encoding="utf-8", xml_declaration=True)
         os.replace(temp_path, xmp_path)
@@ -105,7 +114,10 @@ def _write_atomic(xmp_path: Path, tree: ET.ElementTree) -> None:
 
 
 def _load_or_create(target_path: Path, xmp_path: Path) -> tuple[ET.ElementTree, ET.Element]:
-    for candidate in sidecar_paths_for_read(target_path):
+    # Merge only from the sidecar this target owns. The legacy ``IMG_1.xmp``
+    # next to a JPG belongs to the paired RAW, so it must not leak into
+    # ``IMG_1.JPG.xmp``.
+    for candidate in (xmp_path,):
         if not candidate.exists():
             continue
         try:
@@ -137,6 +149,41 @@ def _find_or_create_description(root: ET.Element) -> ET.Element:
     description = ET.SubElement(rdf, f"{{{RDF_NS}}}Description")
     description.set(f"{{{RDF_NS}}}about", "")
     return description
+
+
+def _set_simple_property(description: ET.Element, name: str, value: str) -> None:
+    """Set an xmp: property as an attribute, dropping a child-element form of it."""
+    tag = f"{{{XMP_NS}}}{name}"
+    for child in description.findall(tag):
+        description.remove(child)
+    description.set(tag, value)
+
+
+def _clear_label_if(description: ET.Element, owned: set[str]) -> None:
+    owned = {value for value in owned if value}
+    if not owned:
+        return
+    tag = f"{{{XMP_NS}}}Label"
+    if (description.get(tag) or "").strip() in owned:
+        del description.attrib[tag]
+    for child in description.findall(tag):
+        if (child.text or "").strip() in owned:
+            description.remove(child)
+
+
+def _remove_subject_keywords(description: ET.Element, keywords: set[str]) -> None:
+    keywords = {keyword for keyword in keywords if keyword}
+    if not keywords:
+        return
+    for subject in description.findall(f"{{{DC_NS}}}subject"):
+        for container in list(subject):
+            for item in container.findall(f"{{{RDF_NS}}}li"):
+                if (item.text or "").strip() in keywords:
+                    container.remove(item)
+            if container.find(f"{{{RDF_NS}}}li") is None:
+                subject.remove(container)
+        if len(subject) == 0:
+            description.remove(subject)
 
 
 def _ensure_subject_keyword(description: ET.Element, keyword: str) -> None:
