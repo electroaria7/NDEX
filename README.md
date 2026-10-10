@@ -30,14 +30,14 @@ Cancellation takes effect after the current file's copy, verification, or render
 The verified atomic-copy behavior from 0.9.3 remains, including preservation of existing RAW and XMP files under Auto Selector's duplicate `skip` policy.
 
 Large real-world RAW/SD-card benchmarks and Lightroom/Evoto compatibility remain follow-up work.
-Review details: [October 9 audit](docs/Improvement_Review_2026-10-09.md), [October 10 UI and task safety](docs/Improvement_Review_2026-10-10.md).
+Review details: [October 9 audit](https://github.com/electroaria7/NDEX/blob/v0.9.4/docs/Improvement_Review_2026-10-09.md), [October 10 UI and task safety](https://github.com/electroaria7/NDEX/blob/v0.9.4/docs/Improvement_Review_2026-10-10.md), [release validation](https://github.com/electroaria7/NDEX/blob/v0.9.4/docs/Release_Validation_2026-10-10.md).
 
 Preflight capacity summaries, CSV/HTML reports, localization, and release automation follow this work.
 See the [consolidated roadmap](https://github.com/electroaria7/NDEX/blob/main/docs/obsidian/NDEX/Roadmap.md).
 
 **Windows package (recommended)**
 
-1. Download `NDEX_v0.9.4.zip` from the [0.9.4 Beta release](https://github.com/electroaria7/NDEX/releases/tag/v0.9.4) when available.
+1. Download `NDEX_v0.9.4.zip` from the [0.9.4 Beta release](https://github.com/electroaria7/NDEX/releases/tag/v0.9.4).
 2. Unzip the folder. Keep `Apps\` together.
 3. Double-click `NDEX_Launcher.exe`.
 4. Use the four cards: **1. Backup** → **2. Select & Rate** → **3. Extract** → **4. Frame & Export**.

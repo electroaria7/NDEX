@@ -30,7 +30,7 @@
 0.9.3의 검증 후 원자적 복사와 Auto Selector 중복 `skip`의 기존 RAW·XMP 보존 동작은 유지합니다.
 
 실제 대량 RAW·SD카드 성능과 Lightroom/Evoto 호환성 확인은 후속 과제입니다.
-검토 기록: [10월 9일 코드 감사](docs/Improvement_Review_2026-10-09.md), [10월 10일 UI·작업 안정성](docs/Improvement_Review_2026-10-10.md).
+검토 기록: [10월 9일 코드 감사](https://github.com/electroaria7/NDEX/blob/v0.9.4/docs/Improvement_Review_2026-10-09.md), [10월 10일 UI·작업 안정성](https://github.com/electroaria7/NDEX/blob/v0.9.4/docs/Improvement_Review_2026-10-10.md), [배포 검증](https://github.com/electroaria7/NDEX/blob/v0.9.4/docs/Release_Validation_2026-10-10.md).
 
 실행 전 용량 요약·CSV/HTML 리포트·언어 통일·배포 자동화는 이후 순서입니다.
 상세 계획은 [통합 로드맵](https://github.com/electroaria7/NDEX/blob/main/docs/obsidian/NDEX/Roadmap.md)을 참고하세요.
