@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import time
 from contextlib import contextmanager
 from copy import deepcopy
 from pathlib import Path
@@ -79,6 +80,7 @@ def atomic_update(mutator: Callable[[dict], dict], path: Path | None = None) -> 
     """Reload, migrate, apply ``mutator``, and atomically write under a file lock."""
     target = path or settings_path()
     with settings_lock(target):
+        _quarantine_unparseable(target)
         current = migrate(_read_unlocked(target))
         updated = mutator(deepcopy(current))
         if not isinstance(updated, dict):
@@ -126,15 +128,50 @@ def _read_unlocked(path: Path, *, strict_io: bool = False) -> dict:
     if not path.exists():
         return {}
     try:
-        with path.open("r", encoding="utf-8") as handle:
+        with path.open("r", encoding="utf-8-sig") as handle:
             data = json.load(handle)
-    except (json.JSONDecodeError, FileNotFoundError):
+    except (ValueError, FileNotFoundError):
+        # ValueError covers JSONDecodeError and UnicodeDecodeError.
         return {}
     except OSError:
         if strict_io:
             raise
         return {}
     return data if isinstance(data, dict) else {}
+
+
+def _is_parseable(path: Path) -> bool:
+    try:
+        with path.open("r", encoding="utf-8-sig") as handle:
+            return isinstance(json.load(handle), dict)
+    except (ValueError, OSError):
+        return False
+
+
+def _quarantine_unparseable(path: Path) -> None:
+    """Move an unreadable settings file aside so a write cannot destroy it.
+
+    If a parseable ``.bak`` exists, the settings file is restored from it so
+    the other apps' sections survive.
+    """
+    if not path.exists() or _is_parseable(path):
+        return
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    corrupt = path.with_name(f"{path.name}.corrupt-{stamp}")
+    counter = 1
+    while corrupt.exists():
+        corrupt = path.with_name(f"{path.name}.corrupt-{stamp}-{counter}")
+        counter += 1
+    try:
+        os.replace(path, corrupt)
+    except OSError:
+        return
+    backup = path.with_name(f"{path.name}.bak")
+    if backup.exists() and _is_parseable(backup):
+        try:
+            shutil.copy2(backup, path)
+        except OSError:
+            pass
 
 
 def _write_unlocked(path: Path, data: dict) -> None:

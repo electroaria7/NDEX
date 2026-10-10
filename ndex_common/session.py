@@ -11,7 +11,7 @@ from __future__ import annotations
 from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 from ndex_common.locking import file_lock
 from ndex_common.jsonio import write_json_atomic
@@ -120,9 +120,13 @@ def remember(
     folders: dict[str, str] | None = None,
     last_manifest: str = "",
     context: dict[str, Any] | None = None,
+    drop_context: Iterable[str] = (),
     root: Path | None = None,
 ) -> dict[str, Any]:
-    """Write the session file and merge the snapshot into ``shared.sessions``."""
+    """Write the session file and merge the snapshot into ``shared.sessions``.
+
+    ``drop_context`` names context keys to remove before ``context`` is merged.
+    """
     with file_lock((root or data_dir()) / "workflow.lock"):
         current = load_session(app, root) or empty_session(app)
         merged_folders = dict(current.get("folders") or {})
@@ -131,6 +135,8 @@ def remember(
                 if value:
                     merged_folders[key] = str(value)
         merged_context = dict(current.get("context") or {})
+        for key in drop_context:
+            merged_context.pop(key, None)
         if context:
             merged_context.update(context)
         document = {
