@@ -147,6 +147,10 @@ class ScrollableFrame(ttk.Frame):
         self._window = self.canvas.create_window(0, 0, anchor="nw", window=self.content)
         self.canvas.bind("<Configure>", self._fit_content)
         self.content.bind("<Configure>", self._fit_content)
+        # If a scrolled form shrinks above the viewport, Tk unmaps the canvas
+        # window without applying its new requested height. Refit on Unmap as
+        # well so the scrollregion shrinks and brings the remaining form back.
+        self.content.bind("<Unmap>", self._fit_content)
         self._toplevel = self.winfo_toplevel()
         self._bindings = {
             "<MouseWheel>": self._toplevel.bind("<MouseWheel>", self._scroll, add="+"),

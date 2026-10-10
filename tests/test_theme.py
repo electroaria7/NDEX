@@ -105,9 +105,19 @@ class ScrollableFormTests(unittest.TestCase):
         self.assertGreaterEqual(option.winfo_rooty(), viewport.canvas.winfo_rooty())
         self.assertLessEqual(option.winfo_rooty() + option.winfo_height(), action_y)
         self.assertEqual(action.winfo_rooty(), action_y)
-        root.geometry("360x1800")
+        # A window manager can cap a requested tall window to the desktop's
+        # height. Make the form fit by reducing its content instead, keeping
+        # this scrollbar check independent of the CI monitor resolution.
+        for field in viewport.content.winfo_children()[:-2]:
+            field.destroy()
         root.update()
+        self.assertLessEqual(viewport.content.winfo_reqheight(), viewport.canvas.winfo_height())
         self.assertFalse(viewport.scrollbar.winfo_manager())
+        self.assertTrue(viewport.content.winfo_ismapped())
+        self.assertEqual(viewport.canvas.canvasy(0), 0)
+        for field in viewport.content.winfo_children():
+            self.assertGreaterEqual(field.winfo_rooty(), viewport.canvas.winfo_rooty())
+            self.assertLessEqual(field.winfo_rooty() + field.winfo_height(), action_y)
 
 
 class ThemedLauncherTests(unittest.TestCase):

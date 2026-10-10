@@ -67,6 +67,25 @@ class LauncherLayoutTests(unittest.TestCase):
             app.update()
             self.assertGreaterEqual(button.winfo_rooty(), app._canvas.winfo_rooty())
 
+    def test_refreshing_shorter_cards_restores_them_from_an_old_scroll_position(self) -> None:
+        with patch("ndex_launcher.main.gather_workflow_state", return_value=self._steps(
+            description="A longer workflow explanation. " * 40,
+        )) as gather:
+            app = LauncherApp()
+            self.addCleanup(app.destroy)
+            app.geometry("880x520")
+            app.update()
+            app._canvas.yview_moveto(1.0)
+            app.update()
+            self.assertGreater(app._canvas.canvasy(0), app._canvas.winfo_height())
+            gather.return_value = self._steps(description="Short", last_folder="", launch_args=["--open"])
+            app.refresh_status()
+            app.update()
+            self.assertTrue(app._body.winfo_ismapped())
+            scrollregion = tuple(float(value) for value in app._canvas.cget("scrollregion").split())
+            self.assertEqual(scrollregion[3], max(app._body.winfo_reqheight(), app._canvas.winfo_height()))
+            self._assert_cards_fit(app)
+
     def test_compact_layout_accounts_for_the_available_heading_width(self) -> None:
         self.assertGreater(COMPACT_LAYOUT_WIDTH, 880)
         self.assertTrue(uses_compact_card_layout(COMPACT_LAYOUT_WIDTH - 1))

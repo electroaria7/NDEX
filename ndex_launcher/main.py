@@ -73,6 +73,9 @@ class LauncherApp(tk.Tk):
         self._body_window = self._canvas.create_window(0, 0, anchor="nw", window=self._body)
         self._canvas.bind("<Configure>", self._resize_viewport)
         self._body.bind("<Configure>", self._update_scroll_region)
+        # Shorter refreshed cards can move the canvas window fully above the
+        # old scroll position, where Tk unmaps it instead of sending Configure.
+        self._body.bind("<Unmap>", self._update_scroll_region)
         self.bind("<MouseWheel>", self._scroll_cards, add="+")
         self.bind("<FocusIn>", self._reveal_focused_control, add="+")
 
