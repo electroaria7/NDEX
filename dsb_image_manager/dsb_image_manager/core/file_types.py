@@ -2,17 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from ndex_common.raw_formats import RAW_EXTENSIONS as _SHARED_RAW_EXTENSIONS
+
 JPG_EXTENSIONS = {".jpg", ".jpeg"}
-RAW_EXTENSIONS = {
-    ".cr3",
-    ".cr2",
-    ".arw",
-    ".srf",
-    ".sr2",
-    ".nef",
-    ".nrw",
-    ".dng",
-}
+RAW_EXTENSIONS = set(_SHARED_RAW_EXTENSIONS)
 SUPPORTED_EXTENSIONS = JPG_EXTENSIONS | RAW_EXTENSIONS
 
 
