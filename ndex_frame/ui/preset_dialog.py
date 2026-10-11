@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ndex_common.i18n import _, ngettext
 from ndex_frame.core.framing_choices import normalize_hex_color
 from ndex_frame.core.messages import clean_text
 from ndex_frame.core.models import AspectRatio, FramePreset, MetadataPolicy, SourceItem
@@ -55,16 +56,12 @@ def summarize_preflight(snapshot: ExportJobSnapshot) -> PreflightCounts:
     return PreflightCounts(exportable, 0, conflicted, invalid)
 
 
-def _plural(count: int, singular: str) -> str:
-    return f"{count} {singular}" if count == 1 else f"{count} {singular}s"
-
-
 def metadata_summary(policy: MetadataPolicy) -> str:
     """One line for what the output keeps of the original's metadata."""
     parts = [
-        "capture info kept" if policy.preserve_capture else "capture info removed",
-        "copyright kept" if policy.preserve_copyright else "copyright removed",
-        "GPS location removed" if policy.remove_gps else "GPS location kept",
+        _("capture info kept") if policy.preserve_capture else _("capture info removed"),
+        _("copyright kept") if policy.preserve_copyright else _("copyright removed"),
+        _("GPS location removed") if policy.remove_gps else _("GPS location kept"),
     ]
     text = " · ".join(parts)
     return text[0].upper() + text[1:]
@@ -77,8 +74,13 @@ def colour_notes(sources: Sequence[SourceItem]) -> tuple[str, ...]:
     missing = sum(NO_PROFILE_WARNING in source.warnings for source in sources)
     if not missing:
         return ()
-    verb = "has" if missing == 1 else "have"
-    return (f"{_plural(missing, 'photo')} {verb} no colour profile (treated as sRGB)",)
+    return (
+        ngettext(
+            "{count} photo has no colour profile (treated as sRGB)",
+            "{count} photos have no colour profile (treated as sRGB)",
+            missing,
+        ).format(count=missing),
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,10 +110,10 @@ def describe_preflight(
     size_text = ""
     if items:
         plan = items[0].render_plan
-        size_text = f"{plan.canvas_width} × {plan.canvas_height} px"
+        size_text = _("{width} × {height} px").format(width=plan.canvas_width, height=plan.canvas_height)
     format_text = output.format.upper()
     if output.format != "png":
-        format_text += f" · quality {output.quality}"
+        format_text = _("{format} · quality {quality}").format(format=format_text, quality=output.quality)
     example = ""
     for item in items:
         if item.action != "error":
@@ -127,7 +129,7 @@ def describe_preflight(
         total=len(items),
         size_text=size_text,
         format_text=format_text,
-        colour_text=f"{output.color_space} (profile embedded)",
+        colour_text=_("{space} (profile embedded)").format(space=output.color_space),
         metadata_text=metadata_summary(output.metadata),
         destination=clean_text(str(snapshot.output_dir)),
         example=example,
@@ -151,10 +153,10 @@ class FramePresetDialog(QDialog):
         self._save_as_mode = save_as
         # The preset this dialog last wrote, so the caller can select it.
         self.saved_preset: FramePreset | None = None
-        self.setWindowTitle("Save as Frame Preset" if save_as else "Frame Preset")
+        self.setWindowTitle(_("Save as Frame Preset") if save_as else _("Frame Preset"))
         layout = QVBoxLayout(self)
         form = QFormLayout()
-        self.name_edit = QLineEdit(f"{preset.name} copy" if save_as else preset.name)
+        self.name_edit = QLineEdit(_("{name} copy").format(name=preset.name) if save_as else preset.name)
         self.ratio_width_spin = QSpinBox()
         self.ratio_height_spin = QSpinBox()
         for spin in (self.ratio_width_spin, self.ratio_height_spin):
@@ -180,24 +182,24 @@ class FramePresetDialog(QDialog):
             spin.setDecimals(2)
         self.x_spin.setValue(preset.x)
         self.y_spin.setValue(preset.y)
-        form.addRow("Name", self.name_edit)
-        form.addRow("Ratio width", self.ratio_width_spin)
-        form.addRow("Ratio height", self.ratio_height_spin)
-        form.addRow("Background", self.background_edit)
+        form.addRow(_("Name"), self.name_edit)
+        form.addRow(_("Ratio width"), self.ratio_width_spin)
+        form.addRow(_("Ratio height"), self.ratio_height_spin)
+        form.addRow(_("Background"), self.background_edit)
         form.addRow("", background_presets)
-        form.addRow("Photo Size", self.scale_spin)
+        form.addRow(_("Photo Size"), self.scale_spin)
         form.addRow("", size_presets)
-        form.addRow("X", self.x_spin)
-        form.addRow("Y", self.y_spin)
+        form.addRow(_("X"), self.x_spin)
+        form.addRow(_("Y"), self.y_spin)
         layout.addLayout(form)
 
         actions = QHBoxLayout()
-        self.duplicate_button = QPushButton("Duplicate as Custom Preset")
-        self.save_button = QPushButton("Save")
-        self.save_as_button = QPushButton("Save As")
-        self.delete_button = QPushButton("Delete")
-        self.set_default_button = QPushButton("Set as Default")
-        self.save_preset_button = QPushButton("Save Preset")
+        self.duplicate_button = QPushButton(_("Duplicate as Custom Preset"))
+        self.save_button = QPushButton(_("Save"))
+        self.save_as_button = QPushButton(_("Save As"))
+        self.delete_button = QPushButton(_("Delete"))
+        self.set_default_button = QPushButton(_("Set as Default"))
+        self.save_preset_button = QPushButton(_("Save Preset"))
         self.save_preset_button.setObjectName("primaryButton")
         self.save_preset_button.setDefault(True)
         for button in (
@@ -233,7 +235,7 @@ class FramePresetDialog(QDialog):
 
     def _pick_background(self) -> None:
         current = QColor(self.background_edit.text() or self._preset.background)
-        chosen = QColorDialog.getColor(current, self, "Frame background")
+        chosen = QColorDialog.getColor(current, self, _("Frame background"))
         if chosen.isValid():
             self._apply_background(chosen.name())
 
@@ -288,7 +290,7 @@ class FramePresetDialog(QDialog):
     def _duplicate(self) -> None:
         # Name the copy so it can be told apart from the preset it came from.
         if self.name_edit.text().strip() == self._preset.name:
-            self.name_edit.setText(f"{self._preset.name} copy")
+            self.name_edit.setText(_("{name} copy").format(name=self._preset.name))
         self._persist(self.build_preset(save_as=True))
         self.accept()
 
@@ -316,11 +318,12 @@ class ExportPreflightDialog(QDialog):
         self._counts = counts
         self._info = info
         total = info.total if info is not None else counts.exportable + counts.conflicted
-        self.setWindowTitle(f"Export {_plural(total, 'photo')}")
+        export_title = ngettext("Export {count} photo", "Export {count} photos", total).format(count=total)
+        self.setWindowTitle(export_title)
         self.setMinimumWidth(480)
         layout = QVBoxLayout(self)
         layout.setSpacing(10)
-        self.title_label = QLabel(f"Export {_plural(total, 'photo')}")
+        self.title_label = QLabel(export_title)
         self.title_label.setObjectName("sectionLabel")
         layout.addWidget(self.title_label)
 
@@ -329,14 +332,14 @@ class ExportPreflightDialog(QDialog):
             form = QFormLayout()
             form.setHorizontalSpacing(14)
             rows = (
-                ("Output size", info.size_text),
-                ("Format", info.format_text),
-                ("Colour", info.colour_text),
-                ("Metadata", info.metadata_text),
-                ("Destination", info.destination),
-                ("Example", info.example),
+                ("Output size", _("Output size"), info.size_text),
+                ("Format", _("Format"), info.format_text),
+                ("Colour", _("Colour"), info.colour_text),
+                ("Metadata", _("Metadata"), info.metadata_text),
+                ("Destination", _("Destination"), info.destination),
+                ("Example", _("Example"), info.example),
             )
-            for caption, value in rows:
+            for caption, shown, value in rows:
                 if not value:
                     continue
                 label = QLabel(value)
@@ -344,7 +347,7 @@ class ExportPreflightDialog(QDialog):
                 label.setWordWrap(caption not in ("Destination", "Example"))
                 label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
                 self.detail_labels[caption] = label
-                form.addRow(f"{caption}:", label)
+                form.addRow(_("{caption}:").format(caption=shown), label)
             layout.addLayout(form)
         self.notes_label = QLabel("\n".join(info.notes) if info is not None else "")
         self.notes_label.setWordWrap(True)
@@ -352,25 +355,35 @@ class ExportPreflightDialog(QDialog):
         self.notes_label.setVisible(bool(self.notes_label.text()))
         layout.addWidget(self.notes_label)
         self.invalid_label = QLabel(
-            f"{_plural(counts.invalid, 'photo')} can't be exported and will be left out."
+            ngettext(
+                "{count} photo can't be exported and will be left out.",
+                "{count} photos can't be exported and will be left out.",
+                counts.invalid,
+            ).format(count=counts.invalid)
         )
         self.invalid_label.setWordWrap(True)
         self.invalid_label.setVisible(counts.invalid > 0)
         layout.addWidget(self.invalid_label)
-        self.originals_label = QLabel("Originals are never changed.")
+        self.originals_label = QLabel(_("Originals are never changed."))
         self.originals_label.setObjectName("mutedLabel")
         layout.addWidget(self.originals_label)
 
-        existing = f"Skip existing ({_plural(counts.conflicted, 'file')} already exported)"
+        existing = _("Skip existing ({files} already exported)").format(
+            files=ngettext("{count} file", "{count} files", counts.conflicted).format(count=counts.conflicted)
+        )
         example = info.rename_example if info is not None else ""
-        keep = f"Keep both — save as {example}" if example else "Keep both — number the new files"
+        keep = (
+            _("Keep both — save as {example}").format(example=example)
+            if example
+            else _("Keep both — number the new files")
+        )
         self.skip_radio = QRadioButton(existing)
         self.rename_radio = QRadioButton(keep)
         self._policy_group = QButtonGroup(self)
         self._policy_group.setExclusive(True)
         self._policy_group.addButton(self.skip_radio)
         self._policy_group.addButton(self.rename_radio)
-        self.conflict_prompt = QLabel("Some files are already in the output folder:")
+        self.conflict_prompt = QLabel(_("Some files are already in the output folder:"))
         if has_conflicts:
             layout.addWidget(self.conflict_prompt)
             layout.addWidget(self.skip_radio)
@@ -411,7 +424,9 @@ class ExportPreflightDialog(QDialog):
     def _refresh_export_enabled(self) -> None:
         policy = self.collision_policy()
         count = self.export_count()
-        self.export_button.setText(f"Export {_plural(count, 'Photo')}")
+        self.export_button.setText(
+            ngettext("Export {count} Photo", "Export {count} Photos", count).format(count=count)
+        )
         if policy is None:
             self.export_button.setEnabled(False)
             return
@@ -424,12 +439,14 @@ def completion_title(result: ExportResult, cancelled_count: int) -> str:
     exported = result.exported
     if cancelled_count or result.cancelled:
         total = exported + result.skipped + failed + cancelled_count
-        return f"Export stopped — {exported} of {total} exported"
+        return _("Export stopped — {exported} of {total} exported").format(exported=exported, total=total)
     if failed:
-        return f"Exported {exported} of {exported + failed} — {failed} failed"
+        return _("Exported {exported} of {total} — {failed} failed").format(
+            exported=exported, total=exported + failed, failed=failed
+        )
     if exported == 0 and result.skipped:
-        return f"Nothing new to export — {result.skipped} skipped"
-    return f"Exported {_plural(exported, 'photo')}"
+        return _("Nothing new to export — {count} skipped").format(count=result.skipped)
+    return ngettext("Exported {count} photo", "Exported {count} photos", exported).format(count=exported)
 
 
 def failure_lines(result: ExportResult) -> list[str]:
@@ -437,7 +454,7 @@ def failure_lines(result: ExportResult) -> list[str]:
     lines = []
     for item in result.items:
         if item.state == "failed" and item.message != "not run: cancelled":
-            reason = clean_text(item.message) or "Could not be exported."
+            reason = clean_text(item.message) or _("Could not be exported.")
             name = Path(item.source).name
             # The friendly messages usually name the photo already.
             lines.append(reason if reason.startswith(name) else f"{name} — {reason}")
@@ -470,9 +487,21 @@ class ExportCompletionDialog(QDialog):
 
         notes = []
         if result.skipped:
-            notes.append(f"{_plural(result.skipped, 'photo')} skipped (already in the folder)")
+            notes.append(
+                ngettext(
+                    "{count} photo skipped (already in the folder)",
+                    "{count} photos skipped (already in the folder)",
+                    result.skipped,
+                ).format(count=result.skipped)
+            )
         if cancelled_count:
-            notes.append(f"{_plural(cancelled_count, 'photo')} not exported before you stopped")
+            notes.append(
+                ngettext(
+                    "{count} photo not exported before you stopped",
+                    "{count} photos not exported before you stopped",
+                    cancelled_count,
+                ).format(count=cancelled_count)
+            )
         self.detail_label = QLabel(" · ".join(notes))
         self.detail_label.setWordWrap(True)
         self.detail_label.setObjectName("mutedLabel")
@@ -482,18 +511,18 @@ class ExportCompletionDialog(QDialog):
         failures = failure_lines(result)
         self.failures_text = QPlainTextEdit("\n".join(failures))
         self.failures_text.setReadOnly(True)
-        self.failures_text.setAccessibleName("Failed photos")
+        self.failures_text.setAccessibleName(_("Failed photos"))
         self.failures_text.setMinimumHeight(min(160, 40 + 22 * len(failures)))
         self.failures_text.setVisible(bool(failures))
         layout.addWidget(self.failures_text)
 
         row = QHBoxLayout()
-        self.open_folder_button = QPushButton("Open Output Folder")
+        self.open_folder_button = QPushButton(_("Open Output Folder"))
         self.open_folder_button.clicked.connect(self.open_output_folder)
-        self.job_results_button = QPushButton("View in Job Results")
+        self.job_results_button = QPushButton(_("View in Job Results"))
         self.job_results_button.clicked.connect(self._view_results)
         self.job_results_button.setVisible(view_results_available and on_view_results is not None)
-        self.close_button = QPushButton("Close")
+        self.close_button = QPushButton(_("Close"))
         self.close_button.setDefault(True)
         self.close_button.clicked.connect(self.accept)
         row.addWidget(self.open_folder_button)
@@ -514,26 +543,3 @@ class ExportCompletionDialog(QDialog):
         if self._output_directory is None:
             return
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(self._output_directory)))
-
-
-class ManagePresetsDialog(QDialog):
-    """Small chooser so Manage Presets can open the Frame or Output editor."""
-
-    def __init__(self, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self.choice: str | None = None
-        self.setWindowTitle("Manage Presets")
-        layout = QVBoxLayout(self)
-        self.edit_frame_button = QPushButton("Edit Frame Preset")
-        self.edit_output_button = QPushButton("Edit Output Profile")
-        self.edit_frame_button.clicked.connect(lambda: self._choose("frame"))
-        self.edit_output_button.clicked.connect(lambda: self._choose("output"))
-        layout.addWidget(self.edit_frame_button)
-        layout.addWidget(self.edit_output_button)
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Cancel)
-        buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
-
-    def _choose(self, kind: str) -> None:
-        self.choice = kind
-        self.accept()

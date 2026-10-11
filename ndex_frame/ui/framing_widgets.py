@@ -8,6 +8,7 @@ from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QHBoxLayout, QPushButton, QSizePolicy, QWidget
 
+from ndex_common.i18n import _
 from ndex_frame.core.framing_choices import BACKGROUND_PRESETS, PHOTO_SIZE_PRESETS, RATIO_PRESETS
 from ndex_frame.core.models import AspectRatio
 
@@ -68,6 +69,10 @@ def make_named_preset_buttons(
     return row, buttons
 
 
+# Swatch names live in core.framing_choices (no Qt there); listed so they get translated.
+_SWATCH_NAMES = (_("White"), _("Bright Gray"), _("Medium Gray"), _("Black"))
+
+
 def make_background_swatches(
     on_click: Callable[[str], None],
     on_custom: Callable[[], None] | None = None,
@@ -79,13 +84,13 @@ def make_background_swatches(
     layout.setSpacing(8)
     buttons: list[QPushButton] = []
     for name, color in BACKGROUND_PRESETS:
-        button = ColorSwatchButton(name, color)
+        button = ColorSwatchButton(_(name), color)
         button.clicked.connect(lambda _checked=False, value=color: on_click(value))
         layout.addWidget(button)
         buttons.append(button)
-    custom = QPushButton("Custom…")
+    custom = QPushButton(_("Custom…"))
     custom.setObjectName("compactButton")
-    custom.setAccessibleName("Custom background")
+    custom.setAccessibleName(_("Custom background"))
     custom.setFixedHeight(_SWATCH_SIZE)
     custom.setMinimumWidth(72)
     if on_custom is not None:

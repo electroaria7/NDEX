@@ -9,6 +9,7 @@ from pathlib import Path
 from threading import Event
 from typing import Literal
 
+from ndex_common.i18n import _
 from ndex_frame.core.geometry import build_render_plan, resolve_canvas
 from ndex_frame.core.messages import describe_error
 from ndex_frame.core.models import FramePreset, ImageOverride, OutputProfile, RenderPlan, SourceItem
@@ -150,7 +151,7 @@ def plan_export(request: ExportRequest) -> ExportJobSnapshot:
         if key in reserved:
             if request.collision_policy == "skip":
                 action = "skip"
-                message = "Destination already exists or is reserved by this batch."
+                message = _("Destination already exists or is reserved by this batch.")
             else:
                 sequence = 1
                 while True:
@@ -200,7 +201,7 @@ def run_export(
                 for pending in snapshot.items[index - 1:]
             )
             _notify_progress(
-                progress, ExportProgress(index, total, item.source.path, "cancelled", "Export cancelled.")
+                progress, ExportProgress(index, total, item.source.path, "cancelled", _("Export cancelled."))
             )
             break
 

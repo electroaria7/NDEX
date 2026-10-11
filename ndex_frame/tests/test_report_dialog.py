@@ -21,7 +21,8 @@ from ndex_frame.core.models import (
     SourceItem,
 )
 from ndex_frame.ui.main_window import MainWindow
-from ndex_frame.ui.report_dialog import FrameJobReportDialog, item_listing
+from ndex_common.theme import DANGER
+from ndex_frame.ui.report_dialog import FrameJobReportDialog, item_listing, job_label
 from ndex_frame.ui.workspace import WorkspaceController, WorkspaceState
 
 
@@ -42,6 +43,11 @@ def _report(**overrides) -> JobReport:
     }
     fields.update(overrides)
     return JobReport(**fields)
+
+
+def _table_rows(dialog: FrameJobReportDialog) -> list[tuple[str, str]]:
+    table = dialog.item_table
+    return [(table.item(row, 0).text(), table.item(row, 1).text()) for row in range(table.rowCount())]
 
 
 def _source(path: Path) -> SourceItem:
@@ -69,8 +75,10 @@ class FrameJobReportDialogTests(unittest.TestCase):
         self.addCleanup(dialog.close)
         self.assertEqual(dialog.job_list.count(), 1)
         self.assertIn("5 copied, 1 failed", dialog.summary_label.text())
-        self.assertIn("bad.jpg", dialog.item_view.toPlainText())
-        self.assertIn("unreadable", dialog.item_view.toPlainText())
+        self.assertEqual(
+            _table_rows(dialog),
+            [("⚠ bad.jpg", "unreadable"), ("good.jpg", "exported")],
+        )
 
     def test_copy_button_is_disabled_without_problems(self) -> None:
         clean = _report(counts={"copied": 5}, items=(JobItem(path="good.jpg", status="exported"),))
@@ -98,7 +106,47 @@ class FrameJobReportDialogTests(unittest.TestCase):
         self.addCleanup(dialog.close)
         dialog.job_list.setCurrentRow(1)
         self.assertIn("2 copied", dialog.summary_label.text())
-        self.assertIn("no per-file items", dialog.item_view.toPlainText())
+        self.assertEqual(dialog.item_table.rowCount(), 1)
+        self.assertIn("no per-file items", dialog.item_table.item(0, 0).text())
+
+    def test_table_has_file_and_result_columns_with_problems_first(self) -> None:
+        report = _report(
+            items=(
+                JobItem(path="C:/shots/good.jpg", status="exported"),
+                JobItem(path="C:/shots/ok2.jpg", status="exported"),
+                JobItem(path="C:/shots/bad.jpg", status="failed", detail="Could not be read"),
+            ),
+        )
+        dialog = FrameJobReportDialog([report])
+        self.addCleanup(dialog.close)
+        table = dialog.item_table
+        self.assertEqual(table.columnCount(), 2)
+        self.assertEqual(
+            [table.horizontalHeaderItem(index).text() for index in range(2)], ["File", "Result"]
+        )
+        self.assertEqual(table.item(0, 0).text(), "⚠ bad.jpg")
+        self.assertEqual(table.item(0, 1).text(), "Could not be read")
+        self.assertEqual(table.item(1, 0).text(), "good.jpg")
+        self.assertEqual(table.item(0, 0).toolTip(), "C:/shots/bad.jpg")
+        self.assertEqual(table.item(0, 0).foreground().color().name().upper(), DANGER.upper())
+        self.assertNotEqual(table.item(1, 0).foreground().color().name().upper(), DANGER.upper())
+
+    def test_job_list_shows_the_outcome_first(self) -> None:
+        text = job_label(_report(counts={"failed": 1}))
+        self.assertTrue(text.startswith("⚠ 1 failed · Export · "), text)
+        self.assertRegex(text, r"· \d\d-\d\d \d\d:\d\d$")
+        clean = job_label(_report(counts={"exported": 4}, items=()))
+        self.assertTrue(clean.startswith("4 exported · Export · "), clean)
+        self.assertNotIn("⚠", clean)
+        dialog = FrameJobReportDialog([_report(counts={"failed": 1})])
+        self.addCleanup(dialog.close)
+        self.assertEqual(dialog.job_list.item(0).text(), job_label(dialog.reports[0]))
+
+    def test_retry_button_stays_for_a_job_with_failures(self) -> None:
+        dialog = FrameJobReportDialog([_report()], retry=lambda plan: None)
+        self.addCleanup(dialog.close)
+        self.assertIsNotNone(dialog.retry_button.parent())
+        self.assertTrue(dialog.output_button.text().startswith("Open Output"))
 
     def test_item_listing_puts_problems_first(self) -> None:
         listing = item_listing(_report())
