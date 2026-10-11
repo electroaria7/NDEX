@@ -45,14 +45,14 @@ class AppFlowTests(unittest.TestCase):
         )
         self.window = MainWindow(self.controller, preset_store=self.store)
         self.window.set_interactive_dialogs(False)
-        self.addCleanup(self.window.close)
+        self.addCleanup(self.window.teardown)
 
     def tearDown(self) -> None:
         self.controller.cancel_export()
         thread = self.controller._export_thread
         if thread is not None:
             thread.wait(5000)
-        self.window.close()
+        self.window.teardown()
         self.controller.thread_pool.waitForDone(5000)
         QApplication.processEvents()
         self.temporary.cleanup()

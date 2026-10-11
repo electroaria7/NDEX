@@ -13,6 +13,8 @@ from PIL import Image
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QMessageBox, QToolButton
 
+from ndex_frame.core.models import AspectRatio
+from ndex_frame.services.cache import PreviewCache
 from ndex_frame.services.importer import analyze_source
 from ndex_frame.services.presets import PresetStore
 from ndex_frame.services.thumbnails import ThumbnailCache
@@ -79,7 +81,7 @@ class ThumbnailWindowTests(unittest.TestCase):
 
     def test_only_visible_rows_are_loaded_and_placeholder_until_ready(self) -> None:
         window = MainWindow(self.controller, preset_store=self.store)
-        self.addCleanup(window.close)
+        self.addCleanup(window.teardown)
         window.resize(1180, 760)
         window.show()
         self.state.replace_sources(self._photos(300))
@@ -102,7 +104,7 @@ class ThumbnailWindowTests(unittest.TestCase):
 
     def test_keyboard_navigation_still_steps_through_photos(self) -> None:
         window = MainWindow(self.controller, preset_store=self.store)
-        self.addCleanup(window.close)
+        self.addCleanup(window.teardown)
         self.state.replace_sources(self._photos(3))
         window.refresh_thumbnails()
         window.thumbnail_view.setCurrentRow(0)
@@ -121,7 +123,7 @@ class ThumbnailWindowTests(unittest.TestCase):
 
     def test_toolbar_fits_at_minimum_width(self) -> None:
         window = MainWindow(self.controller, preset_store=self.store)
-        self.addCleanup(window.close)
+        self.addCleanup(window.teardown)
         window.show()
         window.resize(1, 1)
         QTest.qWait(50)
@@ -131,7 +133,7 @@ class ThumbnailWindowTests(unittest.TestCase):
 
     def test_edited_frame_is_marked_in_words(self) -> None:
         window = MainWindow(self.controller, preset_store=self.store)
-        self.addCleanup(window.close)
+        self.addCleanup(window.teardown)
         name = window.frame_preset_combo.currentData().name
         window.background_preset_buttons[3].click()
         self.assertEqual(window.frame_preset_combo.currentText(), f"{name} (edited)")
@@ -234,7 +236,7 @@ class MainWindowPresetsTests(unittest.TestCase):
             controller = WorkspaceController(state, settings_writer=lambda _s, _v: None)
             window = MainWindow(controller, preset_store=store)
             window.set_interactive_dialogs(False)
-            self.addCleanup(window.close)
+            self.addCleanup(window.teardown)
             window.manage_presets_button.click()
             dialog = window._last_presets_dialog
             self.assertIsInstance(dialog, PresetsManagerDialog)
@@ -245,6 +247,70 @@ class MainWindowPresetsTests(unittest.TestCase):
             dialog.delete(FRAME, created.id)
             window._reload_preset_combos()
             self.assertEqual(state.working_frame.id, store.default_frame().id)
+
+    def _window(self, folder: str):
+        store = PresetStore(Path(folder))
+        state = WorkspaceState(working_frame=store.default_frame(), output_profile=store.default_output())
+        controller = WorkspaceController(
+            state, preview_cache=PreviewCache(Path(folder) / "cache"), settings_writer=lambda _s, _v: None
+        )
+        window = MainWindow(controller, preset_store=store)
+        window.set_interactive_dialogs(False)
+        self.addCleanup(window.teardown)
+        return window, store, state, controller
+
+    def test_new_preset_in_manager_captures_current_working_edits(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            window, store, state, controller = self._window(folder)
+            controller.update_working_frame(ratio=AspectRatio(7, 5), background="#123456", photo_scale=0.8)
+            window.manage_presets_button.click()
+            created = window._last_presets_dialog.create(FRAME, "From edits")
+            self.assertEqual((created.ratio.width, created.ratio.height), (7, 5))
+            self.assertEqual(created.background, "#123456")
+            self.assertAlmostEqual(created.photo_scale, 0.8)
+
+    def test_use_as_current_survives_manager_closing(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            window, store, state, controller = self._window(folder)
+            base = state.working_frame
+            controller.update_working_frame(background="#123456")
+            self.assertNotEqual(state.working_frame.background, base.background)
+
+            def use_same_preset(dialog) -> int:
+                dialog.select(FRAME, base.id)
+                dialog.use(FRAME)
+                return 0
+
+            window.set_interactive_dialogs(True)
+            with patch.object(PresetsManagerDialog, "exec", use_same_preset):
+                window._manage_presets()
+            self.assertEqual(state.working_frame.background, base.background)
+            self.assertEqual(state.working_frame.id, base.id)
+
+    def test_closing_manager_without_choosing_keeps_unsaved_edits(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            window, store, state, controller = self._window(folder)
+            controller.update_working_frame(background="#123456")
+            window.set_interactive_dialogs(True)
+            with patch.object(PresetsManagerDialog, "exec", lambda dialog: 0):
+                window._manage_presets()
+            self.assertEqual(state.working_frame.background, "#123456")
+
+    def test_teardown_leaves_no_worker_running(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            window, store, state, controller = self._window(folder)
+            paths = []
+            for index in range(8):
+                path = Path(folder) / f"P{index}.jpg"
+                Image.new("RGB", (400, 300), (index, 90, 160)).save(path)
+                paths.append(path)
+            state.replace_sources([analyze_source(path) for path in paths])
+            window.refresh_thumbnails()
+            window.load_visible_thumbnails()
+            self.assertTrue(window.teardown())
+            self.assertEqual(controller.thread_pool.activeThreadCount(), 0)
+            self.assertEqual(window.thumbnail_loader._pool.activeThreadCount(), 0)
+            self.assertTrue(window.thumbnail_loader.stopped)
 
 
 class LocalizationTests(unittest.TestCase):
@@ -267,7 +333,7 @@ class LocalizationTests(unittest.TestCase):
                 state = WorkspaceState(working_frame=store.default_frame(), output_profile=store.default_output())
                 controller = WorkspaceController(state, settings_writer=lambda _s, _v: None)
                 window = MainWindow(controller, preset_store=store)
-                self.addCleanup(window.close)
+                self.addCleanup(window.teardown)
                 self.assertEqual(window.open_files_button.text(), "파일 열기")
                 window.background_preset_buttons[3].click()
                 self.assertTrue(window.frame_preset_combo.currentText().endswith("(수정됨)"))

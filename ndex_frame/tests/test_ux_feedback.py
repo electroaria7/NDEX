@@ -33,6 +33,7 @@ from ndex_frame.services.export_job import (
     ExportResult,
     plan_export,
 )
+from ndex_frame.services.cache import PreviewCache
 from ndex_frame.services.importer import analyze_source, scan_paths
 from ndex_frame.services.presets import PresetStore
 from ndex_frame.ui.main_window import MainWindow
@@ -131,10 +132,12 @@ class WindowFeedbackTests(unittest.TestCase):
         self.state = WorkspaceState(
             working_frame=self.store.default_frame(), output_profile=self.store.default_output()
         )
-        self.controller = WorkspaceController(self.state, settings_writer=lambda _s, _v: None)
+        self.controller = WorkspaceController(
+            self.state, preview_cache=PreviewCache(self.root / "cache"), settings_writer=lambda _s, _v: None
+        )
         self.window = MainWindow(self.controller, preset_store=self.store)
         self.window.set_interactive_dialogs(False)
-        self.addCleanup(self.window.close)
+        self.addCleanup(self.window.teardown)
 
     def _sources(self, count: int, warnings: tuple[str, ...] = ()) -> list[SourceItem]:
         return [
