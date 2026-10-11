@@ -247,5 +247,41 @@ class MainWindowPresetsTests(unittest.TestCase):
             self.assertEqual(state.working_frame.id, store.default_frame().id)
 
 
+class LocalizationTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.app = QApplication.instance() or QApplication([])
+
+    def test_window_and_messages_use_translations(self) -> None:
+        from ndex_common import i18n
+        from ndex_frame.core.messages import ImportSummary, import_status_text
+
+        table = {
+            "Open Files": "파일 열기",
+            "{name} (edited)": "{name} (수정됨)",
+        }
+        plurals = {"Opened {count} photo{source}": ["{count}장 열었습니다{source}"]}
+        with patch.dict(i18n._messages, table), patch.dict(i18n._plurals, plurals):
+            with tempfile.TemporaryDirectory() as folder:
+                store = PresetStore(Path(folder))
+                state = WorkspaceState(working_frame=store.default_frame(), output_profile=store.default_output())
+                controller = WorkspaceController(state, settings_writer=lambda _s, _v: None)
+                window = MainWindow(controller, preset_store=store)
+                self.addCleanup(window.close)
+                self.assertEqual(window.open_files_button.text(), "파일 열기")
+                window.background_preset_buttons[3].click()
+                self.assertTrue(window.frame_preset_combo.currentText().endswith("(수정됨)"))
+            self.assertEqual(import_status_text(ImportSummary(opened=2)), "2장 열었습니다")
+        self.assertEqual(import_status_text(ImportSummary(opened=2)), "Opened 2 photos")
+
+    def test_frame_keys_are_in_the_korean_catalog(self) -> None:
+        import json
+        from ndex_common import i18n
+
+        data = json.loads((i18n.bundled_locales_dir() / "ko.json").read_text(encoding="utf-8"))
+        for key in ("Manage Presets", "Retry Failed", "{count} failed", "Use as Current Frame"):
+            self.assertIn(key, data)
+
+
 if __name__ == "__main__":
     unittest.main()

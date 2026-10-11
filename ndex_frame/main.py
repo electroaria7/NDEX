@@ -11,7 +11,8 @@ from pathlib import Path
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication
 
-from ndex_common import settings
+from ndex_common import i18n, settings
+from ndex_common.i18n import _, ngettext
 from ndex_common.branding import NDEX_FRAME_TITLE
 from ndex_common.crashlog import install_crash_logging
 from ndex_common.theme import apply_qt_theme
@@ -28,18 +29,18 @@ _BUILTIN_OUTPUT_ID = "builtin.instagram-feed-hq"
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=NDEX_FRAME_TITLE)
-    parser.add_argument("--open", action="store_true", help="Open the GUI (Launcher compatibility).")
-    parser.add_argument("--source", type=Path, help="Master image folder to import after startup.")
+    parser.add_argument("--open", action="store_true", help=_("Open the GUI (Launcher compatibility)."))
+    parser.add_argument("--source", type=Path, help=_("Master image folder to import after startup."))
     parser.add_argument(
         "--handoff",
         type=Path,
-        help="Select-handoff manifest from Image Manager (JPG/PNG/TIFF list).",
+        help=_("Select-handoff manifest from Image Manager (JPG/PNG/TIFF list)."),
     )
-    parser.add_argument("--output", type=Path, help="Export output folder to preload.")
+    parser.add_argument("--output", type=Path, help=_("Export output folder to preload."))
     parser.add_argument(
         "--retry",
         type=Path,
-        help="Open Job Results at this export manifest so its failed files can be retried.",
+        help=_("Open Job Results at this export manifest so its failed files can be retried."),
     )
     parser.add_argument(
         "--smoke-export",
@@ -203,7 +204,11 @@ def _run_gui(args: argparse.Namespace) -> int:
     window.sync_output_folder_label()
     if store.errors:
         window.show_nonfatal_error(
-            f"{len(store.errors)} custom preset(s) could not be loaded: {store.errors[0]}"
+            ngettext(
+                "{count} custom preset could not be loaded: {error}",
+                "{count} custom presets could not be loaded: {error}",
+                len(store.errors),
+            ).format(count=len(store.errors), error=store.errors[0])
         )
     handoff = args.handoff
     source = args.source
@@ -218,6 +223,8 @@ def _run_gui(args: argparse.Namespace) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Before any Qt widget exists, so every label is built in the chosen language.
+    i18n.init("frame")
     install_crash_logging("NDEX Frame")
     args = build_parser().parse_args(argv)
     if args.smoke_export is not None:

@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ndex_common.i18n import _
 from ndex_frame.core.geometry import resolve_canvas
 from ndex_frame.core.models import AspectRatio, MetadataPolicy, OutputProfile, OutputSizing
 from ndex_frame.services.presets import PresetStore
@@ -29,10 +30,10 @@ from ndex_frame.services.presets import PresetStore
 _UNSAFE = re.compile(r"[^A-Za-z0-9]+")
 _FORMATS = ("jpeg", "png", "webp")
 _SIZING_MODES = (
-    ("fixed_width", "Fixed width"),
-    ("fixed_height", "Fixed height"),
-    ("long_edge", "Long edge"),
-    ("fixed_dimensions", "Fixed dimensions"),
+    ("fixed_width", _("Fixed width")),
+    ("fixed_height", _("Fixed height")),
+    ("long_edge", _("Long edge")),
+    ("fixed_dimensions", _("Fixed dimensions")),
 )
 
 
@@ -66,14 +67,14 @@ class OutputProfileDialog(QDialog):
         self._profile = profile
         self._ratio = ratio
         self._store = store
-        self.setWindowTitle("Output Profile")
+        self.setWindowTitle(_("Output Profile"))
         self._build_widgets()
         self._apply_profile(profile)
         self._refresh_action_buttons()
 
     def _build_widgets(self) -> None:
         layout = QVBoxLayout(self)
-        self.basic_group = QGroupBox("Basic")
+        self.basic_group = QGroupBox(_("Basic"))
         basic = QFormLayout(self.basic_group)
         self.name_edit = QLineEdit()
         self.format_combo = QComboBox()
@@ -88,15 +89,15 @@ class OutputProfileDialog(QDialog):
         for spin in (self.width_spin, self.height_spin, self.long_edge_spin):
             spin.setRange(1, 20000)
         self.computed_size_label = QLabel()
-        basic.addRow("Name", self.name_edit)
-        basic.addRow("Format", self.format_combo)
-        basic.addRow("Sizing", self.sizing_mode_combo)
-        basic.addRow("Width", self.width_spin)
-        basic.addRow("Height", self.height_spin)
-        basic.addRow("Long edge", self.long_edge_spin)
-        basic.addRow("Computed size", self.computed_size_label)
+        basic.addRow(_("Name"), self.name_edit)
+        basic.addRow(_("Format"), self.format_combo)
+        basic.addRow(_("Sizing"), self.sizing_mode_combo)
+        basic.addRow(_("Width"), self.width_spin)
+        basic.addRow(_("Height"), self.height_spin)
+        basic.addRow(_("Long edge"), self.long_edge_spin)
+        basic.addRow(_("Computed size"), self.computed_size_label)
 
-        self.advanced_group = QGroupBox("Advanced")
+        self.advanced_group = QGroupBox(_("Advanced"))
         advanced = QFormLayout(self.advanced_group)
         self.quality_spin = QSpinBox()
         self.quality_spin.setRange(1, 100)
@@ -105,22 +106,22 @@ class OutputProfileDialog(QDialog):
         self.encoder_info_label = QLabel()
         self.encoder_info_label.setObjectName("mutedLabel")
         self.encoder_info_label.setWordWrap(True)
-        self.preserve_capture_checkbox = QCheckBox("Keep capture info")
-        self.preserve_copyright_checkbox = QCheckBox("Keep copyright")
-        self.remove_gps_checkbox = QCheckBox("Remove GPS location")
+        self.preserve_capture_checkbox = QCheckBox(_("Keep capture info"))
+        self.preserve_copyright_checkbox = QCheckBox(_("Keep copyright"))
+        self.remove_gps_checkbox = QCheckBox(_("Remove GPS location"))
         self.advanced_form = advanced
-        advanced.addRow("Quality", self.quality_spin)
-        advanced.addRow("Colour", self.encoder_info_label)
+        advanced.addRow(_("Quality"), self.quality_spin)
+        advanced.addRow(_("Colour"), self.encoder_info_label)
         advanced.addRow(self.preserve_capture_checkbox)
         advanced.addRow(self.preserve_copyright_checkbox)
         advanced.addRow(self.remove_gps_checkbox)
 
         actions = QHBoxLayout()
-        self.duplicate_button = QPushButton("Duplicate as Custom Preset")
-        self.save_button = QPushButton("Save")
-        self.save_as_button = QPushButton("Save As")
-        self.delete_button = QPushButton("Delete")
-        self.set_default_button = QPushButton("Set as Default")
+        self.duplicate_button = QPushButton(_("Duplicate as Custom Preset"))
+        self.save_button = QPushButton(_("Save"))
+        self.save_as_button = QPushButton(_("Save As"))
+        self.delete_button = QPushButton(_("Delete"))
+        self.set_default_button = QPushButton(_("Set as Default"))
         for button in (
             self.duplicate_button,
             self.save_button,
@@ -159,7 +160,9 @@ class OutputProfileDialog(QDialog):
         self.height_spin.setValue(profile.sizing.height or 1440)
         self.long_edge_spin.setValue(profile.sizing.long_edge or profile.sizing.width or 1080)
         self.quality_spin.setValue(profile.quality)
-        self.encoder_info_label.setText(f"{profile.color_space} · ICC profile embedded · 4:4:4")
+        self.encoder_info_label.setText(
+            _("{space} · ICC profile embedded · 4:4:4").format(space=profile.color_space)
+        )
         self.preserve_capture_checkbox.setChecked(profile.metadata.preserve_capture)
         self.preserve_copyright_checkbox.setChecked(profile.metadata.preserve_copyright)
         self.remove_gps_checkbox.setChecked(profile.metadata.remove_gps)
@@ -189,7 +192,7 @@ class OutputProfileDialog(QDialog):
             width, height = resolve_canvas(self._current_sizing(), self._ratio)
             self.computed_size_label.setText(f"{width} × {height}")
         except (TypeError, ValueError):
-            self.computed_size_label.setText("Invalid size")
+            self.computed_size_label.setText(_("Invalid size"))
 
     def _current_sizing(self) -> OutputSizing:
         mode = self.sizing_mode_combo.currentData()
@@ -245,7 +248,7 @@ class OutputProfileDialog(QDialog):
     def _duplicate(self) -> None:
         # Name the copy so it can be told apart from the profile it came from.
         if self.name_edit.text().strip() == self._profile.name:
-            self.name_edit.setText(f"{self._profile.name} copy")
+            self.name_edit.setText(_("{name} copy").format(name=self._profile.name))
         self._persist(self.build_profile(save_as=True))
         self.accept()
 

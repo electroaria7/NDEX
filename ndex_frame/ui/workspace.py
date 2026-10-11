@@ -11,6 +11,7 @@ from PIL.ImageQt import ImageQt
 from PySide6.QtCore import QObject, QRunnable, Qt, QThread, QThreadPool, QTimer, Signal, Slot
 from PySide6.QtGui import QImage
 
+from ndex_common.i18n import _
 from ndex_common import settings
 
 from ndex_frame.core.geometry import build_render_plan, resolve_canvas
@@ -170,7 +171,7 @@ class _PreviewRunnable(QRunnable):
                 try:
                     prepared.image.thumbnail((self.max_edge, self.max_edge), Image.Resampling.LANCZOS)
                     image = QImage(ImageQt(prepared.image)).copy()
-                    warning = f"Preview cache unavailable; using direct preview. {cache_error}"
+                    warning = _("Preview cache unavailable; using direct preview. {error}").format(error=cache_error)
                 finally:
                     prepared.image.close()
             self.signals.completed.emit(self, self.source.path, image, warning)
@@ -393,12 +394,12 @@ class WorkspaceController(QObject):
 
     def start_export(self, sources: list[SourceItem] | None = None, collision_policy: str = "rename") -> None:
         if self._shutting_down:
-            raise RuntimeError("The workspace is closing.")
+            raise RuntimeError(_("The workspace is closing."))
         if self._export_thread is not None:
-            raise RuntimeError("An export job is already running.")
+            raise RuntimeError(_("An export job is already running."))
         selected_sources = tuple(sources if sources is not None else self.state.sources)
         if not selected_sources or self.state.output_directory is None:
-            raise ValueError("Sources and output directory are required.")
+            raise ValueError(_("Sources and output directory are required."))
         request = ExportRequest(
             selected_sources,
             self.state.output_directory,
@@ -476,6 +477,6 @@ class WorkspaceController(QObject):
         if result is not None:
             self.exportFinished.emit(result)
         else:
-            message = self._export_error or "Export worker stopped without a result."
+            message = self._export_error or _("Export worker stopped without a result.")
             self.exportAborted.emit(message)
             self.errorOccurred.emit(message)
