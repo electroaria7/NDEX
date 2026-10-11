@@ -236,3 +236,20 @@ class RetryInAppTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LauncherLanguageTests(unittest.TestCase):
+    def test_selector_lists_system_default_first_and_saves_choice(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, patch.dict("os.environ", {"LOCALAPPDATA": tmp}):
+            app = LauncherApp()
+            self.addCleanup(app.destroy)
+            codes = [code for code, _label in app._language_choices()]
+            self.assertEqual(codes[:2], ["system", "en"])
+            self.assertIn("ko", codes)
+            self.assertEqual(app.language_combo.current(), 0)
+            app.language_combo.current(codes.index("ko"))
+            app._on_language_selected()
+            from ndex_common import i18n
+
+            self.assertEqual(i18n.configured_language(), "ko")
+            self.assertIn("Restart", app._language_note.get())
