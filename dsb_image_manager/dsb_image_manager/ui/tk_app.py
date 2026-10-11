@@ -215,7 +215,7 @@ def mark_change_label(pick_status, rating, count: int, noun: str) -> str:
     if pick_status is not None:
         what = f"Pick: {PICK_LABELS.get(pick_status, pick_status)}"
     else:
-        what = f"Rating: {STAR_FILLED * rating if rating else 'Clear'}"
+        what = f"Rating: {f'{rating}{STAR_FILLED}' if rating else 'Clear'}"
     return f"{what} {plural(count, noun)}"
 
 
@@ -223,7 +223,7 @@ def mark_done_text(pick_status, rating, count: int, noun: str) -> str:
     if pick_status is not None:
         return f"{PICK_DONE.get(pick_status, pick_status)} {plural(count, noun)}"
     if rating:
-        return f"Rated {plural(count, noun)} {STAR_FILLED * rating}"
+        return f"Rated {plural(count, noun)} {rating}{STAR_FILLED}"
     return f"Cleared rating on {plural(count, noun)}"
 
 

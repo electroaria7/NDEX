@@ -159,6 +159,8 @@ class ImageScanner:
                         len(pending) >= BATCH_RECORDS or time.monotonic() - last_flush >= BATCH_SECONDS
                     ):
                         flush()
+                # Show this chunk before the next (possibly slow) metadata read starts.
+                flush()
                 start = end
         except ScanCancelled:
             flush()  # keep what was catalogued before the stop
