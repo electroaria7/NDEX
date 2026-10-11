@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from ndex_common.i18n import _
+from ndex_common.raw_formats import BRAND_ORDER, RAW_FORMATS, extensions_for_brand
+
 
 BASE_FILE_TYPES = {
     "jpg": {
@@ -10,32 +13,31 @@ BASE_FILE_TYPES = {
     },
 }
 
-RAW_BRANDS = {
-    "canon": {
-        "label": "Canon",
-        "types": {
-            "cr3": {"label": "Canon RAW (.CR3)", "extensions": {".cr3"}},
-            "cr2": {"label": "Canon RAW (.CR2)", "extensions": {".cr2"}},
-        },
-    },
-    "sony": {
-        "label": "Sony",
-        "types": {
-            "arw": {"label": "Sony RAW (.ARW)", "extensions": {".arw"}},
-            "srf": {"label": "Sony RAW (.SRF)", "extensions": {".srf"}},
-            "sr2": {"label": "Sony RAW (.SR2)", "extensions": {".sr2"}},
-        },
-    },
-    "nikon": {
-        "label": "Nikon",
-        "types": {
-            "nef": {"label": "Nikon RAW (.NEF)", "extensions": {".nef"}},
-            "nrw": {"label": "Nikon RAW (.NRW)", "extensions": {".nrw"}},
-        },
-    },
-}
+def _build_raw_brands() -> dict[str, dict]:
+    brands: dict[str, dict] = {}
+    for brand_key in BRAND_ORDER:
+        types = {}
+        label = brand_key.title()
+        for extension in extensions_for_brand(brand_key):
+            fmt = RAW_FORMATS[extension]
+            label = fmt.brand_label
+            types[fmt.type_key] = {
+                "label": f"{fmt.brand_label} RAW (.{fmt.type_key.upper()})",
+                "brand": fmt.brand_label,
+                "ext": fmt.type_key.upper(),
+                "extensions": {extension},
+            }
+        brands[brand_key] = {"label": label, "types": types}
+    return brands
 
-FILE_TYPE_ORDER = ["jpg", "cr3", "cr2", "arw", "srf", "sr2", "nef", "nrw"]
+
+# Checkbox brands for NDEX One. Built from ndex_common.raw_formats; the type key
+# (lower-case extension) doubles as the on-disk type folder name.
+RAW_BRANDS = _build_raw_brands()
+
+FILE_TYPE_ORDER = ["jpg"] + [
+    file_type for brand in RAW_BRANDS.values() for file_type in brand["types"]
+]
 
 
 def get_file_type_definitions() -> dict[str, dict]:
@@ -64,8 +66,13 @@ def get_file_type_for_path(file_path: Path) -> str:
 
 
 def get_file_type_label(file_type: str) -> str:
+    """Checkbox text for a type. The definition's English ``label`` stays the data."""
     definition = get_file_type_definitions().get(file_type)
-    return definition["label"] if definition else file_type.upper()
+    if definition is None:
+        return file_type.upper()
+    if "brand" in definition:
+        return _("{brand} RAW (.{ext})").format(brand=definition["brand"], ext=definition["ext"])
+    return definition["label"]
 
 
 def get_file_type_group(file_type: str) -> str:

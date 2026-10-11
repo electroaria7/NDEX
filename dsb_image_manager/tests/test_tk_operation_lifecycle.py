@@ -159,12 +159,13 @@ class TkOperationLifecycleTests(unittest.TestCase):
                     raise RuntimeError("Test did not release metadata")
                 return {}
 
+        # A new file forces a metadata read; unchanged files are reused without one.
+        make_record(self.source / "new.jpg", 4)
         with patch.object(tk_app, "ImageScanner", return_value=ImageScanner(SlowMetadata())) as scanner:
             self.app.scan_folder()
             self.pump_until(entered.is_set)
             self.assertIsNone(self.app.catalog)
             first_worker = self.app._worker
-            make_record(self.source / "new.jpg", 4)
             self.app.rescan()
             self.assertIs(self.app._worker, first_worker)
             self.assertEqual(scanner.call_count, 1)
@@ -190,7 +191,8 @@ class TkOperationLifecycleTests(unittest.TestCase):
         self.app.attributes("-alpha", 0)
         self.app.deiconify()
         self.app.update_idletasks()
-        self.pump_until(lambda: self.app.choose_button.winfo_width() > 1)
+        self.pump_until(lambda: all(w.winfo_ismapped() for w in (
+            self.app.choose_button, self.app.cancel_button, self.app.work_progress)))
         self.assertEqual(self.app.winfo_width(), 1040)
         for widget in (self.app.choose_button, self.app.cancel_button, self.app.work_progress):
             self.assertGreaterEqual(widget.winfo_width(), widget.winfo_reqwidth())

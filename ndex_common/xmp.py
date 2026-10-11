@@ -20,21 +20,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
 
+from .raw_formats import RAW_EXTENSIONS
+
 XMP_NS = "http://ns.adobe.com/xap/1.0/"
 RDF_NS = "http://www.w3.org/1999/02/22-rdf-syntax-ns#"
 DC_NS = "http://purl.org/dc/elements/1.1/"
 X_NS = "adobe:ns:meta/"
-
-RAW_EXTENSIONS = {
-    ".cr3",
-    ".cr2",
-    ".arw",
-    ".srf",
-    ".sr2",
-    ".nef",
-    ".nrw",
-    ".dng",
-}
 
 ET.register_namespace("x", X_NS)
 ET.register_namespace("rdf", RDF_NS)

@@ -49,7 +49,7 @@ class WorkspaceStateTests(unittest.TestCase):
         self.workspace = WorkspaceState(
             sources=[
                 SourceItem(self.first_path, 3000, 4000, True),
-                SourceItem(self.second_path, 6000, 4000, False, ("색상 프로필 없음",)),
+                SourceItem(self.second_path, 6000, 4000, False, ("No colour profile — treated as sRGB",)),
             ],
             working_frame=self.frame,
             output_profile=self.output,

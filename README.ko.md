@@ -2,7 +2,7 @@
 
 [English](README.md)
 
-**공개 베타 · 0.9.5**
+**공개 베타 · 0.9.6**
 
 사진 작업 흐름(백업 → 선별 → 원본 추출 → 프레임·내보내기)을 위한 Windows 데스크톱 유틸리티입니다.
 각 앱은 혼자 실행할 수 있고, XMP 사이드카와 공용 설정으로 연동됩니다. Lightroom / Evoto에서의 실제 XMP 해석은 별도 검증이 필요합니다.
@@ -11,38 +11,39 @@
 
 ## 공개 베타
 
-- 현재 버전: **0.9.5 Beta**. 패키지: `NDEX_v0.9.5.zip` (포터블), `NDEX_Setup_0.9.5.exe` (설치본). [0.9.5 Beta 릴리스](https://github.com/electroaria7/NDEX/releases/tag/v0.9.5)에서 확인하세요.
-- GitHub 태그 `v1.0.0` / `v1.0.1`은 같은 베타 줄에 안정 버전 번호를 붙인 기록입니다. `v0.9.4`를 포함한 과거 다운로드는 0.9.5 릴리스와 별도로 유지합니다.
-- 이미 `NDEX_Setup_1.0.1.exe`를 설치했다면 `0.9.5`를 설치하기 전에 제거하세요. Windows는 `0.9.5`를 `1.0.1`보다 낮은 버전으로 봅니다.
+- 현재 버전: **0.9.6 Beta**. 패키지: `NDEX_v0.9.6.zip` (포터블), `NDEX_Setup_0.9.6.exe` (설치본). [0.9.6 Beta 릴리스](https://github.com/electroaria7/NDEX/releases/tag/v0.9.6)에서 확인하세요.
+- GitHub 태그 `v1.0.0` / `v1.0.1`은 같은 베타 줄에 안정 버전 번호를 붙인 기록입니다. `v0.9.5`를 포함한 과거 다운로드는 0.9.6 릴리스와 별도로 유지합니다.
+- 이미 `NDEX_Setup_1.0.1.exe`를 설치했다면 `0.9.6`를 설치하기 전에 제거하세요. Windows는 `0.9.6`를 `1.0.1`보다 낮은 버전으로 봅니다.
 - 변경점: [PATCH_NOTES.md](PATCH_NOTES.md).
 
 ## 빠른 시작
 
-**0.9.5 주요 변경**
+**0.9.6 주요 변경**
 
-- Launcher의 네 작업 카드를 한 줄로 정리하고 폴더명과 문제 결과를 읽기 쉽게 표시합니다. Job Results에서 파일별 처리 이유를 유지하고 재시도·폴더 열기 버튼을 정리했습니다.
-- One의 백업 옵션 설명, 전체 크기·여유 공간 요약, 분석한 목적지 확인과 완료창을 개선했습니다. 과거 작업 재시도 후에도 실제 백업 폴더를 열거나 Manager로 전달합니다.
-- Image Manager의 필터·Pick·별점 표시, 한 칸씩 이동하는 방향키, 표시 후 자동 이동 옵션, 미리보기·전체 화면 안내를 개선했습니다. 필터 입력 중 사진의 선택 상태가 바뀌는 문제를 수정했습니다.
-- Auto Selector에서 **Choose RAW…**로 중복 후보를 직접 선택할 수 있습니다. 매칭 근거, Pick 전달 표시, 중복·XMP 옵션과 방금 끝난 작업 결과를 여는 완료창을 제공합니다.
-- 0.9.4의 백그라운드 작업·취소·안전 종료·동일 RAW 재사용·파일 보존 수정을 포함합니다. Frame은 스위트 버전으로 재빌드하며 이번 패치에서 앱 동작은 바뀌지 않습니다.
+- Launcher에서 언어를 고를 수 있습니다: 시스템 기본값, English, 한국어. 선택은 다음 앱 시작부터 적용됩니다. 한국어 번역은 추후 추가되며, 그 전까지 UI는 영어로 표시됩니다.
+- RAW 형식 목록을 공용으로 통합했습니다. Canon CR3·CR2·CRW(신규), Sony ARW·SRF·SR2, Nikon NEF·NRW를 지원하고 Auto Selector는 DNG도 매칭합니다. 실제 샘플 19개로 촬영일, 메타데이터, XMP, 매칭, 백업 검증을 확인했습니다.
+- Image Manager는 RAW+JPG를 한 장면(한 행)으로 묶어 보여 주고, 실행 취소·다시 실행(Ctrl+Z, Ctrl+Y)을 지원합니다. 스캔은 진행 중에도 결과를 보여 주며 Esc로 취소할 수 있고, 재스캔 때는 바뀌지 않은 파일을 재사용합니다.
+- Image Manager에 썸네일 격자 보기(G, Small/Medium/Large)를 추가했고 툴바를 한 줄로 정리했습니다.
+- Frame은 목록에 썸네일을 표시하고, 프레임·출력 프리셋을 한 곳에서 관리합니다(새로 만들기, 복제, 편집, 이름 바꾸기, 삭제, 기본값, 현재 설정으로 사용). 작업 결과는 표로 보여 줍니다.
+- 통합 검수에서 발견한 문제를 고쳤습니다. Image Manager 재스캔 후 실행 취소, Frame 프리셋 생성, 창을 닫기 전 백그라운드 작업 종료를 수정했으며, One의 미리보기 표를 스크롤바 옆에 다시 배치했습니다.
 
 취소는 현재 파일의 복사·검증·렌더링 또는 현재 메타데이터 묶음 처리가 끝난 뒤 적용합니다. One 분석 중 닫기를 요청하면 분석 완료를 기다립니다.
 0.9.3의 검증 후 원자적 복사와 Auto Selector 중복 `skip`의 기존 RAW·XMP 보존 동작은 유지합니다.
 
-실제 대량 RAW·SD카드 성능과 Lightroom/Evoto 호환성 확인은 후속 과제입니다.
-검토 기록: [10월 9일 코드 감사](https://github.com/electroaria7/NDEX/blob/v0.9.5/docs/Improvement_Review_2026-10-09.md), [10월 10일 UI·작업 안정성](https://github.com/electroaria7/NDEX/blob/v0.9.5/docs/Improvement_Review_2026-10-10.md), [0.9.5 배포 검증](https://github.com/electroaria7/NDEX/blob/v0.9.5/docs/Release_Validation_0.9.5.md).
+이번 릴리스에서 검증하지 않은 항목은 Lightroom/Evoto XMP 해석, 이전 설치본 업그레이드, 고DPI 다중 모니터, 실제 세로 RAW 방향입니다. 대량 RAW·SD카드 성능도 후속 과제입니다.
+검토 기록: [10월 9일 코드 감사](https://github.com/electroaria7/NDEX/blob/v0.9.6/docs/Improvement_Review_2026-10-09.md), [10월 10일 UI·작업 안정성](https://github.com/electroaria7/NDEX/blob/v0.9.6/docs/Improvement_Review_2026-10-10.md), [0.9.6 배포 검증](https://github.com/electroaria7/NDEX/blob/v0.9.6/docs/Release_Validation_0.9.6.md).
 
-다른 앱의 실행 전 용량 점검·CSV/HTML 리포트·언어 통일·배포 자동화는 후속 과제입니다.
+다른 앱의 실행 전 용량 점검·CSV/HTML 리포트·한국어 번역·배포 자동화는 후속 과제입니다.
 상세 계획은 [통합 로드맵](https://github.com/electroaria7/NDEX/blob/main/docs/obsidian/NDEX/Roadmap.md)을 참고하세요.
 
 **Windows 패키지 (권장)**
 
-1. [0.9.5 Beta 릴리스](https://github.com/electroaria7/NDEX/releases/tag/v0.9.5)에서 `NDEX_v0.9.5.zip`을 받습니다.
+1. [0.9.6 Beta 릴리스](https://github.com/electroaria7/NDEX/releases/tag/v0.9.6)에서 `NDEX_v0.9.6.zip`을 받습니다.
 2. 압축을 풉니다. `Apps\` 폴더는 그대로 둡니다.
 3. `NDEX_Launcher.exe`를 더블클릭합니다.
 4. 카드 순서대로 진행합니다: **1. Backup** → **2. Select & Rate** → **3. Extract** → **4. Frame & Export**.
 
-**설치본 (`NDEX_Setup_0.9.5.exe`)**
+**설치본 (`NDEX_Setup_0.9.6.exe`)**
 
 1. 설치 프로그램을 실행합니다. 파일은 `C:\Program Files\NDEX`에 들어갑니다.
 2. 시작 메뉴 또는 바탕화면의 **NDEX Launcher**를 엽니다.
@@ -69,7 +70,7 @@ one-file EXE는 처음 실행 시 압축 해제 때문에 몇 초 걸릴 수 있
 | **NDEX Auto Selector** | 셀렉 JPG로 RAW 원본 매칭·복제 + XMP 표시 (JPG 별점 승계 지원) |
 | **NDEX Frame** | 완성된 Master를 자르지 않고 캔버스에 배치하고, 색 관리된 Instagram용 JPEG/PNG/WebP를 내보냄 |
 
-지원 RAW: CR3 · CR2 · ARW · SRF · SR2 · NEF · NRW  
+지원 RAW: CR3 · CR2 · CRW · ARW · SRF · SR2 · NEF · NRW · DNG (Auto Selector)  
 파일명 매칭: Canon `IMG_0001` · Nikon `DSC_0001`/`_DSC0001` · Sony `DSC00001`. 정확한 파일명을 우선하며, 이름을 바꾼 JPG 안의 카메라 ID는 그 ID로 시작하는 RAW와 매칭할 수 있습니다. RAW 앞에 다른 접두사가 있으면 정확한 파일명으로만 매칭합니다.
 
 NDEX Frame 입력: JPG/JPEG · PNG · TIFF. Master와 기존 출력은 덮어쓰지 않습니다.
@@ -111,7 +112,7 @@ Frame 데이터: `%LOCALAPPDATA%\NDEX\Frame\`
 ## 패키지 구성 (설치본·포터블)
 
 ```
-NDEX_v0.9.5\                  설치 위치: C:\Program Files\NDEX\
+NDEX_v0.9.6\                  설치 위치: C:\Program Files\NDEX\
   NDEX_Launcher.exe           여기서 시작
   SHA256SUMS.txt
   Apps\
@@ -142,7 +143,7 @@ powershell -ExecutionPolicy Bypass -File .\build_all.ps1
 powershell -ExecutionPolicy Bypass -File .\build_all.ps1 -Installer
 ```
 
-결과: `release\NDEX_v0.9.5\` (포터블)과 `release\NDEX_Setup_0.9.5.exe`.
+결과: `release\NDEX_v0.9.6\` (포터블)과 `release\NDEX_Setup_0.9.6.exe`.
 
 ```powershell
 python -m ndex_launcher.main

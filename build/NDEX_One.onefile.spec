@@ -9,6 +9,7 @@ project_root = Path(SPECPATH).parent
 datas = [
     (str(project_root / "config" / "settings.json"), "config"),
     (str(project_root / "assets" / "branding"), "assets/branding"),
+    (str(project_root / "ndex_common" / "locales"), "ndex_common/locales"),
 ]
 
 exiftool_dir = project_root / "vendor" / "exiftool"

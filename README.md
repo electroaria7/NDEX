@@ -2,7 +2,7 @@
 
 [한국어](README.ko.md)
 
-**Public beta · 0.9.5**
+**Public beta · 0.9.6**
 
 Windows desktop tools for a photo workflow: backup → select → extract masters → frame & export.
 Each app can run alone. Together they share XMP sidecars and one settings file. Actual XMP interpretation in Lightroom / Evoto still needs separate validation.
@@ -11,38 +11,39 @@ This is a **public beta**, not a 1.0 product. EXEs are unsigned, so Windows Smar
 
 ## Public beta
 
-- Current version: **0.9.5 Beta**. Packages: `NDEX_v0.9.5.zip` (portable) and `NDEX_Setup_0.9.5.exe` (installer). See the [0.9.5 Beta release](https://github.com/electroaria7/NDEX/releases/tag/v0.9.5) for downloads.
-- GitHub tags `v1.0.0` and `v1.0.1` were this same beta line with a premature stable number. Historical downloads, including `v0.9.4`, remain separate from the 0.9.5 release.
-- If `NDEX_Setup_1.0.1.exe` is already installed, uninstall it before installing `0.9.5`. Windows treats `0.9.5` as older than `1.0.1`.
+- Current version: **0.9.6 Beta**. Packages: `NDEX_v0.9.6.zip` (portable) and `NDEX_Setup_0.9.6.exe` (installer). See the [0.9.6 Beta release](https://github.com/electroaria7/NDEX/releases/tag/v0.9.6) for downloads.
+- GitHub tags `v1.0.0` and `v1.0.1` were this same beta line with a premature stable number. Historical downloads, including `v0.9.5`, remain separate from the 0.9.6 release.
+- If `NDEX_Setup_1.0.1.exe` is already installed, uninstall it before installing `0.9.6`. Windows treats `0.9.6` as older than `1.0.1`.
 - Changelog: [PATCH_NOTES.md](PATCH_NOTES.md).
 
 ## Quick start
 
-**What's new in 0.9.5**
+**What's new in 0.9.6**
 
-- Launcher fits its four workflow cards in one row, shows shorter folder names, and highlights problem jobs. Job Results keeps per-file reasons visible and makes retry/folder actions easier to reach.
-- One explains backup options, shows total size and free space, confirms the analyzed destination, and offers completion actions that use the actual destination of a retried job.
-- Image Manager adds clearer filters and pick/star indicators, single-step arrow navigation, optional advance after marking, and improved preview/fullscreen feedback. Typing in a filter no longer changes photo marks.
-- Auto Selector adds **Choose RAW…** for ambiguous matches, matching explanations, a persistent picked-file handoff, clearer duplicate/XMP controls, and completion actions for the exact finished job.
-- The 0.9.4 background jobs, cancellation, safe closing, duplicate RAW reuse, and file-preservation fixes remain included. Frame is rebuilt with the suite version; its application behavior is unchanged in this patch.
+- Choose the interface language in the Launcher: System default, English, or 한국어. The choice applies the next time an app starts. Korean translations come later, so the UI stays in English until then.
+- RAW support uses one shared format list: Canon CR3, CR2, and CRW (new), Sony ARW, SRF, and SR2, and Nikon NEF and NRW, plus DNG in Auto Selector. Nineteen real sample files were checked for dates, metadata, XMP naming, matching, and backup verification.
+- Image Manager shows RAW+JPG files as one shot row, adds Undo/Redo (Ctrl+Z, Ctrl+Y), and streams scans that can be cancelled with Esc. Rescans reuse unchanged files.
+- Image Manager adds a thumbnail Grid view (G; Small, Medium, Large) and a single-row compact toolbar.
+- Frame shows thumbnails in the image list and manages Frame and Output presets in one place (New, Duplicate, Edit, Rename, Delete, Make Default, Use as current). Job Results is now a table.
+- Integration-review fixes: Image Manager undo after rescans, Frame preset creation, and background workers shut down before windows close. NDEX One's preview tables sit next to their scrollbars again.
 
 Cancellation takes effect after the current file's copy, verification, or render, or the current metadata batch. One waits for analysis to finish when closing during analysis.
 The verified atomic-copy behavior from 0.9.3 remains, including preservation of existing RAW and XMP files under Auto Selector's duplicate `skip` policy.
 
-Large real-world RAW/SD-card benchmarks and Lightroom/Evoto compatibility remain follow-up work.
-Review details: [October 9 audit](https://github.com/electroaria7/NDEX/blob/v0.9.5/docs/Improvement_Review_2026-10-09.md), [October 10 UI and task safety](https://github.com/electroaria7/NDEX/blob/v0.9.5/docs/Improvement_Review_2026-10-10.md), [release validation](https://github.com/electroaria7/NDEX/blob/v0.9.5/docs/Release_Validation_0.9.5.md).
+Not verified in this release: Lightroom/Evoto XMP interpretation, upgrades from older installs, high-DPI multi-monitor use, and real portrait RAW orientation. Large real-world RAW/SD-card benchmarks remain follow-up work.
+Review details: [October 9 audit](https://github.com/electroaria7/NDEX/blob/v0.9.6/docs/Improvement_Review_2026-10-09.md), [October 10 UI and task safety](https://github.com/electroaria7/NDEX/blob/v0.9.6/docs/Improvement_Review_2026-10-10.md), [release validation](https://github.com/electroaria7/NDEX/blob/v0.9.6/docs/Release_Validation_0.9.6.md).
 
-Capacity checks in the other apps, CSV/HTML reports, localization, and release automation remain follow-up work.
+Capacity checks in the other apps, CSV/HTML reports, Korean translations, and release automation remain follow-up work.
 See the [consolidated roadmap](https://github.com/electroaria7/NDEX/blob/main/docs/obsidian/NDEX/Roadmap.md).
 
 **Windows package (recommended)**
 
-1. Download `NDEX_v0.9.5.zip` from the [0.9.5 Beta release](https://github.com/electroaria7/NDEX/releases/tag/v0.9.5).
+1. Download `NDEX_v0.9.6.zip` from the [0.9.6 Beta release](https://github.com/electroaria7/NDEX/releases/tag/v0.9.6).
 2. Unzip the folder. Keep `Apps\` together.
 3. Double-click `NDEX_Launcher.exe`.
 4. Use the four cards: **1. Backup** → **2. Select & Rate** → **3. Extract** → **4. Frame & Export**.
 
-**Installed (`NDEX_Setup_0.9.5.exe`)**
+**Installed (`NDEX_Setup_0.9.6.exe`)**
 
 1. Run the installer. Files go to `C:\Program Files\NDEX`.
 2. Open **NDEX Launcher** from the Start menu or the desktop icon.
@@ -69,7 +70,7 @@ First launch of a one-file EXE can take a few seconds while it unpacks.
 | **NDEX Auto Selector** | Match select JPGs to RAW masters + XMP (can carry JPG star ratings) |
 | **NDEX Frame** | Place finished Masters on a crop-free canvas and export color-managed Instagram JPEG/PNG/WebP |
 
-Supported RAW: CR3 · CR2 · ARW · SRF · SR2 · NEF · NRW  
+Supported RAW: CR3 · CR2 · CRW · ARW · SRF · SR2 · NEF · NRW · DNG (Auto Selector)  
 Filename matching: Canon `IMG_0001` · Nikon `DSC_0001`/`_DSC0001` · Sony `DSC00001`. Exact names take priority; a camera ID inside a renamed JPG can match a RAW whose name begins with that ID. Prefixed RAW names require an exact filename match.
 
 NDEX Frame input: JPG/JPEG · PNG · TIFF. Masters and existing outputs are never overwritten.
@@ -111,7 +112,7 @@ Shared settings `frame` section: `%LOCALAPPDATA%\NDEX\config\settings.json`
 ## Packaged layout (installer and portable)
 
 ```
-NDEX_v0.9.5\                  also installed as C:\Program Files\NDEX\
+NDEX_v0.9.6\                  also installed as C:\Program Files\NDEX\
   NDEX_Launcher.exe           start here
   SHA256SUMS.txt
   Apps\
@@ -142,7 +143,7 @@ powershell -ExecutionPolicy Bypass -File .\build_all.ps1
 powershell -ExecutionPolicy Bypass -File .\build_all.ps1 -Installer
 ```
 
-Output: `release\NDEX_v0.9.5\` (portable package) and `release\NDEX_Setup_0.9.5.exe`.
+Output: `release\NDEX_v0.9.6\` (portable package) and `release\NDEX_Setup_0.9.6.exe`.
 
 ```powershell
 python -m ndex_launcher.main

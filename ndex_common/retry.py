@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from ndex_common.i18n import _
 from ndex_common.report import JobReport, path_key, same_path
 
 # The job type each app can run again. A Select handoff is a pointer, not
@@ -43,36 +44,37 @@ class RetryPlan:
     def summary(self) -> str:
         """One line explaining what a retry would do, or why it would not."""
         if not self.paths and not self.missing:
-            return "This job has no failed items to retry."
+            return _("This job has no failed items to retry.")
         if not self.paths:
-            return (
-                f"None of the {len(self.missing)} problem file(s) are still where "
+            return _(
+                "None of the {count} problem file(s) are still where "
                 "the job found them, so there is nothing to retry."
-            )
-        text = f"Retry {len(self.paths)} file(s)."
+            ).format(count=len(self.missing))
+        text = _("Retry {count} file(s).").format(count=len(self.paths))
         if self.missing:
-            text += (
-                f" {len(self.missing)} more are no longer on disk and will be left out."
-            )
+            text += " " + _(
+                "{count} more are no longer on disk and will be left out."
+            ).format(count=len(self.missing))
         return text
 
-    def question(self, *, destination_label: str = "Destination", note: str = "") -> str:
+    def question(self, *, destination_label: str = "", note: str = "") -> str:
         """The confirmation every app shows before a retry starts.
 
         One text for all of them, so the promise about folders and settings
         reads the same wherever the button lives.
         """
+        destination_label = destination_label or _("Destination")
         lines = [self.summary, ""]
         if self.report.source:
-            lines.append(f"Source: {self.report.source}")
+            lines.append(_("Source: {path}").format(path=self.report.source))
         if self.report.destination:
             lines.append(f"{destination_label}: {self.report.destination}")
         lines.append("")
         if note:
             lines.append(note)
-        lines.append("They run again with the settings showing in the main window.")
+        lines.append(_("They run again with the settings showing in the main window."))
         lines.append("")
-        lines.append("Continue?")
+        lines.append(_("Continue?"))
         return chr(10).join(lines)
 
     def context(self) -> dict[str, Any]:

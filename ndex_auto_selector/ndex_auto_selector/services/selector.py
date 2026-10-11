@@ -7,15 +7,16 @@ from pathlib import Path
 from threading import Event
 
 from ndex_common.filecopy import copy_verified
+from ndex_common.i18n import _
 
 from ndex_common.rating import read_jpg_rating
+from ndex_common.raw_formats import RAW_EXTENSIONS
 from ndex_common.retry import path_key
 from ndex_common.xmp import sidecar_paths_for_read, write_xmp_sidecar
 
 from ..core.models import AnalysisSummary, CopyResult, DuplicatePolicy, SelectionMatch
 
 JPG_EXTENSIONS = {".jpg", ".jpeg"}
-RAW_EXTENSIONS = {".cr3", ".cr2", ".arw", ".srf", ".sr2", ".nef", ".nrw"}
 # An ID must not sit inside a longer token: no letter/digit before it and no
 # further digit after it (IMG_1234 must not match IMG_12345).
 CAMERA_ID_PATTERNS = (
@@ -42,7 +43,7 @@ def load_handoff(manifest_path: Path) -> tuple[Path | None, list[Path]]:
 
     manifest = load_manifest(Path(manifest_path))
     if manifest is None:
-        raise ValueError(f"Not a valid handoff manifest: {manifest_path}")
+        raise ValueError(_("Not a valid handoff manifest: {path}").format(path=manifest_path))
     source = manifest.get("source") or (manifest.get("folders") or {}).get("source")
     files = [path for path in handoff_files(manifest) if path.suffix.casefold() in JPG_EXTENSIONS]
     return (Path(str(source)) if source else None), files
@@ -130,8 +131,8 @@ class AutoSelectorService:
         """
         raw_source_dir = Path(raw_source_dir)
         selected_jpg_dir = Path(selected_jpg_dir)
-        self._require_dir(raw_source_dir, "RAW folder")
-        self._require_dir(selected_jpg_dir, "selected JPGs folder")
+        self._require_dir(raw_source_dir, _("RAW folder"))
+        self._require_dir(selected_jpg_dir, _("selected JPGs folder"))
 
         _check_cancelled(cancel_event)
         raw_by_stem = self._index_cr3_files(
@@ -193,13 +194,15 @@ class AutoSelectorService:
                     result.errors += 1
                     result.items.append({"path": str(pending.jpg_path), "status": "failed",
                                          "detail": "not run: cancelled"})
-                result.messages.append(f"Cancelled: {len(matches) - index + 1} JPG(s) not processed")
+                result.messages.append(
+                    _("Cancelled: {count} JPG(s) not processed").format(count=len(matches) - index + 1)
+                )
                 break
             try:
                 if match.status == "ambiguous":
                     result.ambiguous += 1
                     result.messages.append(
-                        f"several RAW files match {match.jpg_path.name}; skipped"
+                        _("several RAW files match {name}; skipped").format(name=match.jpg_path.name)
                     )
                     result.items.append(
                         {"path": str(match.jpg_path), "status": "ambiguous", "detail": "multiple RAW matches"}
@@ -207,7 +210,7 @@ class AutoSelectorService:
                     continue
                 if match.raw_path is None or match.status not in ("matched", "chosen"):
                     result.missing += 1
-                    result.messages.append(f"no RAW found for {match.jpg_path.name}")
+                    result.messages.append(_("no RAW found for {name}").format(name=match.jpg_path.name))
                     result.items.append(
                         {"path": str(match.jpg_path), "status": "missing", "detail": "no RAW match"}
                     )
@@ -217,7 +220,9 @@ class AutoSelectorService:
                 if source_key in copied_sources:
                     result.skipped += 1
                     result.messages.append(
-                        f"skipped {match.raw_path.name} for {match.jpg_path.name}: already copied in this run"
+                        _("skipped {raw} for {jpg}: already copied in this run").format(
+                            raw=match.raw_path.name, jpg=match.jpg_path.name
+                        )
                     )
                     result.items.append(
                         {"path": str(match.jpg_path), "status": "skipped", "detail": "already copied in this run"}
@@ -249,7 +254,9 @@ class AutoSelectorService:
                             detail += "; XMP written"
                         except Exception as exc:
                             result.errors += 1
-                            result.messages.append(f"{match.file_stem}: XMP write failed: {exc}")
+                            result.messages.append(
+                                _("{name}: XMP write failed: {error}").format(name=match.file_stem, error=exc)
+                            )
                             result.items.append(
                                 {
                                     "path": str(match.jpg_path),
@@ -260,13 +267,15 @@ class AutoSelectorService:
                             continue
                     result.skipped += 1
                     copied_sources.add(source_key)
-                    result.messages.append(f"skipped existing {final_path.name}: {detail}")
+                    result.messages.append(
+                        _("skipped existing {name}: {detail}").format(name=final_path.name, detail=detail)
+                    )
                     result.items.append({"path": str(final_path), "status": "skipped", "detail": detail})
                     continue
                 if action == "skip":
                     result.skipped += 1
                     copied_sources.add(source_key)
-                    result.messages.append(f"skipped existing {destination_path.name}")
+                    result.messages.append(_("skipped existing {name}").format(name=destination_path.name))
                     result.items.append(
                         {"path": str(destination_path), "status": "skipped",
                          "detail": "already exists; RAW and XMP preserved" + (f"; {note}" if note else "")}
@@ -283,7 +292,9 @@ class AutoSelectorService:
                         # The RAW is in the work folder; report one failure for
                         # this JPG rather than copied + failed.
                         result.errors += 1
-                        result.messages.append(f"{match.file_stem}: XMP write failed: {exc}")
+                        result.messages.append(
+                                _("{name}: XMP write failed: {error}").format(name=match.file_stem, error=exc)
+                            )
                         result.items.append(
                             {
                                 "path": str(match.jpg_path),
@@ -459,14 +470,14 @@ class AutoSelectorService:
             candidate = destination_path.with_name(f"{stem}_{index:03d}{suffix}")
             if index not in occupied and not candidate.exists():
                 return candidate, "copy"
-        raise RuntimeError(f"Could not resolve duplicate name for {destination_path}")
+        raise RuntimeError(_("Could not resolve duplicate name for {path}").format(path=destination_path))
 
     @staticmethod
     def _require_dir(path: Path, label: str) -> None:
         if not path.exists():
-            raise FileNotFoundError(f"{label} does not exist: {path}")
+            raise FileNotFoundError(_("{label} does not exist: {path}").format(label=label, path=path))
         if not path.is_dir():
-            raise NotADirectoryError(f"{label} is not a folder: {path}")
+            raise NotADirectoryError(_("{label} is not a folder: {path}").format(label=label, path=path))
 
     @staticmethod
     def _write_selected_xmp(raw_path: Path, rating: int, label: str) -> None:

@@ -8,6 +8,7 @@ from ndex_common.filecopy import copy_verified
 
 from ..core.models import DuplicatePolicy, ExportOptions, ExportSummary, ImageRecord
 from .operations import ProgressCallback, operation_records
+from ndex_common.i18n import _
 
 INVALID_FILENAME_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
@@ -19,11 +20,15 @@ class ExportService:
         progress_callback: ProgressCallback | None = None,
     ) -> ExportSummary:
         summary = ExportSummary(total=len(records))
+        # Both files of a RAW+JPG shot share one index so exported names stay paired.
+        shot_numbers: dict[str, int] = {}
+        for record in records:
+            shot_numbers.setdefault(record.pair_group_id, len(shot_numbers))
 
-        for offset, record in enumerate(operation_records(records, summary, cancel_event, progress_callback)):
+        for record in operation_records(records, summary, cancel_event, progress_callback):
             try:
                 options.destination_dir.mkdir(parents=True, exist_ok=True)
-                index = options.start_index + offset
+                index = options.start_index + shot_numbers[record.pair_group_id]
                 stem = render_export_stem(record, options.rename_pattern, index)
                 destination = options.destination_dir / f"{stem}{record.file_path.suffix}"
                 final_path, action = resolve_duplicate(destination, options.duplicate_policy)
@@ -81,4 +86,4 @@ def resolve_duplicate(destination_path: Path, duplicate_policy: DuplicatePolicy)
         candidate = destination_path.with_name(f"{stem}_{index:03d}{suffix}")
         if not candidate.exists():
             return candidate, "copy"
-    raise RuntimeError(f"Could not resolve duplicate name for {destination_path}")
+    raise RuntimeError(_("Could not resolve duplicate name for {path}").format(path=destination_path))

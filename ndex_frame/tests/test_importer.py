@@ -54,7 +54,7 @@ class ImporterTests(unittest.TestCase):
         self.assertEqual(source.path, path.resolve())
         self.assertEqual((source.oriented_width, source.oriented_height), (20, 30))
         self.assertFalse(source.has_icc)
-        self.assertIn("색상 프로필 없음", source.warnings)
+        self.assertIn("No colour profile — treated as sRGB", source.warnings)
 
 
 if __name__ == "__main__":

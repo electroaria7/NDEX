@@ -44,7 +44,7 @@ class MainWindowTests(unittest.TestCase):
 
     def test_composes_preview_first_single_window(self) -> None:
         window = MainWindow(controller=self.controller)
-        self.addCleanup(window.close)
+        self.addCleanup(window.teardown)
         self.assertEqual(window.windowTitle(), "NDEX Frame")
         self.assertIsNotNone(window.thumbnail_view)
         self.assertIsNotNone(window.preview_widget)
@@ -86,13 +86,14 @@ class MainWindowTests(unittest.TestCase):
 
     def test_export_progress_bar_tracks_files_and_hides_when_finished(self) -> None:
         window = MainWindow(controller=self.controller)
-        self.addCleanup(window.close)
+        self.addCleanup(window.teardown)
         window._export_progress(ExportProgress(1, 3, Path("one.jpg"), "started"))
         self.assertFalse(window.export_progress_bar.isHidden())
         self.assertEqual(window.export_progress_bar.maximum(), 3)
         self.assertEqual(window.export_progress_bar.value(), 1)
-        self.assertEqual(window.export_progress_bar.format(), "%v / %m")
+        self.assertEqual(window.export_progress_label.text(), "Exporting 1 of 3 — one.jpg")
         self.assertEqual(window.export_progress_bar.toolTip(), "one.jpg")
+        self.assertEqual(window.statusBar().currentMessage(), "")
         window._export_progress(ExportProgress(2, 3, Path("two.jpg"), "exported"))
         self.assertEqual(window.export_progress_bar.value(), 2)
         window.set_interactive_dialogs(False)
@@ -101,7 +102,7 @@ class MainWindowTests(unittest.TestCase):
 
     def test_long_output_path_does_not_expand_window_or_hide_export_actions(self) -> None:
         window = MainWindow(controller=self.controller)
-        self.addCleanup(window.close)
+        self.addCleanup(window.teardown)
         window.show()
         window.resize(960, 640)
         self.app.processEvents()
@@ -113,9 +114,11 @@ class MainWindowTests(unittest.TestCase):
 
         self.assertEqual(window.width(), 960)
         self.assertEqual(window.minimumSizeHint().width(), original_minimum)
-        self.assertEqual(window.output_folder_label.text(), str(path))
+        self.assertEqual(window.output_folder_label.text(), f"Output folder: {path} (folder not found)")
         self.assertEqual(window.output_folder_label.toolTip(), str(path))
-        self.assertEqual(window.output_folder_label.accessibleDescription(), str(path))
+        self.assertEqual(
+            window.output_folder_label.accessibleDescription(), window.output_folder_label.text()
+        )
         for button in (window.output_folder_button, window.export_selected_button, window.export_all_button):
             position = button.mapTo(window, QPoint())
             self.assertTrue(window.rect().contains(position))
@@ -123,7 +126,7 @@ class MainWindowTests(unittest.TestCase):
 
     def test_short_window_keeps_cancel_visible_and_settings_scrollable(self) -> None:
         window = MainWindow(controller=self.controller)
-        self.addCleanup(window.close)
+        self.addCleanup(window.teardown)
         window.show()
         window.resize(900, 600)
         with patch.object(self.controller, "_export_thread", object()):
@@ -148,7 +151,7 @@ class MainWindowTests(unittest.TestCase):
 
     def test_selected_controls_require_a_photo_and_reset_only_that_photo(self) -> None:
         window = MainWindow(controller=self.controller)
-        self.addCleanup(window.close)
+        self.addCleanup(window.teardown)
         self.assertFalse(window.scale_spin.isEnabled())
         self.assertFalse(window.reset_override_button.isEnabled())
         self.assertTrue(window.ratio_width_spin.isEnabled())
@@ -176,7 +179,7 @@ class MainWindowTests(unittest.TestCase):
 
     def test_ratio_and_background_presets_update_working_frame(self) -> None:
         window = MainWindow(controller=self.controller)
-        self.addCleanup(window.close)
+        self.addCleanup(window.teardown)
         window.ratio_preset_buttons[1].click()
         self.assertEqual(
             (self.state.working_frame.ratio.width, self.state.working_frame.ratio.height),
@@ -198,7 +201,8 @@ class MainWindowTests(unittest.TestCase):
         second = SourceItem(Path("second.jpg"), 5000, 7000, True)
         self.state.replace_sources([first, second])
         window = MainWindow(controller=self.controller)
-        self.addCleanup(window.close)
+        self.addCleanup(window.teardown)
+        window.set_interactive_dialogs(False)
         window.ratio_preset_buttons[2].click()
         window.background_preset_buttons[1].click()
         window.photo_size_preset_buttons[0].click()
@@ -216,7 +220,7 @@ class MainWindowTests(unittest.TestCase):
         source = SourceItem(Path("master.jpg"), 3000, 4000, True)
         self.state.replace_sources([source])
         window = MainWindow(controller=self.controller)
-        self.addCleanup(window.close)
+        self.addCleanup(window.teardown)
         window.photo_size_preset_buttons[0].click()
         self.assertEqual(self.state.effective_framing(source.path)[0], 0.80)
         self.assertEqual(window.scale_spin.value(), 80)
@@ -226,7 +230,7 @@ class MainWindowTests(unittest.TestCase):
     def test_selecting_output_folder_enables_export_after_import(self) -> None:
         self.state.replace_sources([SourceItem(Path("master.jpg"), 3000, 4000, True)])
         window = MainWindow(controller=self.controller)
-        self.addCleanup(window.close)
+        self.addCleanup(window.teardown)
         self.assertFalse(window.export_all_button.isEnabled())
         with tempfile.TemporaryDirectory() as directory:
             with patch.object(QFileDialog, "getExistingDirectory", return_value=directory):
@@ -236,7 +240,7 @@ class MainWindowTests(unittest.TestCase):
 
     def test_opening_files_clears_a_previous_handoff(self) -> None:
         window = MainWindow(controller=self.controller)
-        self.addCleanup(window.close)
+        self.addCleanup(window.teardown)
         window.handoff_path = Path("select-handoff.json")
         with tempfile.TemporaryDirectory() as directory:
             master = Path(directory) / "master.jpg"
@@ -247,7 +251,7 @@ class MainWindowTests(unittest.TestCase):
 
     def test_opening_a_folder_clears_a_previous_handoff(self) -> None:
         window = MainWindow(controller=self.controller)
-        self.addCleanup(window.close)
+        self.addCleanup(window.teardown)
         window.handoff_path = Path("select-handoff.json")
         with tempfile.TemporaryDirectory() as directory:
             with patch.object(QFileDialog, "getExistingDirectory", return_value=directory):
@@ -303,7 +307,7 @@ class MainWindowTests(unittest.TestCase):
         self.state.replace_sources([source])
         self.controller.select(source.path)
         window = MainWindow(controller=self.controller)
-        self.addCleanup(window.close)
+        self.addCleanup(window.teardown)
         self.assertIn("Default", window.thumbnail_view.item(0).text())
         window._preview_dragged(0.25, -0.5)
         self.assertTrue(self.state.is_modified(source.path))

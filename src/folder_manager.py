@@ -4,6 +4,8 @@ from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 
+from ndex_common.i18n import _
+
 from .file_types import FILE_TYPE_ORDER, get_file_type_for_path
 from .models import PreviewRow, ScanItem
 
@@ -80,7 +82,7 @@ def build_preview(items: list[ScanItem], backup_root: Path) -> tuple[list[Previe
             if count == 0:
                 continue
             target_dir = backup_root / rel_date_path / file_type
-            line_status = "existing" if target_dir.exists() else "new"
+            line_status = _("existing") if target_dir.exists() else _("new")
             lines.append(f"  {rel_date_path.as_posix()}/{file_type}  [{line_status}] ({count})")
 
     return rows, lines

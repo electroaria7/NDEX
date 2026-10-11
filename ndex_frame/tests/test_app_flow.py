@@ -45,14 +45,14 @@ class AppFlowTests(unittest.TestCase):
         )
         self.window = MainWindow(self.controller, preset_store=self.store)
         self.window.set_interactive_dialogs(False)
-        self.addCleanup(self.window.close)
+        self.addCleanup(self.window.teardown)
 
     def tearDown(self) -> None:
         self.controller.cancel_export()
         thread = self.controller._export_thread
         if thread is not None:
             thread.wait(5000)
-        self.window.close()
+        self.window.teardown()
         self.controller.thread_pool.waitForDone(5000)
         QApplication.processEvents()
         self.temporary.cleanup()
@@ -199,7 +199,7 @@ class AppFlowTests(unittest.TestCase):
     def test_cancel_button_shows_cancelling_ellipsis(self) -> None:
         self.window.cancel_button.show()
         self.window.request_cancel()
-        self.assertEqual(self.window.cancel_button.text(), "Cancelling…")
+        self.assertEqual(self.window.cancel_button.text(), "Stopping…")
 
     def test_queue_handoff_imports_manifest_files(self) -> None:
         source_dir = self.root / "handoff-masters"
@@ -302,11 +302,10 @@ class AppFlowTests(unittest.TestCase):
     def test_completion_dialog_lists_counts_and_open_folder(self) -> None:
         dialog = ExportCompletionDialog(ExportResult(2, 1, 3, True, ()), 4, self.root / "output")
         self.addCleanup(dialog.close)
-        self.assertEqual(
-            dialog.summary_label.text(),
-            "Exported 2 · Skipped 1 · Failed 3 · Cancelled 4",
-        )
+        self.assertEqual(dialog.summary_label.text(), "Export stopped — 2 of 10 exported")
+        self.assertEqual(dialog.windowTitle(), "Export stopped — 2 of 10 exported")
         self.assertEqual(dialog.open_folder_button.text(), "Open Output Folder")
+        self.assertTrue(dialog.job_results_button.isHidden())
 
     def test_export_worker_exception_releases_thread_and_reports_failure(self) -> None:
         self.controller.state.sources = [SourceItem(self.root / "a.jpg", 20, 20, True)]
@@ -324,7 +323,7 @@ class AppFlowTests(unittest.TestCase):
         ))
         self.window._export_finished(result)
         self.assertEqual(self.window._last_completion_dialog.summary_label.text(),
-                         "Exported 0 · Skipped 0 · Failed 0 · Cancelled 1")
+                         "Export stopped — 0 of 1 exported")
         self.assertEqual(self.window._source_export_status[self.root / "a.jpg"], "Cancelled")
         self.assertEqual(self.window._status_for(self.root / "a.jpg"), "Cancelled")
 

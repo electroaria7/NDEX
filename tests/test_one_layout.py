@@ -8,7 +8,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from src.gui import DSBApp, STOPPING_STATUS
+from src.gui import DSBApp, stopping_status
 
 
 class OneLayoutTests(unittest.TestCase):
@@ -29,7 +29,7 @@ class OneLayoutTests(unittest.TestCase):
                     for enabled in app.brand_vars.values():
                         enabled.set(True)
                     app._refresh_file_type_options()
-                    app.status_var.set(STOPPING_STATUS)
+                    app.status_var.set(stopping_status())
                     app.update()
                     viewport = app.options_viewport
                     self.assertLessEqual(app.minsize()[1], 600)

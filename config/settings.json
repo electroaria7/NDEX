@@ -2,6 +2,7 @@
   "supported_extensions": [
     ".cr3",
     ".cr2",
+    ".crw",
     ".arw",
     ".srf",
     ".sr2",
@@ -20,6 +21,7 @@
     "jpg": true,
     "cr3": true,
     "cr2": true,
+    "crw": true,
     "arw": true,
     "srf": true,
     "sr2": true,

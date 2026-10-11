@@ -10,12 +10,6 @@ from unittest.mock import patch
 from src import gui
 from src.file_types import get_file_type_group, get_file_type_label
 from src.gui import (
-    DUPLICATE_LABEL_TO_POLICY,
-    DUPLICATE_POLICY_HINTS,
-    DUPLICATE_POLICY_LABELS,
-    VERIFY_LABEL_TO_MODE,
-    VERIFY_MODE_HINTS,
-    VERIFY_MODE_LABELS,
     DSBApp,
     build_completion_status,
     build_confirmation,
@@ -23,7 +17,11 @@ from src.gui import (
     format_day_span,
     format_size,
     format_type_counts,
+    duplicate_policy_hints,
+    duplicate_policy_labels,
     free_space_warning,
+    verify_mode_hints,
+    verify_mode_labels,
 )
 from src.logger import format_display_line
 from src.models import BackupResult, ScanItem, ScanSummary
@@ -48,15 +46,12 @@ def make_summary(total_size=1_932_735_283, free_space=None, fallback_count=0, ro
 
 class WordingTests(unittest.TestCase):
     def test_labels_map_to_the_saved_config_keys(self):
-        self.assertEqual(
-            {label: key for key, label in DUPLICATE_POLICY_LABELS.items()}, DUPLICATE_LABEL_TO_POLICY
-        )
-        self.assertEqual(set(DUPLICATE_POLICY_LABELS), {"rename", "smart", "skip", "overwrite"})
-        self.assertEqual(set(VERIFY_MODE_LABELS), {"size", "sha256", "none"})
-        self.assertEqual(VERIFY_LABEL_TO_MODE["Quick check (file size)"], "size")
-        self.assertEqual(DUPLICATE_LABEL_TO_POLICY["Skip identical files"], "smart")
-        self.assertEqual(set(DUPLICATE_POLICY_HINTS), set(DUPLICATE_POLICY_LABELS))
-        self.assertEqual(set(VERIFY_MODE_HINTS), set(VERIFY_MODE_LABELS))
+        self.assertEqual(set(duplicate_policy_labels()), {"rename", "smart", "skip", "overwrite"})
+        self.assertEqual(set(verify_mode_labels()), {"size", "sha256", "none"})
+        self.assertEqual(verify_mode_labels()["size"], "Quick check (file size)")
+        self.assertEqual(duplicate_policy_labels()["smart"], "Skip identical files")
+        self.assertEqual(set(duplicate_policy_hints()), set(duplicate_policy_labels()))
+        self.assertEqual(set(verify_mode_hints()), set(verify_mode_labels()))
 
     def test_file_type_labels_say_raw(self):
         self.assertEqual(get_file_type_label("jpg"), "JPG")
@@ -207,8 +202,8 @@ class WindowTests(unittest.TestCase):
     def test_hints_follow_the_comboboxes(self):
         self.app.duplicate_var.set("Overwrite existing")
         self.app.verify_var.set("No check")
-        self.assertEqual(self.app.duplicate_hint_var.get(), DUPLICATE_POLICY_HINTS["overwrite"])
-        self.assertEqual(self.app.verify_hint_var.get(), VERIFY_MODE_HINTS["none"])
+        self.assertEqual(self.app.duplicate_hint_var.get(), duplicate_policy_hints()["overwrite"])
+        self.assertEqual(self.app.verify_hint_var.get(), verify_mode_hints()["none"])
 
     def test_accent_and_enter_follow_the_next_step(self):
         app = self.app
@@ -240,13 +235,13 @@ class WindowTests(unittest.TestCase):
         self.app.destination_var.set(str(self.root / "out"))
         with patch.object(gui.messagebox, "showerror") as showerror:
             self.app._start_analysis()
-        showerror.assert_called_once_with("Invalid Source", gui.INVALID_SOURCE_MESSAGE)
+        showerror.assert_called_once_with("Invalid Source", gui.invalid_source_message())
 
     def test_cancel_and_completion_status(self):
         self.app._set_busy(True, "Working")
         self.app.is_analyzing = False
         self.app._cancel_task()
-        self.assertEqual(self.app.status_var.get(), gui.STOPPING_STATUS)
+        self.assertEqual(self.app.status_var.get(), gui.stopping_status())
         self.app._set_busy(False, "Done", progress=100.0)
         self.assertEqual(self.app.progress_var.get(), 100.0)
 
