@@ -8,7 +8,9 @@ from src.branding import NDEX_AUTO_SELECTOR_TITLE
 
 from ndex_auto_selector.ndex_auto_selector.services.selector import AutoSelectorService, load_handoff
 from ndex_auto_selector.ndex_auto_selector.ui.tk_app import run_app
+from ndex_common import i18n
 from ndex_common.crashlog import install_crash_logging
+from ndex_common.i18n import _
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -16,21 +18,21 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--raw-source",
         type=Path,
-        help="Folder containing original RAW files (CR3, CR2, ARW, SRF, SR2, NEF, NRW)",
+        help=_("Folder containing original RAW files (CR3, CR2, ARW, SRF, SR2, NEF, NRW)"),
     )
-    parser.add_argument("--selected-jpg", type=Path, help="Folder containing selected JPG files")
-    parser.add_argument("--work-folder", type=Path, help="Destination folder for matched RAW copies")
-    parser.add_argument("--recursive", action="store_true", default=True, help="Scan source folders recursively")
+    parser.add_argument("--selected-jpg", type=Path, help=_("Folder containing selected JPG files"))
+    parser.add_argument("--work-folder", type=Path, help=_("Destination folder for matched RAW copies"))
+    parser.add_argument("--recursive", action="store_true", default=True, help=_("Scan source folders recursively"))
     parser.add_argument("--no-recursive", dest="recursive", action="store_false")
-    parser.add_argument("--analyze", action="store_true", help="Analyze matches and print a summary")
-    parser.add_argument("--copy", action="store_true", help="Copy matched RAW files into the work folder")
-    parser.add_argument("--write-xmp", action="store_true", help="Write XMP sidecars for copied RAW files")
-    parser.add_argument("--xmp-rating", type=int, choices=range(0, 6), default=5, help="XMP star rating from 0 to 5")
-    parser.add_argument("--xmp-label", default="NDEX Selected", help="XMP label and keyword for selected files")
+    parser.add_argument("--analyze", action="store_true", help=_("Analyze matches and print a summary"))
+    parser.add_argument("--copy", action="store_true", help=_("Copy matched RAW files into the work folder"))
+    parser.add_argument("--write-xmp", action="store_true", help=_("Write XMP sidecars for copied RAW files"))
+    parser.add_argument("--xmp-rating", type=int, choices=range(0, 6), default=5, help=_("XMP star rating from 0 to 5"))
+    parser.add_argument("--xmp-label", default="NDEX Selected", help=_("XMP label and keyword for selected files"))
     parser.add_argument(
         "--xmp-rating-from-jpg",
         action="store_true",
-        help=(
+        help=_(
             "Read the star rating from each selected JPG (sidecar, EXIF, or embedded XMP) "
             "and copy it to the RAW XMP. Falls back to --xmp-rating when none is found."
         ),
@@ -39,27 +41,28 @@ def build_parser() -> argparse.ArgumentParser:
         "--duplicate-policy",
         choices=["rename", "skip", "overwrite"],
         default="rename",
-        help="How to handle RAW files that already exist in the work folder",
+        help=_("How to handle RAW files that already exist in the work folder"),
     )
     parser.add_argument(
         "--handoff",
         type=Path,
-        help="Select-handoff manifest from Image Manager: only its picked JPGs are matched.",
+        help=_("Select-handoff manifest from Image Manager: only its picked JPGs are matched."),
     )
     parser.add_argument(
         "--open",
         action="store_true",
-        help="Open the GUI with folder arguments preloaded (used by NDEX handoff)",
+        help=_("Open the GUI with folder arguments preloaded (used by NDEX handoff)"),
     )
     parser.add_argument(
         "--retry",
         type=Path,
-        help="Open Job Results at this extract manifest so its failed files can be retried.",
+        help=_("Open Job Results at this extract manifest so its failed files can be retried."),
     )
     return parser
 
 
 def main() -> int:
+    i18n.init("auto_selector")
     install_crash_logging("NDEX Auto Selector")
     args = build_parser().parse_args()
 
@@ -90,9 +93,9 @@ def main() -> int:
             raise SystemExit(str(exc))
         selected_jpg = handoff_source or (jpg_files[0].parent if jpg_files else None)
     if not args.raw_source or not selected_jpg:
-        raise SystemExit("--raw-source and --selected-jpg (or --handoff) are required for CLI mode.")
+        raise SystemExit(_("--raw-source and --selected-jpg (or --handoff) are required for CLI mode."))
     if args.copy and not args.work_folder:
-        raise SystemExit("--work-folder is required with --copy.")
+        raise SystemExit(_("--work-folder is required with --copy."))
 
     service = AutoSelectorService()
     summary = service.analyze(
@@ -102,12 +105,12 @@ def main() -> int:
         exclude=args.work_folder,
         jpg_files=jpg_files,
     )
-    _emit(f"RAW folder: {summary.raw_source_dir}")
-    _emit(f"Selected JPGs folder: {summary.selected_jpg_dir}")
-    _emit(f"Selected JPG: {summary.selected_count}")
-    _emit(f"Matched RAW: {summary.matched_count}")
-    _emit(f"No RAW found: {summary.missing_count}")
-    _emit(f"Ambiguous: {summary.ambiguous_count}")
+    _emit(_("RAW folder: {path}").format(path=summary.raw_source_dir))
+    _emit(_("Selected JPGs folder: {path}").format(path=summary.selected_jpg_dir))
+    _emit(_("Selected JPG: {count}").format(count=summary.selected_count))
+    _emit(_("Matched RAW: {count}").format(count=summary.matched_count))
+    _emit(_("No RAW found: {count}").format(count=summary.missing_count))
+    _emit(_("Ambiguous: {count}").format(count=summary.ambiguous_count))
 
     if args.copy:
         result = service.copy_matches(
@@ -120,9 +123,17 @@ def main() -> int:
             rating_from_jpg=args.xmp_rating_from_jpg,
         )
         _emit(
-            "Copy result: "
-            f"copied={result.copied}, xmp={result.xmp_written}, skipped={result.skipped}, "
-            f"overwritten={result.overwritten}, missing={result.missing}, errors={result.errors}"
+            _(
+                "Copy result: copied={copied}, xmp={xmp}, skipped={skipped}, "
+                "overwritten={overwritten}, missing={missing}, errors={errors}"
+            ).format(
+                copied=result.copied,
+                xmp=result.xmp_written,
+                skipped=result.skipped,
+                overwritten=result.overwritten,
+                missing=result.missing,
+                errors=result.errors,
+            )
         )
         for message in result.messages:
             _emit(message)

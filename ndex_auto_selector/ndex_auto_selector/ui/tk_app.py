@@ -13,6 +13,7 @@ from tkinter import font as tkfont
 
 from src.branding import NDEX_AUTO_SELECTOR_TITLE
 
+from ndex_common.i18n import _, ngettext
 from ndex_common.settings import get_section, update_section
 from ndex_common.theme import (
     CARD_BG,
@@ -29,20 +30,27 @@ from ..services.selector import AnalysisCancelled, AutoSelectorService, load_han
 
 SETTINGS_SECTION = "auto_selector"
 
-STATUS_LABELS = {
-    "matched": "✔ Matched",
-    "ambiguous": "⚠ Choose RAW",
-    "missing": "✖ Not found",
-    "chosen": "✔ Chosen",
-}
+def status_labels() -> dict[str, str]:
+    """Match status key -> label shown in the results tree."""
+    return {
+        "matched": _("✔ Matched"),
+        "ambiguous": _("⚠ Choose RAW"),
+        "missing": _("✖ Not found"),
+        "chosen": _("✔ Chosen"),
+    }
 
-# Policy key (stored in settings and passed to the service) -> label shown to the user.
-DUPLICATE_LABELS = {
-    "rename": "Keep both (add _001)",
-    "skip": "Skip existing",
-    "overwrite": "Replace existing (cannot be undone)",
-}
-PLACEHOLDER_TEXT = "Choose folders, then press Analyze Matches."
+
+def duplicate_labels() -> dict[str, str]:
+    """Policy key (stored in settings, passed to the service) -> label shown to the user."""
+    return {
+        "rename": _("Keep both (add _001)"),
+        "skip": _("Skip existing"),
+        "overwrite": _("Replace existing (cannot be undone)"),
+    }
+
+
+def placeholder_text() -> str:
+    return _("Choose folders, then press Analyze Matches.")
 
 
 # --- Wording helpers (pure, unit-tested) -------------------------------------
@@ -63,16 +71,22 @@ def relative_folder(raw_path: Path | None, raw_root: Path | None) -> str:
 
 
 def banner_for_analysis(summary: AnalysisSummary) -> str:
-    return (
-        f"{summary.selected_count} picked · {summary.copyable_count} will copy · "
-        f"{summary.ambiguous_count} need your choice · {summary.missing_count} RAW not found"
+    return _(
+        "{picked} picked · {copy} will copy · {choose} need your choice · {missing} RAW not found"
+    ).format(
+        picked=summary.selected_count,
+        copy=summary.copyable_count,
+        choose=summary.ambiguous_count,
+        missing=summary.missing_count,
     )
 
 
 def banner_for_copy(result: CopyResult) -> str:
-    return (
-        f"Copied {result.copied} · Skipped {result.skipped + result.ambiguous} · "
-        f"Not found {result.missing} · Failed {result.errors}"
+    return _("Copied {copied} · Skipped {skipped} · Not found {missing} · Failed {failed}").format(
+        copied=result.copied,
+        skipped=result.skipped + result.ambiguous,
+        missing=result.missing,
+        failed=result.errors,
     )
 
 
@@ -81,20 +95,20 @@ def hint_for_match(match: SelectionMatch | None, recursive: bool = True) -> str:
     if match is None:
         return ""
     if match.status == "missing":
-        advice = "Check the folder." if recursive else "Check the folder or turn on Include subfolders."
-        return f"No RAW named {match.file_stem} in the RAW folder. {advice}"
+        advice = _("Check the folder.") if recursive else _("Check the folder or turn on Include subfolders.")
+        return _("No RAW named {name} in the RAW folder. {advice}").format(name=match.file_stem, advice=advice)
     if match.status == "ambiguous":
-        return "Several RAW files match this photo. Choose one with Choose RAW…"
+        return _("Several RAW files match this photo. Choose one with Choose RAW…")
     if match.raw_path is None:
         return ""
     if match.status == "chosen":
-        return f"{match.raw_path} — chosen by you"
+        return _("{path} — chosen by you").format(path=match.raw_path)
     if match.match_kind == "camera_id":
         camera = shared_camera_id(match.jpg_path.stem, match.raw_path.stem)
-        kind = f"camera number {camera}" if camera else "camera number"
+        kind = _("camera number {camera}").format(camera=camera) if camera else _("camera number")
     else:
-        kind = "exact name"
-    return f"{match.raw_path} — {kind}"
+        kind = _("exact name")
+    return _("{path} — {kind}").format(path=match.raw_path, kind=kind)
 
 
 def format_size(size: int) -> str:
@@ -121,8 +135,11 @@ def candidate_rows(match: SelectionMatch, raw_root: Path | None) -> list[tuple[s
 
 
 def handoff_text(count: int, folder: str) -> str:
-    noun = "photo" if count == 1 else "photos"
-    return f"{count} {noun} picked in Image Manager (from {folder})"
+    return ngettext(
+        "{count} photo picked in Image Manager (from {folder})",
+        "{count} photos picked in Image Manager (from {folder})",
+        count,
+    ).format(count=count, folder=folder)
 
 
 def open_folder(folder: str | Path) -> None:
@@ -135,7 +152,7 @@ def open_folder(folder: str | Path) -> None:
         else:
             subprocess.Popen(["xdg-open", folder])
     except OSError as exc:
-        messagebox.showerror("Error", f"Couldn't open the folder: {exc}")
+        messagebox.showerror(_("Error"), _("Couldn't open the folder: {error}").format(error=exc))
 
 
 # --- Dialogs -----------------------------------------------------------------
@@ -149,7 +166,7 @@ class ChooseRawDialog(tk.Toplevel):
         self.match = match
         # ("choose", Path) | ("skip", None) | None (cancelled)
         self.result: tuple[str, Path | None] | None = None
-        self.title("Choose RAW")
+        self.title(_("Choose RAW"))
         self.configure(bg="#FFFFFF")
         self.transient(parent)
         self.resizable(True, False)
@@ -159,7 +176,7 @@ class ChooseRawDialog(tk.Toplevel):
         frame.columnconfigure(0, weight=1)
         ttk.Label(
             frame,
-            text=f"Several RAW files match {match.jpg_path.name}. Choose the one to copy.",
+            text=_("Several RAW files match {name}. Choose the one to copy.").format(name=match.jpg_path.name),
             style="Card.TLabel",
             wraplength=540,
         ).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 8))
@@ -167,7 +184,8 @@ class ChooseRawDialog(tk.Toplevel):
         columns = ("folder", "file", "size", "modified")
         self.tree = ttk.Treeview(frame, columns=columns, show="headings", height=min(max(len(match.candidates), 3), 8))
         for column, text, width in (
-            ("folder", "Folder", 190), ("file", "File", 130), ("size", "Size", 70), ("modified", "Modified", 120),
+            ("folder", _("Folder"), 190), ("file", _("File"), 130), ("size", _("Size"), 70),
+            ("modified", _("Modified"), 120),
         ):
             self.tree.heading(column, text=text)
             self.tree.column(column, width=width, anchor="w")
@@ -184,10 +202,10 @@ class ChooseRawDialog(tk.Toplevel):
 
         buttons = ttk.Frame(frame, style="CardInner.TFrame")
         buttons.grid(row=2, column=0, columnspan=2, sticky="e", pady=(12, 0))
-        self.use_button = ttk.Button(buttons, text="Use Selected RAW", style="Accent.TButton", command=self._choose)
+        self.use_button = ttk.Button(buttons, text=_("Use Selected RAW"), style="Accent.TButton", command=self._choose)
         self.use_button.pack(side=tk.LEFT, padx=(0, 8))
-        ttk.Button(buttons, text="Skip this photo", command=self._skip).pack(side=tk.LEFT, padx=(0, 8))
-        ttk.Button(buttons, text="Cancel", command=self.destroy).pack(side=tk.LEFT)
+        ttk.Button(buttons, text=_("Skip this photo"), command=self._skip).pack(side=tk.LEFT, padx=(0, 8))
+        ttk.Button(buttons, text=_("Cancel"), command=self.destroy).pack(side=tk.LEFT)
 
         self.tree.bind("<Double-1>", lambda _e: self._choose())
         self.tree.bind("<Return>", lambda _e: self._choose())
@@ -226,7 +244,7 @@ class CopyDoneDialog(tk.Toplevel):
     def __init__(self, parent: tk.Misc, result: CopyResult, work_folder: str, on_results):
         super().__init__(parent)
         problems = result.errors > 0
-        self.title("Copy finished with problems" if problems else "Copy complete")
+        self.title(_("Copy finished with problems") if problems else _("Copy complete"))
         self.configure(bg="#FFFFFF")
         self.transient(parent)
         self.resizable(False, False)
@@ -235,14 +253,29 @@ class CopyDoneDialog(tk.Toplevel):
         ttk.Label(frame, text=banner_for_copy(result), style="CardSection.TLabel").pack(anchor="w")
         notes = []
         if result.ambiguous:
-            notes.append(f"{result.ambiguous} photo(s) have several RAW matches and were skipped. "
-                         "Choose a RAW for them, then copy again.")
+            notes.append(ngettext(
+                "{count} photo has several RAW matches and was skipped. Choose a RAW for it, then copy again.",
+                "{count} photos have several RAW matches and were skipped. Choose a RAW for them, then copy again.",
+                result.ambiguous,
+            ).format(count=result.ambiguous))
         if result.missing:
-            notes.append(f"{result.missing} photo(s) have no RAW in the RAW folder.")
+            notes.append(ngettext(
+                "{count} photo has no RAW in the RAW folder.",
+                "{count} photos have no RAW in the RAW folder.",
+                result.missing,
+            ).format(count=result.missing))
         if result.skipped:
-            notes.append(f"{result.skipped} RAW file(s) were already in the work folder.")
+            notes.append(ngettext(
+                "{count} RAW file was already in the work folder.",
+                "{count} RAW files were already in the work folder.",
+                result.skipped,
+            ).format(count=result.skipped))
         if result.errors:
-            notes.append(f"{result.errors} file(s) failed. Open Job Results to retry them.")
+            notes.append(ngettext(
+                "{count} file failed. Open Job Results to retry it.",
+                "{count} files failed. Open Job Results to retry them.",
+                result.errors,
+            ).format(count=result.errors))
         for note in notes:
             ttk.Label(frame, text=note, style="CardMuted.TLabel", wraplength=420, justify="left").pack(
                 anchor="w", pady=(6, 0)
@@ -250,14 +283,14 @@ class CopyDoneDialog(tk.Toplevel):
         buttons = ttk.Frame(frame, style="CardInner.TFrame")
         buttons.pack(anchor="e", pady=(14, 0))
         open_button = ttk.Button(
-            buttons, text="Open Work Folder", style="Accent.TButton",
+            buttons, text=_("Open Work Folder"), style="Accent.TButton",
             command=lambda: (open_folder(work_folder), self.destroy()),
         )
         open_button.pack(side=tk.LEFT, padx=(0, 8))
         ttk.Button(
-            buttons, text="Job Results…", command=lambda: (self.destroy(), on_results()),
+            buttons, text=_("Job Results…"), command=lambda: (self.destroy(), on_results()),
         ).pack(side=tk.LEFT, padx=(0, 8))
-        ttk.Button(buttons, text="Close", command=self.destroy).pack(side=tk.LEFT)
+        ttk.Button(buttons, text=_("Close"), command=self.destroy).pack(side=tk.LEFT)
         self.bind("<Escape>", lambda _e: self.destroy())
         self.update_idletasks()
         try:
@@ -315,11 +348,11 @@ class AutoSelectorApp(tk.Tk):
         self.work_folder_var = tk.StringVar()
         self.recursive_var = tk.BooleanVar(value=True)
         self.duplicate_var = tk.StringVar(value="rename")
-        self.duplicate_label_var = tk.StringVar(value=DUPLICATE_LABELS["rename"])
+        self.duplicate_label_var = tk.StringVar(value=duplicate_labels()["rename"])
         self.write_xmp_var = tk.BooleanVar(value=True)
         self.xmp_rating_var = tk.StringVar(value="5")
         self.rating_from_jpg_var = tk.BooleanVar(value=False)
-        self.status_var = tk.StringVar(value="Choose the RAW folder and the selected-JPGs folder.")
+        self.status_var = tk.StringVar(value=_("Choose the RAW folder and the selected-JPGs folder."))
         self.banner_var = tk.StringVar(value="")
         self.hint_var = tk.StringVar(value="")
         self.progress_var = tk.DoubleVar(value=0.0)
@@ -354,7 +387,7 @@ class AutoSelectorApp(tk.Tk):
             self.rating_from_jpg_var.set(bool(stored["rating_from_jpg"]))
         if "recursive" in stored:
             self.recursive_var.set(bool(stored["recursive"]))
-        if stored.get("duplicate_policy") in DUPLICATE_LABELS:
+        if stored.get("duplicate_policy") in duplicate_labels():
             self.duplicate_var.set(stored["duplicate_policy"])
 
         if self._initial_raw_source:
@@ -364,7 +397,7 @@ class AutoSelectorApp(tk.Tk):
         if self._initial_work_folder:
             self.work_folder_var.set(str(self._initial_work_folder))
         if self._initial_selected_jpg and not self._initial_raw_source:
-            self.status_var.set("Selected JPGs folder linked. Choose the RAW folder.")
+            self.status_var.set(_("Selected JPGs folder linked. Choose the RAW folder."))
 
     def _apply_initial_handoff(self) -> None:
         if self._initial_handoff is None:
@@ -375,14 +408,20 @@ class AutoSelectorApp(tk.Tk):
             messagebox.showerror(NDEX_AUTO_SELECTOR_TITLE, str(exc))
             return
         if not files:
-            messagebox.showinfo(NDEX_AUTO_SELECTOR_TITLE, "The handoff has no JPG files.")
+            messagebox.showinfo(NDEX_AUTO_SELECTOR_TITLE, _("The handoff has no JPG files."))
             return
         display = str(source or files[0].parent)
         self._handoff_display = display
         self.handoff_files = files
         self.selected_jpg_var.set(display)
         self._refresh_handoff_ui()
-        self.status_var.set(f"Image Manager handoff: {len(files)} photos picked.")
+        self.status_var.set(
+            ngettext(
+                "Image Manager handoff: {count} photo picked.",
+                "Image Manager handoff: {count} photos picked.",
+                len(files),
+            ).format(count=len(files))
+        )
 
     # --- layout ---------------------------------------------------------------
 
@@ -390,7 +429,7 @@ class AutoSelectorApp(tk.Tk):
         header = build_app_header(
             self,
             title=NDEX_AUTO_SELECTOR_TITLE,
-            tagline="Match selected JPGs to original RAW files",
+            tagline=_("Match selected JPGs to original RAW files"),
             holder=self.brand_images,
         )
         header.pack(fill=tk.X)
@@ -414,44 +453,49 @@ class AutoSelectorApp(tk.Tk):
         left = self.options_scroll.content
 
         left.columnconfigure(0, weight=1)
-        self.raw_entry, _ = self._path_row(
-            left, 0, "Original RAW folder", self.raw_source_var, self._browse_raw_source)
+        self.raw_entry, _raw_browse = self._path_row(
+            left, 0, _("Original RAW folder"), self.raw_source_var, self._browse_raw_source)
+        # The Selected JPGs entry has its own tooltip below (it can show a handoff).
         self.selected_entry, self.selected_browse = self._path_row(
-            left, 2, "Selected JPGs folder", self.selected_jpg_var, self._browse_selected_jpg)
-        self.work_entry, _ = self._path_row(
-            left, 4, "Work folder (RAW copies)", self.work_folder_var, self._browse_work_folder)
+            left, 2, _("Selected JPGs folder"), self.selected_jpg_var, self._browse_selected_jpg,
+            tooltip=False)
+        self.work_entry, _work_browse = self._path_row(
+            left, 4, _("Work folder (RAW copies)"), self.work_folder_var, self._browse_work_folder)
         # Handoff mode swaps the browse button for this one.
         self.use_folder_button = ttk.Button(
-            left, text="Use folder…", width=0, command=self._leave_handoff)
+            left, text=_("Use folder…"), width=0, command=self._leave_handoff)
         self.use_folder_button.grid(row=3, column=2, sticky="ew", padx=(8, 0), pady=(1, 4))
         self.use_folder_button.grid_remove()
-        Tooltip(self.use_folder_button, "Use the Selected JPGs folder instead of the picks sent by Image Manager.")
+        Tooltip(
+            self.use_folder_button,
+            _("Use the Selected JPGs folder instead of the picks sent by Image Manager."),
+        )
         Tooltip(self.selected_entry, lambda: self.selected_display_var.get() if self.handoff_files is not None
                 else self.selected_jpg_var.get())
 
         recursive_check = ttk.Checkbutton(
-            left, text="Include subfolders", variable=self.recursive_var, style="Card.TCheckbutton"
+            left, text=_("Include subfolders"), variable=self.recursive_var, style="Card.TCheckbutton"
         )
         recursive_check.grid(row=6, column=0, columnspan=3, sticky="w", pady=(0, 6))
         self._input_widgets.append((recursive_check, "normal"))
 
-        ttk.Label(left, text="If a file already exists", style="Card.TLabel").grid(row=7, column=0, columnspan=3, sticky="w")
+        ttk.Label(left, text=_("If a file already exists"), style="Card.TLabel").grid(row=7, column=0, columnspan=3, sticky="w")
         duplicate_combo = ttk.Combobox(
             left,
             textvariable=self.duplicate_label_var,
-            values=list(DUPLICATE_LABELS.values()),
+            values=list(duplicate_labels().values()),
             state="readonly",
         )
         duplicate_combo.grid(row=8, column=0, columnspan=3, sticky="ew", pady=(2, 2))
         Tooltip(duplicate_combo, self.duplicate_label_var.get)
         self._input_widgets.append((duplicate_combo, "readonly"))
-        self._muted_note(left, 9, "Identical files already in the work folder are always skipped.", pady=(0, 6))
+        self._muted_note(left, 9, _("Identical files already in the work folder are always skipped."), pady=(0, 6))
 
         xmp_row = ttk.Frame(left, style="CardInner.TFrame")
         xmp_row.grid(row=10, column=0, columnspan=3, sticky="ew")
         xmp_check = ttk.Checkbutton(
             xmp_row,
-            text="Write XMP sidecars",
+            text=_("Write XMP sidecars"),
             variable=self.write_xmp_var,
             style="Card.TCheckbutton",
         )
@@ -460,7 +504,7 @@ class AutoSelectorApp(tk.Tk):
 
         rating_row = ttk.Frame(left, style="CardInner.TFrame")
         rating_row.grid(row=11, column=0, columnspan=3, sticky="w", padx=(22, 0), pady=(4, 4))
-        ttk.Label(rating_row, text="Star rating", style="Card.TLabel").pack(side=tk.LEFT, padx=(0, 6))
+        ttk.Label(rating_row, text=_("Star rating"), style="Card.TLabel").pack(side=tk.LEFT, padx=(0, 6))
         rating_combo = ttk.Combobox(
             rating_row,
             textvariable=self.xmp_rating_var,
@@ -473,7 +517,7 @@ class AutoSelectorApp(tk.Tk):
 
         jpg_rating_check = ttk.Checkbutton(
             left,
-            text="Use each JPG's star rating",
+            text=_("Use each JPG's star rating"),
             variable=self.rating_from_jpg_var,
             style="Card.TCheckbutton",
         )
@@ -481,8 +525,9 @@ class AutoSelectorApp(tk.Tk):
         self._input_widgets.append((jpg_rating_check, "normal"))
         self._xmp_dependents = [rating_combo, jpg_rating_check]
         self._muted_note(
-            left, 13, "JPGs without a rating use the rating above. Writes rating, label 'NDEX Selected' "
-            "and keyword next to each copied RAW.",
+            left, 13,
+            _("JPGs without a rating use the rating above. Writes rating, label 'NDEX Selected' "
+              "and keyword next to each copied RAW."),
             padx=(22, 0), pady=(0, 6))
 
         # Keep progress and primary actions visible while only the options scroll.
@@ -498,16 +543,16 @@ class AutoSelectorApp(tk.Tk):
         progress_row.columnconfigure(0, weight=1)
         self.progress_bar = ttk.Progressbar(progress_row, variable=self.progress_var, maximum=100)
         self.progress_bar.grid(row=0, column=0, sticky="ew", padx=(0, 8))
-        self.cancel_button = ttk.Button(progress_row, text="Cancel", command=self.cancel_work, state="disabled")
+        self.cancel_button = ttk.Button(progress_row, text=_("Cancel"), command=self.cancel_work, state="disabled")
         self.cancel_button.grid(row=0, column=1)
 
         buttons = ttk.Frame(action_panel, style="CardInner.TFrame")
         buttons.grid(row=2, column=0, sticky="ew")
         buttons.columnconfigure(0, weight=1)
         buttons.columnconfigure(1, weight=1)
-        self.analyze_button = ttk.Button(buttons, text="Analyze Matches", width=0, command=self.start_analysis)
+        self.analyze_button = ttk.Button(buttons, text=_("Analyze Matches"), width=0, command=self.start_analysis)
         self.copy_button = ttk.Button(
-            buttons, text="Copy RAW Files", width=0, style="Accent.TButton", command=self.start_copy
+            buttons, text=_("Copy RAW Files"), width=0, style="Accent.TButton", command=self.start_copy
         )
         self.analyze_button.grid(row=0, column=0, sticky="ew", padx=(0, 6))
         self.copy_button.grid(row=0, column=1, sticky="ew", padx=(6, 0))
@@ -518,8 +563,8 @@ class AutoSelectorApp(tk.Tk):
         title_row = ttk.Frame(right, style="CardInner.TFrame")
         title_row.grid(row=0, column=0, columnspan=2, sticky="ew")
         title_row.columnconfigure(0, weight=1)
-        ttk.Label(title_row, text="Match results", style="CardSection.TLabel").grid(row=0, column=0, sticky="w")
-        ttk.Button(title_row, text="Job Results…", command=self.open_job_results).grid(row=0, column=1, sticky="e")
+        ttk.Label(title_row, text=_("Match results"), style="CardSection.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Button(title_row, text=_("Job Results…"), command=self.open_job_results).grid(row=0, column=1, sticky="e")
         self.banner_label = ttk.Label(right, textvariable=self.banner_var, style="Card.TLabel", wraplength=400)
         self.banner_label.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(4, 4))
 
@@ -531,12 +576,12 @@ class AutoSelectorApp(tk.Tk):
         self.match_tree = ttk.Treeview(results, columns=columns, show="headings", height=8, selectmode="browse")
         self.match_tree.grid(row=0, column=0, sticky="nsew")
         tree_font = tkfont.Font(self, font=ttk.Style(self).lookup("Treeview", "font") or "TkDefaultFont")
-        status_width = max(tree_font.measure(label) for label in STATUS_LABELS.values()) + 16
+        status_width = max(tree_font.measure(label) for label in status_labels().values()) + 16
         for column, text, width, stretch in (
-            ("jpg", "Selected JPG", 150, True),
-            ("raw", "Matched RAW", 120, True),
-            ("location", "RAW location", 100, True),
-            ("status", "Status", status_width, False),
+            ("jpg", _("Selected JPG"), 150, True),
+            ("raw", _("Matched RAW"), 120, True),
+            ("location", _("RAW location"), 100, True),
+            ("status", _("Status"), status_width, False),
         ):
             self.match_tree.heading(column, text=text)
             self.match_tree.column(column, width=width, minwidth=70 if stretch else width, anchor="w", stretch=stretch)
@@ -549,7 +594,7 @@ class AutoSelectorApp(tk.Tk):
         self.match_xscroll.grid(row=1, column=0, sticky="ew")
         self.match_tree.configure(yscrollcommand=match_scroll.set, xscrollcommand=self.match_xscroll.set)
         self.placeholder_label = ttk.Label(
-            self.match_tree, text=PLACEHOLDER_TEXT, style="CardMuted.TLabel", anchor="center")
+            self.match_tree, text=placeholder_text(), style="CardMuted.TLabel", anchor="center")
 
         hint_row = ttk.Frame(right, style="CardInner.TFrame")
         hint_row.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(6, 6))
@@ -558,10 +603,10 @@ class AutoSelectorApp(tk.Tk):
             hint_row, textvariable=self.hint_var, style="CardMuted.TLabel", wraplength=380, justify="left")
         self.hint_label.grid(row=0, column=0, sticky="w", padx=(0, 8))
         self._wrapped_labels.append(self.hint_label)
-        self.choose_button = ttk.Button(hint_row, text="Choose RAW…", command=self.choose_raw, state="disabled")
+        self.choose_button = ttk.Button(hint_row, text=_("Choose RAW…"), command=self.choose_raw, state="disabled")
         self.choose_button.grid(row=0, column=1, sticky="ne")
 
-        ttk.Label(right, text="Log", style="CardSection.TLabel").grid(row=4, column=0, sticky="w")
+        ttk.Label(right, text=_("Log"), style="CardSection.TLabel").grid(row=4, column=0, sticky="w")
         self.log_text = tk.Text(right, width=1, height=5, wrap="word")
         style_text_widget(self.log_text)
         self.log_text.grid(row=5, column=0, sticky="nsew", pady=(4, 0))
@@ -602,13 +647,18 @@ class AutoSelectorApp(tk.Tk):
         ):
             self.match_tree.column(column, width=width)
 
-    def _path_row(self, parent: ttk.Frame, row: int, label: str, variable: tk.StringVar, command):
+    def _path_row(
+        self, parent: ttk.Frame, row: int, label: str, variable: tk.StringVar, command, tooltip: bool = True
+    ):
         heading = ttk.Label(parent, text=label, style="Card.TLabel", wraplength=330)
         heading.grid(row=row, column=0, columnspan=3, sticky="w")
         self._wrapped_labels.append(heading)
         entry = ttk.Entry(parent, textvariable=variable, width=12)
         entry.grid(row=row + 1, column=0, columnspan=2, sticky="ew", pady=(1, 4))
-        browse = ttk.Button(parent, text="Browse…", width=0, command=command)
+        if tooltip:
+            # The field is narrow: hovering shows the whole path.
+            Tooltip(entry, variable.get)
+        browse = ttk.Button(parent, text=_("Browse…"), width=0, command=command)
         browse.grid(row=row + 1, column=2, sticky="ew", padx=(8, 0), pady=(1, 4))
         self._input_widgets.extend(((entry, "normal"), (browse, "normal")))
         return entry, browse
@@ -630,12 +680,12 @@ class AutoSelectorApp(tk.Tk):
 
     def _duplicate_label_changed(self) -> None:
         label = self.duplicate_label_var.get()
-        for key, text in DUPLICATE_LABELS.items():
+        for key, text in duplicate_labels().items():
             if text == label and self.duplicate_var.get() != key:
                 self.duplicate_var.set(key)
 
     def _duplicate_key_changed(self) -> None:
-        label = DUPLICATE_LABELS.get(self.duplicate_var.get())
+        label = duplicate_labels().get(self.duplicate_var.get())
         if label and self.duplicate_label_var.get() != label:
             self.duplicate_label_var.set(label)
 
@@ -656,7 +706,7 @@ class AutoSelectorApp(tk.Tk):
         self.summary = None
         self._clear_matches()
         self._render_summary()
-        self.status_var.set("Settings changed. Run Analyze Matches again.")
+        self.status_var.set(_("Settings changed. Run Analyze Matches again."))
         self._update_buttons()
 
     # --- handoff ----------------------------------------------------------------
@@ -684,7 +734,7 @@ class AutoSelectorApp(tk.Tk):
         self._handoff_display = ""
         self._refresh_handoff_ui()
         self._invalidate_analysis()
-        self.status_var.set("Using the Selected JPGs folder. Run Analyze Matches.")
+        self.status_var.set(_("Using the Selected JPGs folder. Run Analyze Matches."))
         self._update_buttons()
 
     def _set_resting_state(self, widget, state: str) -> None:
@@ -694,17 +744,17 @@ class AutoSelectorApp(tk.Tk):
     # --- browse ------------------------------------------------------------------
 
     def _browse_raw_source(self) -> None:
-        selected = filedialog.askdirectory(title="Choose the RAW folder")
+        selected = filedialog.askdirectory(title=_("Choose the RAW folder"))
         if selected:
             self.raw_source_var.set(selected)
 
     def _browse_selected_jpg(self) -> None:
-        selected = filedialog.askdirectory(title="Choose the selected-JPGs folder")
+        selected = filedialog.askdirectory(title=_("Choose the selected-JPGs folder"))
         if selected:
             self.selected_jpg_var.set(selected)
 
     def _browse_work_folder(self) -> None:
-        selected = filedialog.askdirectory(title="Choose the work folder")
+        selected = filedialog.askdirectory(title=_("Choose the work folder"))
         if selected:
             self.work_folder_var.set(selected)
 
@@ -727,7 +777,7 @@ class AutoSelectorApp(tk.Tk):
         be different from the ones the job used.
         """
         if self._busy or self._closing:
-            messagebox.showinfo(NDEX_AUTO_SELECTOR_TITLE, "Wait for the current job to finish, then try again.")
+            messagebox.showinfo(NDEX_AUTO_SELECTOR_TITLE, _("Wait for the current job to finish, then try again."))
             return
 
         selected_jpg = plan.report.source
@@ -737,13 +787,16 @@ class AutoSelectorApp(tk.Tk):
         raw_source = str(plan.report.folders.get("raw_source") or "").strip()
         raw_source = raw_source or self.raw_source_var.get().strip()
 
-        for label, folder in (("RAW", raw_source), ("selected JPGs", selected_jpg)):
+        for label, folder in ((_("RAW"), raw_source), (_("selected JPGs"), selected_jpg)):
             if not folder or not Path(folder).is_dir():
                 messagebox.showerror(
-                    "Folder not found", f"Folder not found — can't find this job's {label} folder: {folder}")
+                    _("Folder not found"),
+                    _("Folder not found — can't find this job's {label} folder: {folder}").format(
+                        label=label, folder=folder),
+                )
                 return
         if not work_folder:
-            messagebox.showerror("Folder not found", "This job has no work folder recorded.")
+            messagebox.showerror(_("Folder not found"), _("This job has no work folder recorded."))
             return
 
         options = self._copy_options()
@@ -754,8 +807,15 @@ class AutoSelectorApp(tk.Tk):
         options["recursive"] = bool(plan.report.context.get("recursive", True))
         self._set_busy(True)
         self.progress_var.set(0)
-        self.status_var.set(f"Retrying {len(plan.paths)} unfinished files…")
-        self._log(f"Retry started: {len(plan.paths)} files")
+        count = len(plan.paths)
+        self.status_var.set(
+            ngettext(
+                "Retrying {count} unfinished file…", "Retrying {count} unfinished files…", count
+            ).format(count=count)
+        )
+        self._log(
+            ngettext("Retry started: {count} file", "Retry started: {count} files", count).format(count=count)
+        )
         job = {
             "selected_jpg": selected_jpg,
             "raw_source": raw_source,
@@ -802,7 +862,9 @@ class AutoSelectorApp(tk.Tk):
         raw_source = self.raw_source_var.get().strip()
         selected_jpg = self.selected_jpg_var.get().strip()
         if not raw_source or not selected_jpg:
-            messagebox.showwarning("Folders required", "Choose the RAW folder and the selected-JPGs folder.")
+            messagebox.showwarning(
+                _("Folders required"), _("Choose the RAW folder and the selected-JPGs folder.")
+            )
             return
         self._set_busy(True)
         self._analysis_context = self._current_analysis_context()
@@ -811,9 +873,9 @@ class AutoSelectorApp(tk.Tk):
         self.progress_var.set(0)
         self.progress_bar.configure(mode="indeterminate")
         self.progress_bar.start(15)
-        self.status_var.set("Analyzing…")
+        self.status_var.set(_("Analyzing…"))
         self._clear_matches()
-        self._log("Analysis started")
+        self._log(_("Analysis started"))
         self.worker_thread = threading.Thread(
             target=self._analysis_worker,
             args=(
@@ -904,7 +966,9 @@ class AutoSelectorApp(tk.Tk):
             count = existing
         return messagebox.askyesno(
             NDEX_AUTO_SELECTOR_TITLE,
-            f"Replace up to {count} existing RAW files in the work folder?\n\nThis cannot be undone.",
+            _(
+                "Replace up to {count} existing RAW files in the work folder?\n\nThis cannot be undone."
+            ).format(count=count),
             default="no",
             icon="warning",
         )
@@ -913,7 +977,7 @@ class AutoSelectorApp(tk.Tk):
         if self._busy or self._closing:
             return
         if self.summary is None:
-            messagebox.showwarning("Analysis required", "Analysis required — run Analyze Matches first.")
+            messagebox.showwarning(_("Analysis required"), _("Analysis required — run Analyze Matches first."))
             return
         if (
             Path(self.raw_source_var.get().strip()) != self.summary.raw_source_dir
@@ -922,12 +986,14 @@ class AutoSelectorApp(tk.Tk):
         ):
             self.summary = None
             self._update_buttons()
-            messagebox.showwarning(NDEX_AUTO_SELECTOR_TITLE, "Settings changed. Run Analyze Matches again.")
+            messagebox.showwarning(NDEX_AUTO_SELECTOR_TITLE, _("Settings changed. Run Analyze Matches again."))
             return
         work_folder = self.work_folder_var.get().strip()
         if not work_folder:
             messagebox.showwarning(
-                "Work folder required", "Work folder required — choose a folder to copy the RAW files into.")
+                _("Work folder required"),
+                _("Work folder required — choose a folder to copy the RAW files into."),
+            )
             return
         options = self._copy_options()
         copyable = [m for m in self.summary.matches if m.status in ("matched", "chosen")]
@@ -945,8 +1011,8 @@ class AutoSelectorApp(tk.Tk):
         }
         self._set_busy(True)
         self.progress_var.set(0)
-        self.status_var.set("Copying RAW files…")
-        self._log("Copy started")
+        self.status_var.set(_("Copying RAW files…"))
+        self._log(_("Copy started"))
         self.worker_thread = threading.Thread(target=self._copy_worker, args=(job,), daemon=False)
         self.worker_thread.start()
 
@@ -973,9 +1039,9 @@ class AutoSelectorApp(tk.Tk):
             )
             job["manifest"] = manifest
             if manifest is None:
-                job["record_error"] = "Couldn't save the job record. Check the log for what was processed."
+                job["record_error"] = _("Couldn't save the job record. Check the log for what was processed.")
         except Exception as exc:
-            job["record_error"] = f"Couldn't save the job record: {exc}"
+            job["record_error"] = _("Couldn't save the job record: {error}").format(error=exc)
 
     def _copy(self, matches, work_folder: Path, options: dict):
         return self.service.copy_matches(
@@ -1013,17 +1079,19 @@ class AutoSelectorApp(tk.Tk):
         elif kind == "analysis_cancelled":
             self.summary = None
             self._render_summary()
-            self.status_var.set("Analysis cancelled.")
-            self._log("Analysis cancelled")
+            self.status_var.set(_("Analysis cancelled."))
+            self._log(_("Analysis cancelled"))
             self._set_busy(False)
         elif kind == "copy_done":
-            _, result, job = event
+            _kind, result, job = event
             self._handle_copy_done(result, job)
         elif kind == "progress":
-            _, current, total, name = event
+            _kind, current, total, name = event
             self.progress_var.set((current / total) * 100 if total else 0)
             if not self.cancel_event.is_set():
-                self.status_var.set(f"Copying {current} of {total}: {name}")
+                self.status_var.set(
+                    _("Copying {current} of {total}: {name}").format(current=current, total=total, name=name)
+                )
         elif kind == "error":
             self._handle_error(event[1])
 
@@ -1034,8 +1102,8 @@ class AutoSelectorApp(tk.Tk):
         exc_type, exc, tb = sys.exc_info()
         write_crash_log("NDEX Auto Selector", exc_type, exc, tb)
         try:
-            self.status_var.set("Job failed")
-            self._log(f"Error: {exc}")
+            self.status_var.set(_("Job failed"))
+            self._log(_("Error: {error}").format(error=exc))
             self._closing = False
             self._set_busy(False)
             messagebox.showerror(NDEX_AUTO_SELECTOR_TITLE, str(exc))
@@ -1046,17 +1114,21 @@ class AutoSelectorApp(tk.Tk):
         if self.cancel_event.is_set() or self._analysis_context != self._current_analysis_context():
             self.summary = None
             self._render_summary()
-            self.status_var.set("Analysis cancelled or settings changed. Run Analyze Matches again.")
+            self.status_var.set(_("Analysis cancelled or settings changed. Run Analyze Matches again."))
             self._set_busy(False)
             return
         self.summary = summary
         self._render_summary()
         self._render_matches()
         self.progress_var.set(100)
-        self.status_var.set("Analysis complete")
+        self.status_var.set(_("Analysis complete"))
         self._log(
-            f"Analysis complete: {summary.selected_count} JPGs, {summary.matched_count} matched, "
-            f"{summary.ambiguous_count} ambiguous, {summary.missing_count} no RAW"
+            _("Analysis complete: {selected} JPGs, {matched} matched, {ambiguous} ambiguous, {missing} no RAW").format(
+                selected=summary.selected_count,
+                matched=summary.matched_count,
+                ambiguous=summary.ambiguous_count,
+                missing=summary.missing_count,
+            )
         )
         self._set_busy(False)
 
@@ -1064,18 +1136,27 @@ class AutoSelectorApp(tk.Tk):
         """``job`` is what the run was started with; ``job["plan"]`` marks a retry."""
         completed = result.total - sum(item.get("detail") == "not run: cancelled" for item in result.items)
         self.progress_var.set(completed / result.total * 100 if result.total else 0)
-        self.status_var.set("Copy cancelled. Unprocessed files can be retried from Job Results."
-                            if result.cancelled else "Copy complete")
+        self.status_var.set(_("Copy cancelled. Unprocessed files can be retried from Job Results.")
+                            if result.cancelled else _("Copy complete"))
         self.banner_var.set(banner_for_copy(result))
         self._log(
-            f"Copy finished: copied={result.copied}, xmp={result.xmp_written}, skipped={result.skipped}, "
-            f"overwritten={result.overwritten}, ambiguous={result.ambiguous}, "
-            f"not found={result.missing}, errors={result.errors}"
+            _(
+                "Copy finished: copied={copied}, xmp={xmp}, skipped={skipped}, "
+                "overwritten={overwritten}, ambiguous={ambiguous}, not found={missing}, errors={errors}"
+            ).format(
+                copied=result.copied,
+                xmp=result.xmp_written,
+                skipped=result.skipped,
+                overwritten=result.overwritten,
+                ambiguous=result.ambiguous,
+                missing=result.missing,
+                errors=result.errors,
+            )
         )
         for message in result.messages[:80]:
             self._log(message)
         if len(result.messages) > 80:
-            self._log(f"... {len(result.messages) - 80} more messages not shown")
+            self._log(_("... {count} more messages not shown").format(count=len(result.messages) - 80))
         if job.get("record_error"):
             # A failed report must remain visible even if Close was requested
             # while the worker was saving it.
@@ -1101,11 +1182,11 @@ class AutoSelectorApp(tk.Tk):
         )
 
     def _handle_error(self, message: str) -> None:
-        self.status_var.set("Job failed")
-        self._log(f"Error: {message}")
+        self.status_var.set(_("Job failed"))
+        self._log(_("Error: {error}").format(error=message))
         self._closing = False
         self._set_busy(False)
-        messagebox.showerror("Error", message)
+        messagebox.showerror(_("Error"), message)
 
     # --- results view -------------------------------------------------------------
 
@@ -1128,11 +1209,11 @@ class AutoSelectorApp(tk.Tk):
     def _row_values(self, match: SelectionMatch) -> tuple[str, str, str, str]:
         root = self.summary.raw_source_dir if self.summary is not None else None
         if match.status == "ambiguous":
-            raw_cell, location = f"({len(match.candidates)} candidates)", ""
+            raw_cell, location = _("({count} candidates)").format(count=len(match.candidates)), ""
         else:
             raw_cell = match.raw_path.name if match.raw_path else ""
             location = relative_folder(match.raw_path, root)
-        return (match.jpg_path.name, raw_cell, location, STATUS_LABELS.get(match.status, match.status))
+        return (match.jpg_path.name, raw_cell, location, status_labels().get(match.status, match.status))
 
     def _clear_matches(self) -> None:
         for item_id in self.match_tree.get_children():
@@ -1146,9 +1227,9 @@ class AutoSelectorApp(tk.Tk):
             self.placeholder_label.place_forget()
             return
         if self.summary is not None:
-            self.placeholder_label.configure(text="No selected JPGs were found.")
+            self.placeholder_label.configure(text=_("No selected JPGs were found."))
         else:
-            self.placeholder_label.configure(text=PLACEHOLDER_TEXT)
+            self.placeholder_label.configure(text=placeholder_text())
         self._place_placeholder()
 
     def _place_placeholder(self) -> None:
@@ -1213,7 +1294,10 @@ class AutoSelectorApp(tk.Tk):
         self._render_summary()
         self.match_tree.selection_set(iid)
         self._on_match_select()
-        label = f"chose {path.name}" if action == "choose" and path else "skipped"
+        if action == "choose" and path:
+            label = _("chose {name}").format(name=path.name)
+        else:
+            label = _("skipped")
         self._log(f"{match.jpg_path.name}: {label}")
         self._update_buttons()
 
@@ -1253,7 +1337,7 @@ class AutoSelectorApp(tk.Tk):
             return
         self.cancel_event.set()
         self.cancel_button.configure(state="disabled")
-        self.status_var.set("Cancelling after the current file finishes copying and verifying…")
+        self.status_var.set(_("Cancelling after the current file finishes copying and verifying…"))
 
     def _on_close(self) -> None:
         if self._closing or self._closed:
@@ -1261,7 +1345,7 @@ class AutoSelectorApp(tk.Tk):
         self._closing = True
         if self._busy:
             self.cancel_work()
-            self.status_var.set("Closing after the current file; saving the job record…")
+            self.status_var.set(_("Closing after the current file; saving the job record…"))
             self._update_buttons()
         else:
             self._finish_close()
