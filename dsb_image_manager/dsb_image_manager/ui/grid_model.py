@@ -54,6 +54,7 @@ def visible_range(scroll_y: int, view_h: int, n: int, cols: int, m: GridMetrics,
     if n <= 0 or view_h <= 0:
         return 0, 0
     rows = row_count(n, cols)
+    scroll_y = max(0, min(scroll_y, content_height(n, cols, m) - view_h))
     first_row = max(0, (scroll_y - m.pad) // m.cell_h - margin_rows)
     last_row = min(rows - 1, (scroll_y + view_h - m.pad) // m.cell_h + margin_rows)
     if last_row < first_row:
@@ -113,7 +114,7 @@ def scroll_to_reveal(index: int, scroll_y: int, view_h: int, n: int, cols: int, 
 
 def top_index(scroll_y: int, cols: int, m: GridMetrics) -> int:
     """First tile of the row at the top edge of the viewport."""
-    return max(0, (scroll_y - m.pad) // m.cell_h) * cols
+    return max(0, (scroll_y + m.pad) // m.cell_h) * cols
 
 
 def scroll_for_index(index: int, cols: int, m: GridMetrics) -> int:

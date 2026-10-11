@@ -1050,8 +1050,11 @@ class ImageManagerApp(tk.Tk):
 
     def _layout_footer_hint(self, _event=None) -> None:
         """Keep the shortcut hint beside the selection count, or below it if too narrow."""
-        needed = self.selection_label.winfo_reqwidth() + self.hint_label.winfo_reqwidth() + 40
-        fits = self.footer.winfo_width() >= needed
+        try:
+            needed = self.selection_label.winfo_reqwidth() + self.hint_label.winfo_reqwidth() + 40
+            fits = self.footer.winfo_width() >= needed
+        except tk.TclError:
+            return
         # A short window drops the hint instead of spending a row on it (Help > Shortcuts has it).
         state = "beside" if fits else ("hidden" if self._compact else "below")
         if state == self._hint_state:
@@ -1335,6 +1338,11 @@ class ImageManagerApp(tk.Tk):
         self.status.set(_("Closing: {message}").format(message=message) if self._closing else message)
 
     def destroy(self) -> None:
+        try:
+            if not self.winfo_exists():
+                return
+        except tk.TclError:
+            return  # already destroyed
         if self._active_job is not None:
             self._closing = True
             self.cancel_work()
@@ -1508,7 +1516,7 @@ class ImageManagerApp(tk.Tk):
             shot.pick_glyph,
             shot.stem if combined else record.display_name,
             shot.type_label if combined else record.type_label,
-            shot.pick_status,
+            pick_label(shot.pick_status),
             STAR_FILLED * shot.rating if shot.rating > 0 else "",
             record.short_datetime,
         )
@@ -1672,6 +1680,7 @@ class ImageManagerApp(tk.Tk):
         # A mark belongs to the shot: marking IMG_1.CR3 also marks IMG_1.JPG.
         shots = self._shots_of(rows)
         entries = []
+        marks = []
         for shot in shots:
             for record in shot.records:
                 if record.id is None:
@@ -1679,10 +1688,13 @@ class ImageManagerApp(tk.Tk):
                 new_pick = record.pick_status if pick_status is None else pick_status
                 new_rating = record.rating if rating is None else rating
                 if (new_pick, new_rating) != (record.pick_status, record.rating):
-                    entries.append((record.id, record.pick_status, record.rating, new_pick, new_rating))
+                    # History is keyed by the file's path, not its catalog row id: a rescan can
+                    # reuse an id for a different image.
+                    entries.append((self._identity(record), record.pick_status, record.rating, new_pick, new_rating))
+                    marks.append((record.id, new_pick, new_rating))
         if entries:
-            self.catalog.set_marks((image_id, pick, stars) for image_id, _op, _or, pick, stars in entries)
-            self._set_memory_marks((image_id, pick, stars) for image_id, _op, _or, pick, stars in entries)
+            self.catalog.set_marks(marks)
+            self._set_memory_marks(marks)
             noun = "shot" if self.combine_pairs.get() else "file"
             self.undo_stack.push(MarkChange(mark_change_label(pick_status, rating, len(rows), noun), entries))
             self._update_undo_menu()
@@ -1738,6 +1750,10 @@ class ImageManagerApp(tk.Tk):
 
     # ---- undo / redo ----
 
+    @staticmethod
+    def _identity(record: ImageRecord) -> str:
+        return str(record.file_path).casefold()
+
     def _update_undo_menu(self) -> None:
         if not hasattr(self, "edit_menu"):
             return
@@ -1764,10 +1780,23 @@ class ImageManagerApp(tk.Tk):
         if change is None:
             self.status.set(_("Nothing to redo.") if redo else _("Nothing to undo."))
             return
-        if redo:
-            marks = [(image_id, pick, stars) for image_id, _op, _or, pick, stars in change.entries]
-        else:
-            marks = [(image_id, pick, stars) for image_id, pick, stars, _np, _nr in change.entries]
+        by_key = {self._identity(record): record for record in self.all_records}
+        states: dict[int, tuple[str, int]] = {}
+        for key, old_pick, old_stars, new_pick, new_stars in change.entries:
+            record = by_key.get(key)
+            if record is None or record.id is None:
+                continue  # that file is gone after a rescan; nothing to restore
+            states[record.id] = (new_pick, new_stars) if redo else (old_pick, old_stars)
+        # A file that joined a shot since the mark (a RAW found next to its JPG) takes the shot's state.
+        for image_id, state in list(states.items()):
+            for member in self._shot_of(self._records_by_id[image_id]).records:
+                if member.id is not None and member.id not in states:
+                    states[member.id] = state
+        marks = [(image_id, pick, stars) for image_id, (pick, stars) in states.items()]
+        if not marks:
+            self.status.set(_("Nothing to redo.") if redo else _("Nothing to undo."))
+            self._update_undo_menu()
+            return
         self.catalog.set_marks(marks)
         self._set_memory_marks(marks)
         combined = self.combine_pairs.get()
@@ -1988,6 +2017,8 @@ class ImageManagerApp(tk.Tk):
         self.selection_status.set(selection_status_text(selected_count, len(self.records)))
         self._update_culling_actions()
         self._grid_sync()
+        # The selection text changes width; re-check whether the shortcut hint still fits beside it.
+        self.after_idle(self._layout_footer_hint)
 
     def show_shortcuts(self) -> None:
         messagebox.showinfo(
