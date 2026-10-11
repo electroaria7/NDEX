@@ -9,7 +9,7 @@ from typing import Iterable
 
 from ndex_common.xmp import sidecar_path_for, write_xmp_sidecar
 
-from ..core.models import ImageRecord
+from ..core.models import ImageRecord, apply_shot_state
 from .operations import ProgressCallback, operation_records
 
 SELECTED_LABEL = "NDEX Selected"
@@ -42,7 +42,8 @@ class XmpExportService:
         cancel_event: Event | None = None,
         progress_callback: ProgressCallback | None = None,
     ) -> XmpExportSummary:
-        records = list(records)
+        # Marks belong to the shot: every file of a RAW+JPG pair gets the same state.
+        records = apply_shot_state(records)
         summary = XmpExportSummary(total=len(records))
 
         for record in operation_records(records, summary, cancel_event, progress_callback):
