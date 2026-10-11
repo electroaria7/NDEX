@@ -63,11 +63,16 @@ class ThumbnailLoader:
     def has_results(self) -> bool:
         return not self._done.empty()
 
-    def close(self) -> None:
+    def close(self, wait: bool = True) -> None:
+        """Stop taking work and drop the queue.
+
+        By default this waits for the one decode per worker that may be running,
+        so no thread is still writing a cache file once the window is gone.
+        """
         with self._lock:
             self._closed = True
             self._wanted.clear()
-        self._pool.shutdown(wait=False, cancel_futures=True)
+        self._pool.shutdown(wait=wait, cancel_futures=True)
 
     def _load(self, key: ThumbKey, fallback) -> None:
         path, size = key
