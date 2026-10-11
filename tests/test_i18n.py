@@ -176,12 +176,50 @@ class ExtractorTests(unittest.TestCase):
         self.assertEqual(json.loads((self.locales / "en.json").read_text(encoding="utf-8")), {"__meta__": {"name": "English"}})
         self.assertEqual(self.run_tool("--check"), 0)
 
-    def test_prune_removes_unused(self) -> None:
-        self.assertEqual(self.run_tool("--prune"), 0)
+    def test_prune_removes_unused_with_force(self) -> None:
+        self.assertEqual(self.run_tool("--prune", "--force"), 0)
         data = json.loads((self.locales / "ko.json").read_text(encoding="utf-8"))
         self.assertNotIn("Old", data)
         self.assertIn("Open", data)
 
+    def test_prune_refused_for_narrower_paths_without_force(self) -> None:
+        before = (self.locales / "ko.json").read_bytes()
+        self.assertEqual(self.run_tool("--prune"), 2)
+        self.assertEqual((self.locales / "ko.json").read_bytes(), before)
+
+    def test_prune_never_removes_keys_used_in_default_set(self) -> None:
+        used_messages, used_plurals = self.tool.extract_tree(self.tool.default_roots())
+        message = sorted(used_messages)[0]
+        plural = sorted(used_plurals)[0]
+        _write(
+            self.locales / "ko.json",
+            {"__meta__": {"name": "x"}, message: "t", "Old": "o", "__plural__": {plural: ["a"], "Gone": ["b"]}},
+        )
+        self.assertEqual(self.run_tool("--prune", "--force"), 0)
+        data = json.loads((self.locales / "ko.json").read_text(encoding="utf-8"))
+        self.assertEqual(data[message], "t")
+        self.assertNotIn("Old", data)
+        self.assertEqual(data["__plural__"][plural], ["a"])
+        self.assertNotIn("Gone", data["__plural__"])
+
+    def test_default_sources_cover_every_app_root(self) -> None:
+        names = {path.name for path in self.tool.default_roots()}
+        for expected in ("main.py", "src", "dsb_image_manager", "ndex_auto_selector", "ndex_frame",
+                         "ndex_launcher", "ndex_common"):
+            self.assertIn(expected, names)
+        self.assertTrue(self.tool.covers_default_set(self.tool.default_roots()))
+        self.assertTrue(self.tool.covers_default_set([REPO]))
+        self.assertFalse(self.tool.covers_default_set([REPO / "ndex_frame"]))
+
+    def test_printing_on_cp949_console_does_not_raise(self) -> None:
+        import io
+        import sys
+
+        _write(self.locales / "ko.json", {"__meta__": {"name": "x"}, "Unused \u2192 \u00e9\u2603": ""})
+        stream = io.TextIOWrapper(io.BytesIO(), encoding="cp949", errors="strict")
+        with mock.patch.object(sys, "stdout", stream):
+            self.assertEqual(self.run_tool(), 0)
+            stream.flush()
 
 if __name__ == "__main__":
     unittest.main()

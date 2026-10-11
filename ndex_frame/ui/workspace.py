@@ -445,6 +445,20 @@ class WorkspaceController(QObject):
         self._shutdown_timer.start()
         return False
 
+    def shutdown_and_wait(self, timeout_ms: int = 10000) -> bool:
+        """Cancel everything and block until no worker thread is left running.
+
+        For window teardown (and tests) so nothing writes into a cache folder
+        after the window is gone. Returns False if a worker did not stop in time.
+        """
+        self.shutdown()
+        self._shutdown_timer.stop()
+        clean = self.thread_pool.waitForDone(timeout_ms)
+        thread = self._export_thread
+        if thread is not None:
+            clean = thread.wait(timeout_ms) and clean
+        return clean
+
     def _shutdown_complete(self) -> bool:
         return self._export_thread is None and not self._jobs and self.thread_pool.activeThreadCount() == 0
 

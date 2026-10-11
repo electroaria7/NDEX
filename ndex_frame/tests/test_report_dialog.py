@@ -171,7 +171,7 @@ class MainWindowJobResultsTests(unittest.TestCase):
 
     def test_job_results_opens_a_dialog_when_exports_exist(self) -> None:
         window = MainWindow(controller=self.controller)
-        self.addCleanup(window.close)
+        self.addCleanup(window.teardown)
         window.set_interactive_dialogs(False)
         with patch("ndex_frame.ui.report_dialog.frame_reports", return_value=[_report()]):
             dialog = window._open_job_results()
@@ -181,7 +181,7 @@ class MainWindowJobResultsTests(unittest.TestCase):
 
     def test_job_results_says_so_when_nothing_is_recorded(self) -> None:
         window = MainWindow(controller=self.controller)
-        self.addCleanup(window.close)
+        self.addCleanup(window.teardown)
         window.set_interactive_dialogs(False)
         with patch("ndex_frame.ui.report_dialog.frame_reports", return_value=[]):
             dialog = window._open_job_results()
@@ -219,7 +219,7 @@ class FrameRetryTests(unittest.TestCase):
 
     def _window(self) -> MainWindow:
         window = MainWindow(controller=self.controller)
-        self.addCleanup(window.close)
+        self.addCleanup(window.teardown)
         window.set_interactive_dialogs(False)
         return window
 
@@ -440,7 +440,7 @@ class SelectOnOpenTests(unittest.TestCase):
             settings_writer=lambda _section, _values: None,
         )
         window = MainWindow(controller=controller)
-        self.addCleanup(window.close)
+        self.addCleanup(window.teardown)
         window.set_interactive_dialogs(False)
         wanted = _report(manifest_path=Path("C:/m/export-1.json"))
         with patch("ndex_frame.ui.report_dialog.frame_reports", return_value=[_report(), wanted]) as reports:

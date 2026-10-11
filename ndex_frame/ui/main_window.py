@@ -112,6 +112,7 @@ class MainWindow(QMainWindow):
         self._close_ready = False
         self.handoff_path: Path | None = None
         self._last_presets_dialog: PresetsManagerDialog | None = None
+        self._frame_chosen_in_manager = False
         self._item_by_path: dict[Path, QListWidgetItem] = {}
         ratio = QGuiApplication.primaryScreen().devicePixelRatio() if QGuiApplication.primaryScreen() else 1.0
         self.thumbnail_loader = ThumbnailLoader(
@@ -140,7 +141,23 @@ class MainWindow(QMainWindow):
         self._sync_controls()
         self._refresh_sources()
 
+    def teardown(self) -> bool:
+        """Stop every background worker and wait for it, then close the window.
+
+        Synchronous (no event loop needed): once it returns, no thumbnail, preview,
+        import or export thread is alive, so cache folders can be removed safely.
+        """
+        self._interactive_dialogs = False
+        self.request_cancel()
+        self.thumbnail_loader.shutdown()
+        clean = self.controller.shutdown_and_wait()
+        self._close_ready = True
+        self.close()
+        return clean
+
     def closeEvent(self, event: QCloseEvent) -> None:
+        # Thumbnail jobs are short; never leave them running past the window.
+        self.thumbnail_loader.shutdown()
         if self._close_ready:
             self.thumbnail_loader.shutdown()
             super().closeEvent(event)
@@ -581,7 +598,7 @@ class MainWindow(QMainWindow):
         dialog = PresetsManagerDialog(
             self.preset_store,
             self,
-            current_frame=self._stored_frame(),
+            current_frame=self._current_frame_with_edits(),
             current_output=self.controller.state.output_profile,
             on_use_frame=self._use_frame_preset,
             on_use_output=self._use_output_profile,
@@ -589,12 +606,17 @@ class MainWindow(QMainWindow):
         self._last_presets_dialog = dialog
         working = self.controller.state.working_frame
         stored_before = self._stored_frame()
+        self._frame_chosen_in_manager = False
         if self._interactive_dialogs:
             dialog.exec()
         # Presets may have been created, renamed or deleted in there.
         self._reload_preset_combos()
         state = self.controller.state
-        if working.id == state.working_frame.id and self._stored_frame() == stored_before:
+        if (
+            not self._frame_chosen_in_manager
+            and working.id == state.working_frame.id
+            and self._stored_frame() == stored_before
+        ):
             # Nothing changed for this preset: keep the user's unsaved edits.
             state.working_frame = working
         self._sync_controls()
@@ -605,7 +627,13 @@ class MainWindow(QMainWindow):
         stored = self.frame_preset_combo.currentData()
         return stored if stored is not None else self.controller.state.working_frame
 
+    def _current_frame_with_edits(self) -> FramePreset:
+        """The working frame as edited now (ratio, background, border, offsets), not the saved copy."""
+        return self.controller.state.working_frame
+
     def _use_frame_preset(self, preset: FramePreset) -> None:
+        # An explicit "Use as current" must survive the manager closing.
+        self._frame_chosen_in_manager = True
         self.controller.state.working_frame = preset
         self._reload_preset_combos()
         self._sync_controls()

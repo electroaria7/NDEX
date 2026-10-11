@@ -10,9 +10,12 @@ calls whose text arguments are string literals, then:
 
 Usage::
 
-    python tools/i18n_extract.py [--locales DIR] [--prune] [--check] [SOURCE_DIR ...]
+    python tools/i18n_extract.py [--locales DIR] [--prune [--force]] [--check] [SOURCE_DIR ...]
 
-With no sources it scans the repository's app packages.
+With no sources it scans every app source root (see ``DEFAULT_SOURCES``).
+"Unused" is always judged against the full default set, so a narrower scan can
+never mark a key used elsewhere as unused; ``--prune`` with paths that do not
+cover the whole default set is refused unless ``--force`` is given.
 """
 
 from __future__ import annotations
@@ -26,8 +29,8 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 DEFAULT_LOCALES = REPO / "ndex_common" / "locales"
 DEFAULT_SOURCES = [
-    "ndex_common", "ndex_launcher", "ndex_frame", "dsb_image_manager",
-    "ndex_auto_selector", "ndex_one", "main.py",
+    "main.py", "src", "dsb_image_manager", "ndex_auto_selector",
+    "ndex_frame", "ndex_launcher", "ndex_common",
 ]
 SKIP_DIRS = {".venv", "venv", "build", "dist", "__pycache__", ".git", "tests", "node_modules"}
 META_KEY = "__meta__"
@@ -85,24 +88,50 @@ def extract_tree(roots: list[Path]) -> tuple[set[str], set[str]]:
     return messages, plurals
 
 
-def sync_locale(data: dict, messages: set[str], plurals: set[str], prune: bool) -> tuple[dict, list[str], list[str]]:
-    """Return ``(new data, added keys, unused keys)`` without touching ``data``."""
+def default_roots() -> list[Path]:
+    return [REPO / s for s in DEFAULT_SOURCES if (REPO / s).exists()]
+
+
+def covers_default_set(roots: list[Path]) -> bool:
+    """True when every default source root lies inside one of ``roots``."""
+    resolved = [Path(r).resolve() for r in roots]
+    return all(
+        any(default.resolve() == root or root in default.resolve().parents for root in resolved)
+        for default in default_roots()
+    )
+
+
+def sync_locale(
+    data: dict,
+    messages: set[str],
+    plurals: set[str],
+    prune: bool,
+    used_messages: set[str] | None = None,
+    used_plurals: set[str] | None = None,
+) -> tuple[dict, list[str], list[str]]:
+    """Return ``(new data, added keys, unused keys)`` without touching ``data``.
+
+    ``used_*`` is every key used anywhere (the full default set); unused and
+    pruned keys are judged against it. It defaults to ``messages``/``plurals``.
+    """
+    used_messages = messages if used_messages is None else used_messages | messages
+    used_plurals = plurals if used_plurals is None else used_plurals | plurals
     entries = {k: v for k, v in data.items() if k not in (META_KEY, PLURAL_KEY)}
     stored_plurals = data.get(PLURAL_KEY) if isinstance(data.get(PLURAL_KEY), dict) else {}
     plural_entries = dict(stored_plurals)
 
     added = sorted(k for k in messages if k not in entries)
     added += sorted(f"{k} (plural)" for k in plurals if k not in plural_entries)
-    unused = sorted(k for k in entries if k not in messages)
-    unused += sorted(f"{k} (plural)" for k in plural_entries if k not in plurals)
+    unused = sorted(k for k in entries if k not in used_messages)
+    unused += sorted(f"{k} (plural)" for k in plural_entries if k not in used_plurals)
 
     for key in messages:
         entries.setdefault(key, "")
     for key in plurals:
         plural_entries.setdefault(key, ["", ""])
     if prune:
-        entries = {k: v for k, v in entries.items() if k in messages}
-        plural_entries = {k: v for k, v in plural_entries.items() if k in plurals}
+        entries = {k: v for k, v in entries.items() if k in used_messages}
+        plural_entries = {k: v for k, v in plural_entries.items() if k in used_plurals}
 
     result: dict = {}
     if META_KEY in data:
@@ -119,11 +148,29 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("sources", nargs="*", help="folders or files to scan")
     parser.add_argument("--locales", type=Path, default=DEFAULT_LOCALES, help="locale folder to update")
     parser.add_argument("--prune", action="store_true", help="delete keys no source uses")
+    parser.add_argument("--force", action="store_true", help="allow --prune with paths narrower than the default set")
     parser.add_argument("--check", action="store_true", help="write nothing; exit 1 if keys are missing")
     args = parser.parse_args(argv)
+    # A cp949 (or other legacy) console cannot encode every key; never crash printing.
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            reconfigure(errors="replace")
 
-    roots = [Path(s) for s in args.sources] or [REPO / s for s in DEFAULT_SOURCES if (REPO / s).exists()]
+    explicit = [Path(s) for s in args.sources]
+    roots = explicit or default_roots()
+    if args.prune and explicit and not args.force and not covers_default_set(explicit):
+        print(
+            "Refusing --prune: the given paths do not cover every default source root, "
+            "so keys used elsewhere could look unused. Run with no paths, or add --force.",
+            file=sys.stderr,
+        )
+        return 2
     messages, plurals = extract_tree(roots)
+    if explicit:
+        used_messages, used_plurals = extract_tree(default_roots())
+    else:
+        used_messages, used_plurals = messages, plurals
     print(f"Found {len(messages)} messages and {len(plurals)} plural messages.")
 
     missing_total = 0
@@ -138,7 +185,7 @@ def main(argv: list[str] | None = None) -> int:
         if not isinstance(data, dict):
             print(f"{path.name}: not a JSON object", file=sys.stderr)
             return 2
-        result, added, unused = sync_locale(data, messages, plurals, args.prune)
+        result, added, unused = sync_locale(data, messages, plurals, args.prune, used_messages, used_plurals)
         missing_total += len(added)
         print(f"{path.name}: {len(added)} missing, {len(unused)} unused" + (" (pruned)" if args.prune and unused else ""))
         for key in unused:

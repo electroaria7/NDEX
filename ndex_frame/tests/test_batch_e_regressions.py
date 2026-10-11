@@ -156,7 +156,7 @@ class ExportContextTests(unittest.TestCase):
         )
         controller = WorkspaceController(state, settings_writer=lambda _s, _v: None)
         window = MainWindow(controller)
-        self.addCleanup(window.close)
+        self.addCleanup(window.teardown)
         window._sync_controls()
         self.assertTrue(window.export_all_button.isEnabled())
         self.assertTrue(window.open_folder_button.isEnabled())
