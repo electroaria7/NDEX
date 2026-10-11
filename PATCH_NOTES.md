@@ -8,8 +8,18 @@
 - Expose Image Manager's Pick, Maybe, Reject, Clear, export, and handoff actions in the toolbar, retaining existing busy states and confirmation dialogs.
 - Make Auto Selector's match statuses shorter and fully reachable, with font-measured status columns, horizontal scrolling, and clearer XMP option layout.
 - Prevent long Frame output paths from expanding the window. Separate output selection from export actions, keep full paths in tooltips, and distinguish settings for all photos from adjustments to the selected photo.
+- Show Frame warnings in English, with ⚠ badges in the file list and the export confirmation. Summarize imports, for example "5 of 8 opened · 2 RAW skipped".
+- Show the output folder state and explain disabled Export buttons with tooltips.
+- Show a clearer export preflight with size, format, color space, metadata, destination, and an example filename. Default filename conflicts to Skip existing.
+- Replace raw error text with actionable messages that say how to fix the problem.
+- Show a completion dialog that matches the outcome, with a failure list and a Job Results button.
+- Add keyboard shortcuts (Ctrl+O, Ctrl+Shift+O, Ctrl+E, Ctrl+Shift+E, Ctrl+J, Up/Down), drag-and-drop import, and Esc or "Stop After This Photo" to cancel an export.
+- Add a border, size caption, and drag hint to the preview canvas.
+- Name duplicated presets "copy", clarify output profile descriptions, and confirm before applying settings to all photos.
 
 Validation: **568 source tests passed** (shared/One 250, Manager 46, Auto Selector 73, Launcher 25, Frame 174), plus compilation and diff checks. Native Windows spot checks covered all five apps using isolated synthetic fixtures. Layout regressions include small windows and simulated 100%/150% Tk font scaling; these do not replace packaged or multi-monitor DPI validation.
+
+After the Frame feedback changes: **603 source tests passed** (shared/One 250, Manager 46, Auto Selector 73, Launcher 26, Frame 208). Frame states were checked with offscreen captures at the default size and 1024x700; the packaged app was not rebuilt.
 
 ## 0.9.5 Beta — 2026-10-10
 
