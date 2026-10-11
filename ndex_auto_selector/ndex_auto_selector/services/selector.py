@@ -9,13 +9,13 @@ from threading import Event
 from ndex_common.filecopy import copy_verified
 
 from ndex_common.rating import read_jpg_rating
+from ndex_common.raw_formats import RAW_EXTENSIONS
 from ndex_common.retry import path_key
 from ndex_common.xmp import sidecar_paths_for_read, write_xmp_sidecar
 
 from ..core.models import AnalysisSummary, CopyResult, DuplicatePolicy, SelectionMatch
 
 JPG_EXTENSIONS = {".jpg", ".jpeg"}
-RAW_EXTENSIONS = {".cr3", ".cr2", ".arw", ".srf", ".sr2", ".nef", ".nrw"}
 # An ID must not sit inside a longer token: no letter/digit before it and no
 # further digit after it (IMG_1234 must not match IMG_12345).
 CAMERA_ID_PATTERNS = (
