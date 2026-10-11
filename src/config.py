@@ -7,7 +7,7 @@ from pathlib import Path
 from .app_paths import get_default_settings_template_path, get_user_config_dir
 
 DEFAULT_SETTINGS = {
-    "supported_extensions": [".cr3", ".cr2", ".arw", ".srf", ".sr2", ".nef", ".nrw", ".jpg", ".jpeg"],
+    "supported_extensions": [".cr3", ".cr2", ".crw", ".arw", ".srf", ".sr2", ".nef", ".nrw", ".jpg", ".jpeg"],
     "folder_pattern": "{YYYY}/{MM}/{MMDD}/{type}",
     "duplicate_policy": "rename",
     "verify_mode": "size",
@@ -20,6 +20,7 @@ DEFAULT_SETTINGS = {
         "jpg": True,
         "cr3": True,
         "cr2": True,
+        "crw": True,
         "arw": True,
         "srf": True,
         "sr2": True,
