@@ -1,0 +1,80 @@
+NDEX review and documentation log
+Recorded date: 2026-10-11 (America/Chicago)
+Kind: retrospective evidence summary; not raw stdout or an application runtime log
+Scope: release/0.9.6 @ c8c1d34 and separate Manager worktree snapshot
+
+[VERSION]
+git fetch origin --tags; git ls-remote --heads origin
+Local/remote release/0.9.6: c8c1d34eda560829d3b4c7a820bf91e611e540da
+Remote main: 4390ada69c2603c67b1bc811c0ecc31e3afbc417
+22 release-branch commits not in main.
+gh release list / gh api releases/tags/v0.9.5:
+Latest published prerelease v0.9.5, published 2026-10-10T21:04:45Z.
+Assets: NDEX_Setup_0.9.5.exe; NDEX_v0.9.5.zip; SHA256SUMS-0.9.5.txt.
+GitHub releases/latest returns v0.9.3. Historical v1.0.x tags are older.
+ndex_common/version.py still declares 0.9.5. No 0.9.6 build performed.
+
+[INTEGRATED LOCAL TESTS - prior review execution, Python 3.12.10]
+Command template: .venv/Scripts/python.exe -m unittest discover -s <suite>
+tests: 283, OK (skipped=1), 87.140s
+dsb_image_manager/tests: 74, OK, 83.902s
+ndex_auto_selector/tests: 73, OK, 39.426s
+ndex_launcher/tests: 27, OK, 23.790s
+ndex_frame/tests: 226, OK, 103.278s
+Total: 683 discovered; 682 passed, 1 skipped, 0 failures.
+These totals do not include the separate Manager working tree.
+
+[REMOTE CI]
+Run: https://github.com/electroaria7/NDEX/actions/runs/38159035172
+Event: pull_request; head c8c1d34; Python 3.12 success, Python 3.10 failure.
+Failed test: test_keyboard_navigation_still_steps_through_photos
+Suite: test_b2_features.ThumbnailWindowTests
+Failure: OSError [WinError 145] directory is not empty during TemporaryDirectory.cleanup.
+Frame on Python 3.10: 226 tests; FAILED (errors=1).
+Cause requires investigation; async cleanup race is a candidate, not a proven root cause.
+
+[UNMERGED MANAGER SNAPSHOT]
+HEAD: 8b540aa0649470a460d3537623bd3061c2cc0ef0
+Uncommitted: services/backup.py, services/exporter.py, ui/tk_app.py, ndex_common/locales/ko.json.
+Untracked: dsb_image_manager/tests/test_grid_view.py.
+Features: virtualized grid, Grid/List switching, thumbnail workers/LRU, toolbar, localization wrapping.
+Catalog keys absent from committed catalog but present in working copy: 211 ordinary, 12 plural.
+Agent-reported full suite: 110 tests, 4 failures, 3 errors, 71.693s.
+Agent-reported grid-only: 36 tests, 4 failures, 2 errors, 48.218s.
+Issues include scroll index roundtrip/boundaries, virtualization expectations, auto-advance rating expectation,
+Tk tearoff label lookup, duplicate destroy, and Windows thumbnail cleanup WinError 32.
+Do not interpret all seven test issues as confirmed product defects.
+Full test process remained after result output; reviewer terminated only its own test processes.
+Grid-only process exited with failure status normally. Worker shutdown remains to verify.
+Snapshot belongs to ongoing work; recheck before integration.
+
+[REPRODUCED FINDINGS]
+R02: OLD.JPG Reject -> delete/rescan -> NEW.JPG/rescan reuses id=1 -> Undo/Redo changes NEW.JPG.
+R02: JPG Pick -> add RAW/rescan -> Undo clears JPG but leaves RAW Pick.
+R03: Frame edited background #112233 -> Manage/New -> new preset retains stored #FFFFFF.
+R03: Apply same original Frame preset -> dialog closes -> prior #112233 edit restored.
+R05: DEFAULT_SOURCES omits src, includes nonexistent ndex_one.
+In-memory prune removes 129 used ordinary keys and 2 used plural keys. No catalog pruned on disk.
+Default Windows console check also raised UnicodeEncodeError for cp949 output.
+R06: c8c1d34 adds two mode-160000 worktree entries; no .gitmodules mapping.
+git submodule status fails. Preserve actual worktrees when removing index tracking.
+R07: integrated ko.json has 583 ordinary keys; all values empty.
+
+[CORRECTIONS / LIMITS]
+docs/RAW_Compatibility.md already records real Canon/Sony/Nikon 19-sample validation.
+Real portrait RAW, large-scale performance and external Lightroom/Evoto XMP interpretation remain open.
+RAW pixel decoding is not supported by the current design.
+Earlier 552/603 test counts describe past revisions, not this HEAD.
+
+[DOCUMENTATION UPDATE]
+Updated PATCH_NOTES.md with merged work, open findings, and validation boundaries.
+Updated repository progress, roadmap, index and historical UIUX status pointer.
+Added 15_0.9.6_검수_추가작업_2026-10-11.md with R01-R10 execution/acceptance criteria.
+Actual Obsidian vault: C:/Users/Owner/iCloudDrive/iCloud~md~obsidian/Beta/NDEX.
+Vault update preserves historical notes, adds current status pointers, and copies review/release notes.
+No source fix, branch merge, package build, release, commit or push performed.
+
+[DOCUMENT VERIFICATION]
+R01-R10 present; repository/vault review content synchronized; identical log copies; 11 new links checked.
+git diff --check passed. Documentation-only change; application tests were not rerun for this update.
+Original vault notes preserved in .build_tools/review-docs-backup-2026-10-11/.

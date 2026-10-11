@@ -1,5 +1,7 @@
 # UI/UX 검토 — 2026-10-11
 
+> 후속 현황(2026-10-11): 아래는 초기 UI/UX 검토 당시 기록이다. RAW+JPG shot·Undo·점진/취소 스캔과 Frame 썸네일·프리셋 관리·결과 표는 이후 `release/0.9.6`에 병합됐다. Manager 그리드는 별도 worktree에서 진행 중이다. 현재 결함·미완료 번역·CI·배포 상태는 [Development Progress](obsidian/NDEX/01%20Development%20Progress.md)를 참조한다. 아래 603개 테스트 수치를 최신 통합 브랜치 검증으로 사용하지 않는다.
+
 ## 검토 범위와 방법
 
 5개 앱(Launcher, NDEX One, Image Manager, Auto Selector, Frame)을 임시 LOCALAPPDATA와 샘플 촬영 폴더(한글 폴더 포함)로 실제 실행하여 기본 창 크기와 최소 창 크기의 스크린샷을 찍고, 화면 구성을 코드와 함께 평가했다.

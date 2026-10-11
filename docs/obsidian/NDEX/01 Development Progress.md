@@ -1,14 +1,55 @@
 # Development Progress
 
-updated: 2026-10-10
+updated: 2026-10-11
 type: progress-note
 
 ## Summary
 
-0.9.5 Beta의 빌드·소스/패키지 검증을 완료했다. 0.9.4의 작업 취소·백그라운드 실행·안전 종료에
-Launcher/One/Manager/Selector의 UI 개선과 통합 검수 수정 4건을 더했다.
-PR #21과 [[14_0.9.5_UIUX_패치노트_2026-10-10]]에 사용자 변화와 검증 범위를 정리했다.
-One 용량 요약과 RAW 후보 선택은 구현했으며, CSV/HTML 리포트·전체 언어 통일·실카메라 및 설치 업그레이드 검증은 남아 있다.
+실행 체크리스트: [[15_0.9.6_검수_추가작업_2026-10-11]]. 근거: [검수 로그](../../logs/2026-10-11-release-0.9.6-review.log).
+
+최신 공개 배포는 **0.9.5 Beta**, 현재 개발 기준은 **release/0.9.6 @ c8c1d34**다.
+2026-10-11 원격 fetch 및 GitHub API로 확인했으며 로컬/원격 release 브랜치는 같다.
+0.9.6은 미배포 상태이고 `ndex_common/version.py`는 아직 `0.9.5`다.
+
+### 최신 버전과 통합 범위
+
+| 구분 | 확인 결과 |
+| --- | --- |
+| 최신 공개 배포 | [v0.9.5 Beta](https://github.com/electroaria7/NDEX/releases/tag/v0.9.5), 2026-10-10 21:04:45 UTC 공개. ZIP·설치본·체크섬 제공 |
+| GitHub Latest 표시 | v0.9.3. v0.9.4/0.9.5는 pre-release이므로 Latest API와 최신 공개 배포가 다름 |
+| main | `4390ada`; release/0.9.6에는 main에 없는 커밋 22개가 있음 |
+| 통합 개발 기준 | 로컬/원격 `release/0.9.6` 모두 `c8c1d34` |
+| 별도 작업 중 | Manager worktree `8b540aa`와 미커밋 변경. 그리드·툴바·번역 후속 작업은 release에 미병합 |
+| 과거 v1.0.0/v1.0.1 | 2026-09-01에 공개한 이전 번호이며 최신 배포가 아님 |
+
+### 0.9.6에서 병합된 작업
+
+| 작업 | 상태 / 남은 조건 |
+| --- | --- |
+| A1 공용 i18n·Launcher 언어 선택 | 병합. 실제 한국어 번역은 미완료 |
+| A2 공용 RAW 형식·CRW·큰 내장 JPEG 선택·방향 처리 | 병합. 실제 Canon/Sony/Nikon 19샘플 검증 기록은 `docs/RAW_Compatibility.md` 참조 |
+| A3 Manager RAW+JPG shot·Undo/Redo·점진 스캔·취소·빠른 재스캔 | 병합. 재스캔 뒤 Undo 결함 2개 확인 |
+| C1 One·Selector·공용 결과/재시도 문자열 래핑 | 병합. 번역값 및 추출 도구 보완 필요 |
+| B2 Frame 썸네일·프리셋 관리·결과 표·번역 연결 | 병합. 프리셋 관리 결함 2개 및 CI 실패 확인 |
+| Manager 그리드·단일 행 툴바·번역 연결 후속 | 별도 worktree에서 진행 중. 커밋·미커밋 변경을 합쳐 검수 후 통합 필요 |
+
+### 누락 및 후속 작업 목록
+
+아래는 완료 판정 전에 처리할 항목이다. 검수로 발견했으며 이번 문서 갱신에서 코드를 수정하지 않았다.
+
+- [ ] **CI 복구:** [현재 커밋 CI](https://github.com/electroaria7/NDEX/actions/runs/38159035172)는 Python 3.12 성공, 3.10 실패. Frame `test_keyboard_navigation_still_steps_through_photos` 종료 시 임시 폴더 정리에서 WinError 145 발생. 비동기 작업 종료/정리 순서를 조사하고 두 버전 모두 재검증.
+- [ ] **Manager Undo:** 같은 폴더 재스캔 후 SQLite ID 재사용으로 다른 파일을 변경하는 문제, RAW 파트너 추가 후 Undo가 JPG만 복원하는 문제 수정 및 회귀 테스트 (`tk_app.py:1011,1202,1525`).
+- [ ] **Frame 프리셋:** New가 현재 편집값 대신 저장본을 복사하는 문제와 명시적으로 적용한 동일 ID 프리셋이 관리 창 종료 후 이전 편집값으로 돌아오는 문제 수정 (`main_window.py:584,597`).
+- [ ] **한국어 번역:** 통합 브랜치 `ko.json` 일반 키 583개 전부 빈 값. 언어 선택과 `_()` 래핑은 번역 완료를 의미하지 않음. Manager 미병합 키까지 확정한 뒤 번역·자리표시자·줄바꿈·화면 폭 검수.
+- [ ] **번역 추출:** `tools/i18n_extract.py` 기본 대상에 실제 One 소스 `src` 추가. 현재 `--prune`은 사용 중인 일반 키 129개와 복수형 키 2개를 제거함(메모리상 검증). Windows cp949 출력의 UnicodeEncodeError도 처리.
+- [ ] **미병합 작업 보존/통합:** Manager `8b540aa` 및 미커밋 backup/exporter/tk_app/ko.json, 미추적 `test_grid_view.py` 확인. 커밋본 ko.json에는 현재 Manager 추출 기준 일반 키 211개·복수형 키 12개가 없고 미커밋 파일에만 반영돼 있으므로 커밋만 병합하지 말 것. 작업 중 스냅샷 테스트는 아래 별도 결과 참조.
+- [ ] **Git 추적 정리:** `c8c1d34`가 worktree gitlink 두 개를 추가해 `git submodule status` 실패. 실제 작업 폴더를 보존하고 인덱스 추적/ignore만 정리.
+- [ ] **릴리스 준비:** 0.9.6 버전·README·PATCH_NOTES 동기화, 5개 EXE·ZIP·설치본·체크섬 생성 및 패키지 GUI/한글 경로/고DPI/업그레이드 검증. 현재 버전으로 빌드하면 0.9.5 출력 경로를 사용함.
+- [ ] **후속 범위:** CSV/HTML 결과 내보내기, 대량 RAW/SD 성능, 실제 세로 RAW 방향, Lightroom/Evoto XMP 해석, 태그 기반 배포 자동화. 0.9.6 필수 범위와 이후 범위를 확정할 것.
+
+RAW 검증을 전부 미완료로 표시하지 않는다. 19샘플의 날짜·메타데이터·내장 JPEG·XMP 생성·매칭·백업 검증 기록이 있다.
+실제 세로 RAW와 대량 성능, 외부 앱 XMP 해석은 남아 있다. RAW 원본 픽셀 디코딩은 현 설계에서 지원하지 않는다.
+One DNG와 다른 브랜드 RAW 지원도 현재 제한이며, 자동으로 이번 릴리스 필수 요구로 간주하지 않는다.
 
 NDEX는 기존 DSB 백업 도구에서 출발해 사진 백업/선별/원본 추출/내보내기 workflow를 분리한 프로그램 시리즈다. 각 앱은 독립 실행이 가능하고, [[Programs/NDEX Launcher]]가 4단계 순서를 묶는다.
 
@@ -117,14 +158,24 @@ Phase 2는 PR #9로 병합되었으나, 이후 코드 리뷰에서 6건의 결�
 ## Verified Test Coverage
 
 ```powershell
-python -m unittest discover -s tests                      # 244
-python -m unittest discover -s dsb_image_manager\tests    # 43
-python -m unittest discover -s ndex_auto_selector\tests   # 71
-python -m unittest discover -s ndex_launcher\tests        # 23
-python -m unittest discover -s ndex_frame\tests           # 171
+python -m unittest discover -s tests                      # 283 (1 skipped)
+python -m unittest discover -s dsb_image_manager\tests    # 74
+python -m unittest discover -s ndex_auto_selector\tests   # 73
+python -m unittest discover -s ndex_launcher\tests        # 27
+python -m unittest discover -s ndex_frame\tests           # 226
 ```
 
-2026-10-10 기준 552개 전부 통과. 고정 의존성을 사용한 Python 3.12.10 로컬 환경과 GitHub CI Python 3.10/3.12에서 확인했다.
+2026-10-11 `c8c1d34` 로컬 Python 3.12.10 검수: 총 683개, 682개 통과·1개 건너뜀·실패 0개.
+동일 커밋 원격 CI는 Python 3.12 성공, 3.10 실패이므로 전체 검증 완료가 아니다.
+별도 Manager worktree와 미커밋 작업은 이 수치에 포함하지 않는다. 0.9.5의 552개와 Frame 중간 단계의 603개는 과거 기록이다.
+
+별도 Manager worktree `8b540aa` + 미커밋 변경의 읽기 전용 검수 결과:
+
+- Manager 전체 110개: 실패 4개·오류 3개(71.693초).
+- 신규 그리드 테스트 단독 36개: 실패 4개·오류 2개(48.218초).
+- 스크롤 인덱스 왕복/경계와 가상화 수량 검증, 자동 다음 사진 이동 후 평점 기대값, Tk 메뉴 tearoff 조회, 중복 destroy 및 Windows 썸네일 파일 정리가 실패에 포함된다.
+- 구현과 테스트 기대값/정리 코드 문제가 섞여 있으므로 이를 모두 사용자 기능 결함으로 세지 않는다. 각 원인 분리 후 통합 전에 다시 검증한다.
+- 전체 테스트는 결과 출력 후에도 프로세스가 남아 검수 에이전트가 자신이 시작한 테스트 프로세스만 종료했다. worker 종료/정리 검증을 추가한다. 그리드 단독 실행은 정상적으로 실패 종료했다.
 
 ## Current Direction
 

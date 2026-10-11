@@ -1,6 +1,22 @@
 # NDEX Patch Notes
 
-## Unreleased — Icon and UI review
+## 0.9.6 Beta — 2026-10-11
+
+This beta adds a shared language selector and wider RAW support, reworks Image Manager's shot browsing, undo, and grid view, and includes fixes from the 0.9.6 integration review. Packages: `NDEX_v0.9.6.zip` and `NDEX_Setup_0.9.6.exe`. The channel remains `beta`; previous releases remain available separately.
+
+- **Localization:** Add shared i18n with English source text as keys and a language selector in the Launcher (System default, English, 한국어). The choice applies on the next app start. All five apps' UI text is wrapped. `ndex_common/locales/ko.json` contains every message key, but its values are still empty, so the UI stays in English until Korean translations are added. Catalogs can be overridden in `%LOCALAPPDATA%\NDEX\locales` without rebuilding, and an empty translation falls back to English. `tools/i18n_extract.py` keeps catalogs complete (`--check`, safe `--prune`); see [docs/Localization.md](docs/Localization.md).
+- **RAW:** Share one RAW format table covering Canon CR3, CR2, and CRW (new), Sony ARW, SRF, and SR2, Nikon NEF and NRW, plus DNG in Auto Selector. Nineteen real CC0 sample files were checked for capture dates, metadata, XMP sidecar naming, Auto Selector matching, and backup copy-and-verify. Image Manager uses the largest embedded preview with RAW orientation applied, and NDEX One enables CRW by default. See [docs/RAW_Compatibility.md](docs/RAW_Compatibility.md).
+- **Image Manager:** Show RAW+JPG files as one shot row (View → "Show RAW+JPG as one row", on by default). Pick, Maybe, Reject, and ratings apply to both files of a pair. Add Undo/Redo (Ctrl+Z, Ctrl+Y or Ctrl+Shift+Z; 100 steps), keyed by file path. Scans stream results, can be cancelled with Cancel or Esc, and reuse unchanged files on rescan. Add a virtualized thumbnail Grid view (G; Small, Medium, Large) and a single-row compact toolbar. Measured with 2,000 shots: grid switch about 9 ms, scroll p95 about 5 ms.
+- **Frame:** Show thumbnails in the image list. One Presets manager covers Frames and Outputs (New, Duplicate, Edit, Rename, Delete, Make Default, Use as current); new presets capture the current edits. Job Results is a table, the toolbar fits the minimum width, and edited photos show an "(edited)" marker. Preflight, warnings, and shortcuts from the earlier Frame UX pass are included (see below).
+- **Fixes:** Image Manager undo now works after a rescan and after a RAW partner is added. Frame preset creation uses the current edits, and "Use as current" survives closing the manager. Frame and Image Manager shut down background workers before their windows close, which fixes a Python 3.10 CI temp-folder failure and a stuck test process. The translation extractor scans every app, and its prune is safe. NDEX One's preview tables sit next to their scrollbars again. Accidental worktree gitlinks were removed, and `.claude/` is ignored.
+
+Not verified in this release: Lightroom/Evoto XMP interpretation, upgrades from older installs, high-DPI multi-monitor use, real portrait RAW orientation, and Korean translations.
+
+Validation: VALIDATION_PLACEHOLDER
+
+Review: [0.9.6 review and follow-up roadmap](docs/obsidian/NDEX/15_0.9.6_검수_추가작업_2026-10-11.md). Evidence summary: [review log](docs/logs/2026-10-11-release-0.9.6-review.log).
+
+### Included from the icon and UI review
 
 - Give Windows icons transparent outer corners and dedicated 16/24px artwork. Keep reproducible PNG/ICO generation and source provenance in `build/generate_branding.py` and `assets/branding/icon_sources.json`.
 - Use compact shared headers with a visible app name. Launcher adapts its cards to the available width and font size, reduces empty card space, and improves result-text contrast.
