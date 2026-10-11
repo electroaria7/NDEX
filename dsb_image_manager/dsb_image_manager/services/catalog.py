@@ -1,18 +1,21 @@
 from __future__ import annotations
 
+import logging
 import sqlite3
 from datetime import datetime
 from pathlib import Path
 from typing import Iterable
 
-from ..core.models import ImageRecord
+from ..core.models import ImageRecord, Shot, build_shots, merge_pick_status, shot_matches, sort_shots
+
+log = logging.getLogger(__name__)
 
 
 class Catalog:
     def __init__(self, db_path: Path):
         self.db_path = db_path
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self.connection = sqlite3.connect(self.db_path)
+        self.connection = sqlite3.connect(self.db_path, timeout=30)
         self.connection.row_factory = sqlite3.Row
         self.initialize()
 
@@ -51,7 +54,9 @@ class Catalog:
                 has_exif INTEGER NOT NULL DEFAULT 0,
                 has_proxy INTEGER NOT NULL DEFAULT 0,
                 proxy_status TEXT NOT NULL,
-                backup_status TEXT NOT NULL DEFAULT 'not_backed_up'
+                backup_status TEXT NOT NULL DEFAULT 'not_backed_up',
+                size_bytes INTEGER,
+                mtime_ns INTEGER
             );
 
             CREATE TABLE IF NOT EXISTS selection (
@@ -70,6 +75,11 @@ class Catalog:
             );
             """
         )
+        # Catalogs from older versions lack the rescan fingerprint columns.
+        existing = {row["name"] for row in self.connection.execute("PRAGMA table_info(images)")}
+        for column in ("size_bytes", "mtime_ns"):
+            if column not in existing:
+                self.connection.execute(f"ALTER TABLE images ADD COLUMN {column} INTEGER")
         self.connection.commit()
 
     def upsert_images(self, records: Iterable[ImageRecord]) -> list[ImageRecord]:
@@ -81,7 +91,7 @@ class Catalog:
 
     def upsert_image(self, record: ImageRecord) -> ImageRecord:
         existing = self.connection.execute(
-            "SELECT id, file_modified_datetime, file_size, backup_status FROM images WHERE file_path = ?",
+            "SELECT id, file_modified_datetime, file_size, backup_status, mtime_ns FROM images WHERE file_path = ?",
             (str(record.file_path),),
         ).fetchone()
         values = self._record_values(record)
@@ -90,10 +100,13 @@ class Catalog:
             # Keep backup_status across rescans unless the file itself changed on disk.
             changed = existing["file_modified_datetime"] != _dt_to_text(record.file_modified_datetime) or (
                 bool(existing["file_size"]) and bool(record.file_size) and existing["file_size"] != record.file_size
+            ) or (
+                existing["mtime_ns"] is not None and record.mtime_ns is not None
+                and existing["mtime_ns"] != record.mtime_ns
             )
             if not changed:
                 record.backup_status = existing["backup_status"]
-                values = values[:-1] + (existing["backup_status"],)
+                values = values[:27] + (existing["backup_status"],) + values[28:]
             self.connection.execute(
                 """
                 UPDATE images SET
@@ -103,7 +116,8 @@ class Catalog:
                     lens_model = ?, focal_length = ?, exposure_time = ?, aperture = ?,
                     iso = ?, exposure_compensation = ?, white_balance = ?, color_space = ?,
                     width = ?, height = ?, file_size = ?, gps = ?, has_exif = ?,
-                    has_proxy = ?, proxy_status = ?, backup_status = ?
+                    has_proxy = ?, proxy_status = ?, backup_status = ?,
+                    size_bytes = ?, mtime_ns = ?
                 WHERE id = ?
                 """,
                 values[1:] + (image_id,),
@@ -118,8 +132,8 @@ class Catalog:
                     lens_model, focal_length, exposure_time, aperture, iso,
                     exposure_compensation, white_balance, color_space, width,
                     height, file_size, gps, has_exif, has_proxy, proxy_status,
-                    backup_status
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    backup_status, size_bytes, mtime_ns
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 values,
             )
@@ -194,6 +208,52 @@ class Catalog:
             params,
         ).fetchall()
         return [record_from_row(row) for row in rows]
+
+    def list_shots(
+        self,
+        file_filter: str = "all",
+        pick_filter: str = "all",
+        sort_key: str = "capture_datetime",
+        descending: bool = False,
+        min_rating: int = 0,
+    ) -> list[Shot]:
+        """Files grouped into shots (same folder + stem); filters judge the whole shot."""
+        shots = build_shots(self.list_images()).values()
+        matching = [s for s in shots if shot_matches(s, file_filter, pick_filter, min_rating)]
+        return sort_shots(matching, sort_key, descending)
+
+    def records_by_path(self) -> dict[str, ImageRecord]:
+        return {str(record.file_path): record for record in self.list_images()}
+
+    def set_marks(self, entries: Iterable[tuple[int, str, int]]) -> None:
+        """Write exact (image_id, pick_status, rating) values in one transaction."""
+        with self.connection:
+            self.connection.executemany(
+                "UPDATE selection SET pick_status = ?, rating = ? WHERE image_id = ?",
+                ((pick, rating, image_id) for image_id, pick, rating in entries),
+            )
+
+    def reconcile_pair_marks(self) -> tuple[int, int]:
+        """Make every file of a shot agree: strongest pick state and highest rating.
+
+        Older catalogs marked RAW and JPG separately. Returns (shots fixed, files updated);
+        a second call finds nothing to do.
+        """
+        fixed_shots = 0
+        updates: list[tuple[int, str, int]] = []
+        for shot in build_shots(self.list_images()).values():
+            if len(shot.records) < 2:
+                continue
+            pick = merge_pick_status(r.pick_status for r in shot.records)
+            rating = max(r.rating for r in shot.records)
+            stale = [r for r in shot.records if r.pick_status != pick or r.rating != rating]
+            if stale:
+                fixed_shots += 1
+                updates.extend((r.id, pick, rating) for r in stale if r.id is not None)
+        if updates:
+            self.set_marks(updates)
+            log.info("Pair marks reconciled: %d shot(s), %d file(s) updated", fixed_shots, len(updates))
+        return fixed_shots, len(updates)
 
     def update_selection(
         self,
@@ -309,6 +369,8 @@ class Catalog:
             int(record.has_proxy),
             record.proxy_status,
             record.backup_status,
+            record.size_bytes,
+            record.mtime_ns,
         )
 
 
@@ -348,6 +410,8 @@ def record_from_row(row: sqlite3.Row) -> ImageRecord:
         color_label=row["color_label"] or "",
         selected=bool(row["selected"]),
         note=row["note"] or "",
+        size_bytes=row["size_bytes"],
+        mtime_ns=row["mtime_ns"],
     )
 
 

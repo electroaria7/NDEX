@@ -9,7 +9,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from dsb_image_manager.dsb_image_manager.core.models import ImageRecord
+from dsb_image_manager.dsb_image_manager.core.models import ImageRecord, Shot
 from dsb_image_manager.dsb_image_manager.services.catalog import Catalog
 from dsb_image_manager.dsb_image_manager.services.scanner import ImageScanner
 from dsb_image_manager.dsb_image_manager.ui import tk_app
@@ -43,8 +43,9 @@ class HelperTests(unittest.TestCase):
         self.assertEqual(tk_app.progress_text("scan", 18, 42, "IMG_1010.JPG"), "Scanning 18/42 \u2014 IMG_1010.JPG")
         self.assertEqual(tk_app.ready_status_text(42, 24), "Ready. 42 files (24 shots)")
         self.assertEqual(tk_app.send_confirm_text(12, "JPG", "Auto Selector"), "Send 12 picked JPGs to Auto Selector?")
-        self.assertIn("(2 RAW, 1 JPG)", tk_app.backup_confirm_text(
-            [rec("raw"), rec("raw"), rec("jpg")], "D:/out"))
+        shots = [Shot(str(i), [rec("jpg"), rec("raw")]) for i in range(6)]
+        self.assertTrue(tk_app.backup_confirm_text(shots, "D:/out").startswith(
+            "Back up 6 picked shots (6 JPG + 6 RAW) to:"))
         self.assertIn("3 selected / 9 shown", tk_app.selection_status_text(3, 9))
         self.assertEqual(tk_app.position_text(11, 42), "12 / 42")
         self.assertIn("view the JPG of this pair", tk_app.preview_unavailable_text(rec("raw", "raw_jpg_pair")))

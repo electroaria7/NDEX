@@ -159,12 +159,13 @@ class TkOperationLifecycleTests(unittest.TestCase):
                     raise RuntimeError("Test did not release metadata")
                 return {}
 
+        # A new file forces a metadata read; unchanged files are reused without one.
+        make_record(self.source / "new.jpg", 4)
         with patch.object(tk_app, "ImageScanner", return_value=ImageScanner(SlowMetadata())) as scanner:
             self.app.scan_folder()
             self.pump_until(entered.is_set)
             self.assertIsNone(self.app.catalog)
             first_worker = self.app._worker
-            make_record(self.source / "new.jpg", 4)
             self.app.rescan()
             self.assertIs(self.app._worker, first_worker)
             self.assertEqual(scanner.call_count, 1)

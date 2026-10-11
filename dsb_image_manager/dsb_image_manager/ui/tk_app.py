@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import queue
 import threading
@@ -14,7 +15,17 @@ from PIL import Image, ImageOps, ImageTk
 
 from src.branding import NDEX_IMAGE_MANAGER_TITLE
 
-from ..core.models import ExportOptions, ImageRecord
+from ..core.models import (
+    ExportOptions,
+    ImageRecord,
+    MarkChange,
+    Shot,
+    UndoStack,
+    build_shots,
+    shot_matches,
+    sort_records,
+    sort_shots,
+)
 from ..services.backup import BackupService
 from ..services.catalog import Catalog
 from ..services.exporter import ExportService
@@ -37,6 +48,8 @@ from ndex_common.theme import (
 )
 
 SETTINGS_SECTION = "image_manager"
+log = logging.getLogger(__name__)
+UNDO_LIMIT = 100
 
 STAR_FILLED = "\u2605"
 STAR_EMPTY = "\u2606"
@@ -92,12 +105,12 @@ KIND_NAMES = {"scan": "Scan", "backup": "Backup", "export": "Export", "xmp": "XM
 PROGRESS_VERBS = {"scan": "Scanning", "backup": "Backing up", "export": "Exporting", "xmp": "Writing XMP"}
 SHORTCUT_HINT = (
     "P Pick \u00b7 X Reject \u00b7 M Maybe \u00b7 U Clear \u00b7 0\u20135 Stars \u00b7 "
-    "\u2190/\u2192 Move \u00b7 F Full screen \u00b7 Ctrl+O Open"
+    "\u2190/\u2192 Move \u00b7 F Full screen \u00b7 Ctrl+Z Undo"
 )
 # Keys must stay editable/usable inside these widgets, so arrows are not hijacked.
 TEXT_INPUT_CLASSES = frozenset({"TCombobox", "TEntry", "Entry", "TSpinbox", "Spinbox", "Text"})
 MENU_HINTS = {
-    "Backup Picked\u2026": "Copy every picked photo (RAW and JPG) to a backup folder and verify the copies.",
+    "Backup Picked\u2026": "Copy every file of the picked shots (RAW and JPG) to a backup folder and verify the copies.",
     "Export Selected\u2026": "Copy the selected photos to a folder with a rename pattern.",
     "Write XMP Sidecars (for Lightroom/Evoto)": "Write .xmp files next to the photos with their star ratings and pick flags.",
     "Send Picks to Auto Selector": "Open the picked JPGs in Auto Selector.",
@@ -165,14 +178,59 @@ def send_confirm_text(count: int, noun: str, target: str) -> str:
     return f"Send {plural(count, 'picked ' + noun)} to {target}?"
 
 
-def backup_confirm_text(records, destination) -> str:
-    raw = sum(1 for record in records if record.media_type == "raw")
-    jpg = sum(1 for record in records if record.media_type == "jpg")
-    other = len(records) - raw - jpg
-    parts = [f"{raw} RAW"] if raw else []
-    parts += [f"{jpg} JPG"] if jpg else []
+def no_jpg_text(count: int, sent: bool = False) -> str:
+    """Picked shots that only have a RAW cannot be handed to JPG-only apps."""
+    tail = "were not sent." if sent else "will not be sent."
+    return f"{plural(count, 'picked shot')} {'has' if count == 1 else 'have'} no JPG and {tail}"
+
+
+def file_counts_text(files) -> str:
+    """'6 JPG + 6 RAW' for a list of file records."""
+    files = list(files)
+    jpg = sum(1 for record in files if record.media_type == "jpg")
+    raw = sum(1 for record in files if record.media_type == "raw")
+    other = len(files) - jpg - raw
+    parts = [f"{jpg} JPG"] if jpg else []
+    parts += [f"{raw} RAW"] if raw else []
     parts += [f"{other} other"] if other else []
-    return f"Back up {plural(len(records), 'picked file')} ({', '.join(parts)}) to:\n{destination}?"
+    return " + ".join(parts)
+
+
+def shot_files(shots) -> list[ImageRecord]:
+    return [record for shot in shots for record in shot.records]
+
+
+def backup_confirm_text(shots, destination) -> str:
+    shots = list(shots)
+    return (f"Back up {plural(len(shots), 'picked shot')} ({file_counts_text(shot_files(shots))}) "
+            f"to:\n{destination}?")
+
+
+PICK_LABELS = {"Pick": "Pick", "Maybe": "Maybe", "Reject": "Reject", "Unrated": "Clear pick"}
+PICK_DONE = {"Pick": "Picked", "Maybe": "Marked Maybe", "Reject": "Rejected", "Unrated": "Cleared pick on"}
+
+
+def mark_change_label(pick_status, rating, count: int, noun: str) -> str:
+    """Edit-menu wording: 'Pick: Reject 12 shots' or 'Rating: 3\u2605 1 shot'."""
+    if pick_status is not None:
+        what = f"Pick: {PICK_LABELS.get(pick_status, pick_status)}"
+    else:
+        what = f"Rating: {f'{rating}{STAR_FILLED}' if rating else 'Clear'}"
+    return f"{what} {plural(count, noun)}"
+
+
+def mark_done_text(pick_status, rating, count: int, noun: str) -> str:
+    if pick_status is not None:
+        return f"{PICK_DONE.get(pick_status, pick_status)} {plural(count, noun)}"
+    if rating:
+        return f"Rated {plural(count, noun)} {rating}{STAR_FILLED}"
+    return f"Cleared rating on {plural(count, noun)}"
+
+
+def scan_stopped_text(listed: int, total: int) -> str:
+    if total <= 0:
+        return "Scan stopped before any files were listed. The previous catalog was kept."
+    return f"Scan stopped \u2014 {listed} of {total} files listed. Rescan (F5) to finish."
 
 
 def operation_summary_text(kind: str, summary, destination) -> str:
@@ -211,8 +269,16 @@ class ImageManagerApp(tk.Tk):
 
         self.source_dir: Path | None = None
         self.catalog: Catalog | None = None
+        # Every file in the catalog, grouped into shots. self.records is what the list
+        # shows: one primary file per shot (combined) or every file (split).
+        self.all_records: list[ImageRecord] = []
+        self.shots: dict[str, Shot] = {}
         self.records: list[ImageRecord] = []
+        self._rows: dict[str, ImageRecord] = {}
+        self._records_by_id: dict[int, ImageRecord] = {}
         self.current_record: ImageRecord | None = None
+        self.undo_stack = UndoStack(UNDO_LIMIT)
+        self._catalog_source: Path | None = None
         self._scan_generation = 0
         self._worker: threading.Thread | None = None
         self._cancel_event = threading.Event()
@@ -244,6 +310,11 @@ class ImageManagerApp(tk.Tk):
         except OSError:
             stored_advance = True
         self.advance_after_mark = tk.BooleanVar(value=bool(stored_advance))
+        try:
+            stored_combine = get_section(SETTINGS_SECTION).get("combine_pairs", True)
+        except OSError:
+            stored_combine = True
+        self.combine_pairs = tk.BooleanVar(value=bool(stored_combine))
         self.sort_key = tk.StringVar(value="capture_datetime")
         self.sort_descending = tk.BooleanVar(value=False)
         self.detail_mode = tk.StringVar(value="Simple")
@@ -311,6 +382,12 @@ class ImageManagerApp(tk.Tk):
         file_menu.bind("<<MenuSelect>>", self._on_file_menu_select)
         menu_bar.add_cascade(label="File", menu=file_menu)
 
+        edit_menu = tk.Menu(menu_bar, tearoff=0, postcommand=self._update_undo_menu)
+        edit_menu.add_command(label="Undo", accelerator="Ctrl+Z", command=self.undo, state=tk.DISABLED)
+        edit_menu.add_command(label="Redo", accelerator="Ctrl+Y", command=self.redo, state=tk.DISABLED)
+        self.edit_menu = edit_menu
+        menu_bar.add_cascade(label="Edit", menu=edit_menu)
+
         selection_menu = tk.Menu(menu_bar, tearoff=0)
         selection_menu.add_command(label="Select All Visible", accelerator="Ctrl+A", command=self.select_all_visible)
         selection_menu.add_command(label="Full Screen Preview", accelerator="F", command=self.open_fullscreen_viewer)
@@ -377,6 +454,11 @@ class ImageManagerApp(tk.Tk):
         view_menu.add_cascade(label="Image Layout", menu=layout_menu)
         view_menu.add_cascade(label="Preview Background", menu=background_menu)
         view_menu.add_separator()
+        view_menu.add_checkbutton(
+            label="Show RAW+JPG as one row",
+            variable=self.combine_pairs,
+            command=self._on_combine_toggled,
+        )
         view_menu.add_checkbutton(
             label="Advance after Pick/Reject/Rating",
             variable=self.advance_after_mark,
@@ -663,11 +745,18 @@ class ImageManagerApp(tk.Tk):
 
     def _update_culling_actions(self) -> None:
         idle = self._active_job is None and not self._closing
+        can_mark = self._can_mark()
         has_selection = self.catalog is not None and bool(self.tree.selection())
-        for button in (*self.mark_buttons.values(), self.export_button):
-            button.configure(state=tk.NORMAL if idle and has_selection else tk.DISABLED)
+        for button in self.mark_buttons.values():
+            button.configure(state=tk.NORMAL if can_mark and has_selection else tk.DISABLED)
+        self.export_button.configure(state=tk.NORMAL if idle and has_selection else tk.DISABLED)
         for button in (self.send_selector_button, self.send_frame_button):
             button.configure(state=tk.NORMAL if idle and self.catalog is not None else tk.DISABLED)
+        self._update_undo_menu()
+
+    def _can_mark(self) -> bool:
+        """Culling stays available while a scan streams rows in; other jobs lock the marks."""
+        return not self._closing and self._active_job in (None, "scan")
 
     def _bind_shortcuts(self) -> None:
         for key, status in (("p", "Pick"), ("m", "Maybe"), ("x", "Reject"), ("u", "Unrated")):
@@ -687,8 +776,20 @@ class ImageManagerApp(tk.Tk):
         self.bind("<Control-o>", lambda event: self.choose_folder())
         self.bind("<Control-e>", lambda event: self.open_export_dialog())
         self.bind("<F5>", lambda event: self.rescan())
+        self.bind("<Escape>", lambda event: self._on_escape(event))
+        for sequence in ("<Control-z>", "<Control-Z>"):
+            self.bind(sequence, lambda event: self._on_photo_shortcut(event, self.undo))
+        for sequence in ("<Control-y>", "<Control-Y>", "<Control-Shift-z>", "<Control-Shift-Z>"):
+            self.bind(sequence, lambda event: self._on_photo_shortcut(event, self.redo))
 
     # ---- filters, arrows, menu hints, empty state ----
+
+    def _on_escape(self, event):
+        # Esc cancels a running scan; other jobs keep their Cancel button only.
+        if self._active_job == "scan":
+            self.cancel_work()
+            return "break"
+        return None
 
     def _on_photo_shortcut(self, event, command, *args):
         if event.widget.winfo_class() in TEXT_INPUT_CLASSES:
@@ -711,7 +812,7 @@ class ImageManagerApp(tk.Tk):
 
         fixed = {
             "state": body.measure("\u2715") + pad,
-            "type": fit("RAW", "Type"),
+            "type": fit("RAW+JPG", "Type"),
             "pick": fit("Unrated", "Pick"),
             "rating": fit(STAR_FILLED * 5, STAR_FILLED),
             "date": fit("00-00 00:00", "Date"),
@@ -907,10 +1008,14 @@ class ImageManagerApp(tk.Tk):
         if self.catalog:
             self.catalog.close()
             self.catalog = None
+        if self._catalog_source != self.source_dir:
+            # Marks made in another folder cannot be undone here.
+            self.undo_stack.clear()
+        self._catalog_source = self.source_dir
         self.status.set(f"Scanning {self.source_dir.name}\u2026")
         self._stale_ids.clear()
         self.tree.delete(*self.tree.get_children())
-        self.records = []
+        self._clear_row_model()
         self.current_record = None
         self._show_preview(None)
         self._show_details(None)
@@ -918,9 +1023,17 @@ class ImageManagerApp(tk.Tk):
         self.update_selection_status()
         self.update_catalog_status()
         source = self.source_dir
-        self._start_worker("scan", lambda cancel, progress: ImageScanner().scan(
-            source, recursive=True, progress_callback=progress, cancel_event=cancel,
-        ))
+        catalog_path = Path(source).resolve() / ".dsb_cache" / "catalog.sqlite"
+
+        def work(cancel, progress):
+            generation = self._scan_generation
+            # Rows reach the list in batches while the scan keeps running.
+            return ImageScanner().scan(
+                source, recursive=True, progress_callback=progress, cancel_event=cancel,
+                batch_callback=lambda batch: self.ui_queue.put(("scan_rows", generation, catalog_path, batch)),
+            )
+
+        self._start_worker("scan", work)
 
     def _can_start_work(self) -> bool:
         if self._closing:
@@ -964,8 +1077,8 @@ class ImageManagerApp(tk.Tk):
                 result = work(cancel, lambda index, total, path: self._queue_work_progress(
                     generation, index, total, path,
                 ))
-            except ScanCancelled:
-                cancelled = True
+            except ScanCancelled as exc:
+                cancelled, result = True, exc
             except Exception as exc:
                 error = str(exc)
             self.ui_queue.put(("work_done", generation, kind, result, error, cancelled))
@@ -1025,7 +1138,10 @@ class ImageManagerApp(tk.Tk):
 
     def _dispatch_work_event(self, event) -> bool:
         kind = event[0]
-        if kind == "work_progress":
+        if kind == "scan_rows":
+            _, _generation, catalog_path, batch = event
+            self._ingest_scan_rows(catalog_path, batch)
+        elif kind == "work_progress":
             _, _generation, index, total, name = event
             if index > 0:
                 self.work_progress.stop()
@@ -1058,56 +1174,165 @@ class ImageManagerApp(tk.Tk):
                 messagebox.showerror(f"{KIND_NAMES.get(task, task.title())} failed", error)
             elif task == "scan":
                 if cancelled:
-                    self.status.set("Scan cancelled. Previous catalog was preserved; rescan to reload.")
+                    self._scan_stopped(result)
                 else:
                     self._scan_finished(result.catalog_path)
             else:
                 self._operation_finished(task, *result)
         return True
 
-    def _scan_finished(self, catalog_path: Path) -> None:
+    def _open_catalog(self, catalog_path: Path) -> None:
+        if self.catalog is not None and Path(self.catalog.db_path) == Path(catalog_path):
+            return
         if self.catalog:
             self.catalog.close()
-        self.catalog = Catalog(catalog_path)
-        everything = self.catalog.list_images()
-        shots = len({record.pair_group_id for record in everything})
+        self.catalog = Catalog(Path(catalog_path))
+
+    def _reconcile_pair_marks(self) -> str:
+        """Older catalogs marked RAW and JPG separately; merge them into one state per shot."""
+        assert self.catalog is not None
+        fixed, files = self.catalog.reconcile_pair_marks()
+        if not fixed:
+            return ""
+        log.info("Merged pick/rating marks of %d RAW+JPG shots (%d files updated)", fixed, files)
+        return f" Merged RAW and JPG marks for {plural(fixed, 'shot')}."
+
+    def _scan_finished(self, catalog_path: Path) -> None:
+        self._open_catalog(catalog_path)
+        merged = self._reconcile_pair_marks()
         self.refresh_records()
-        self.status.set(ready_status_text(len(everything), shots))
+        self.status.set(ready_status_text(len(self.all_records), len(self.shots)) + merged)
+
+    def _scan_stopped(self, stopped) -> None:
+        """A cancelled scan keeps every file catalogued so far, ready to cull."""
+        catalog_path = getattr(stopped, "catalog_path", None)
+        if catalog_path is None and self.source_dir is not None:
+            catalog_path = Path(self.source_dir).resolve() / ".dsb_cache" / "catalog.sqlite"
+        if catalog_path is not None and Path(catalog_path).exists():
+            self._open_catalog(catalog_path)
+            self._reconcile_pair_marks()
+            self.refresh_records()
+        self.status.set(scan_stopped_text(getattr(stopped, "listed", 0), getattr(stopped, "total", 0)))
+
+    # ---- row model: files -> shots -> list rows ----
+
+    def _clear_row_model(self) -> None:
+        self.all_records = []
+        self.shots = {}
+        self.records = []
+        self._rows = {}
+        self._records_by_id = {}
+
+    def _load_records(self) -> None:
+        assert self.catalog is not None
+        self.all_records = self.catalog.list_images()
+        self._records_by_id = {record.id: record for record in self.all_records}
+        self.shots = build_shots(self.all_records)
+
+    def _shot_of(self, record: ImageRecord) -> Shot:
+        shot = self.shots.get(record.pair_group_id)
+        if shot is not None and any(member is record for member in shot.records):
+            return shot
+        return Shot(record.pair_group_id, [record])
+
+    def _row_records_for(self, shot: Shot) -> list[ImageRecord]:
+        return [shot.primary] if self.combine_pairs.get() else list(shot.records)
+
+    def _row_matches(self, record: ImageRecord) -> bool:
+        """Does the row for this file pass the current list filters?"""
+        shot = self._shot_of(record)
+        file_filter, pick_filter, minimum = self.file_filter.get(), self.pick_filter.get(), self._min_rating()
+        if self.combine_pairs.get():
+            return shot_matches(shot, file_filter, pick_filter, minimum)
+        if file_filter in ("raw", "jpg"):
+            ok = record.media_type == file_filter
+        elif file_filter in ("paired", "raw_only", "jpg_only"):
+            ok = record.pair_status == {"paired": "raw_jpg_pair"}.get(file_filter, file_filter)
+        elif file_filter == "proxy_failed":
+            ok = record.proxy_status == "failed"
+        else:
+            ok = True
+        return ok and record_matches_filters(shot, pick_filter, minimum)
+
+    def _visible_records(self) -> list[ImageRecord]:
+        sort_key, descending = self.sort_key.get(), self.sort_descending.get()
+        if self.combine_pairs.get():
+            matching = [shot for shot in self.shots.values() if self._row_matches(shot.primary)]
+            return [shot.primary for shot in sort_shots(matching, sort_key, descending)]
+        matching = [record for record in self.all_records if self._row_matches(record)]
+        return sort_records(matching, sort_key, descending)
 
     def _row_values(self, record: ImageRecord) -> tuple:
+        shot = self._shot_of(record)
+        combined = self.combine_pairs.get()
         return (
-            record.pick_glyph,
-            record.display_name,
-            record.type_label,
-            record.pick_status,
-            STAR_FILLED * record.rating if record.rating > 0 else "",
+            shot.pick_glyph,
+            shot.stem if combined else record.display_name,
+            shot.type_label if combined else record.type_label,
+            shot.pick_status,
+            STAR_FILLED * shot.rating if shot.rating > 0 else "",
             record.short_datetime,
         )
 
-    def refresh_records(self) -> None:
+    def _row_tags(self, record: ImageRecord) -> tuple:
+        return (self._shot_of(record).pick_status,)
+
+    def _insert_row(self, record: ImageRecord) -> None:
+        iid = str(record.id)
+        self._rows[iid] = record
+        self.tree.insert("", tk.END, iid=iid, values=self._row_values(record), tags=self._row_tags(record))
+
+    def _ingest_scan_rows(self, catalog_path: Path, batch: list[ImageRecord]) -> None:
+        """Add one streamed batch of freshly catalogued files to the list."""
+        if self.catalog is None:
+            self.catalog = Catalog(Path(catalog_path))
+        touched: dict[str, Shot] = {}
+        for record in batch:
+            if record.id in self._records_by_id:
+                continue
+            self._records_by_id[record.id] = record
+            self.all_records.append(record)
+            shot = self.shots.get(record.pair_group_id)
+            if shot is None:
+                shot = self.shots[record.pair_group_id] = Shot(record.pair_group_id, [record])
+            else:
+                shot.records.append(record)
+                shot.__post_init__()
+            touched[record.pair_group_id] = shot
+        had_rows = bool(self.tree.get_children())
+        for shot in touched.values():
+            for row in self._row_records_for(shot):
+                if str(row.id) in self._rows:
+                    self.tree.item(str(row.id), values=self._row_values(row), tags=self._row_tags(row))
+                elif self._row_matches(row):
+                    self.records.append(row)
+                    self._insert_row(row)
+        children = self.tree.get_children()
+        if children and not had_rows:
+            self._select_only(children[0])
+        self.update_selection_status()
+        self.update_catalog_status()
+
+    def refresh_records(self, keep_shots: set[str] | None = None) -> None:
         if not self.catalog:
             return
         selection = self.tree.selection()
         focus = self.tree.focus()
-        records = self.catalog.list_images(
-            file_filter=self.file_filter.get(),
-            pick_filter=self.pick_filter.get(),
-            sort_key=self.sort_key.get(),
-            descending=self.sort_descending.get(),
-        )
-        minimum = self._min_rating()
-        if minimum:
-            records = [record for record in records if record.rating >= minimum]
-        self.records = records
+        self._load_records()
+        self.records = self._visible_records()
         self._stale_ids.clear()
         self.tree.delete(*self.tree.get_children())
+        self._rows = {}
         self.current_record = None
         self._update_column_headings()
         for record in self.records:
-            self.tree.insert("", tk.END, iid=str(record.id), values=self._row_values(record), tags=(record.pick_status,))
+            self._insert_row(record)
         if self.records:
             first = self.tree.get_children()[0]
-            surviving = [iid for iid in selection if self.tree.exists(iid)]
+            if keep_shots is not None:
+                surviving = [iid for iid, row in self._rows.items() if row.pair_group_id in keep_shots]
+            else:
+                surviving = [iid for iid in selection if self.tree.exists(iid)]
             self.tree.selection_set(surviving or [first])
             focused = focus if focus in surviving else (surviving[0] if surviving else first)
             self.tree.focus(focused)
@@ -1121,6 +1346,14 @@ class ImageManagerApp(tk.Tk):
         self.update_selection_status()
         self.update_catalog_status()
         self._update_empty_state()
+
+    def _on_combine_toggled(self) -> None:
+        try:
+            update_section(SETTINGS_SECTION, {"combine_pairs": bool(self.combine_pairs.get())})
+        except OSError:
+            pass
+        keep = {record.pair_group_id for record in self.selected_records()}
+        self.refresh_records(keep_shots=keep or None)
 
     def sort_by_column(self, column: str) -> None:
         sort_key = TREE_COLUMNS[column]["sort_key"]
@@ -1153,13 +1386,13 @@ class ImageManagerApp(tk.Tk):
             self.update_selection_status()
             return
         focused = self.tree.focus()
-        image_id = int(focused if focused in selected else selected[-1])
-        record = next((item for item in self.records if item.id == image_id), None)
+        iid = focused if focused in selected else selected[-1]
+        record = self._rows.get(iid)
         self.current_record = record
         self._prune_stale(selected)
         self._show_preview(record)
         self._show_details(record)
-        self._refresh_rating_widgets(record.rating if record else 0)
+        self._refresh_rating_widgets(self._shot_of(record).rating if record else 0)
         self.update_selection_status()
 
     def _prune_stale(self, selected=()) -> None:
@@ -1173,6 +1406,7 @@ class ImageManagerApp(tk.Tk):
         for image_id in gone:
             if self.tree.exists(str(image_id)):
                 self.tree.delete(str(image_id))
+            self._rows.pop(str(image_id), None)
         self.records = [record for record in self.records if record.id not in gone]
         self._stale_ids -= gone
         self.update_catalog_status()
@@ -1184,45 +1418,127 @@ class ImageManagerApp(tk.Tk):
         self._apply_marks(rating=rating, advance=advance)
 
     def _apply_marks(self, *, pick_status: str | None = None, rating: int | None = None, advance: bool = True) -> None:
-        if not self._can_start_work():
+        if not self._can_mark():
+            if self._active_job is not None:
+                self.status.set("A task is running. Wait for it to finish or use Cancel.")
             return
         if not self.catalog or not self.current_record or self.current_record.id is None:
             return
-        targets = [record for record in self.selected_records() if record.id is not None]
-        if not targets:
+        rows = [record for record in self.selected_records() if record.id is not None]
+        if not rows:
             return
         single = len(self.tree.selection()) == 1
-        self.catalog.update_selections((record.id for record in targets), pick_status=pick_status, rating=rating)
-        for record in targets:
-            if pick_status is not None:
-                record.pick_status = pick_status  # type: ignore[assignment]
-            if rating is not None:
-                record.rating = rating
+        # A mark belongs to the shot: marking IMG_1.CR3 also marks IMG_1.JPG.
+        shots = self._shots_of(rows)
+        entries = []
+        for shot in shots:
+            for record in shot.records:
+                if record.id is None:
+                    continue
+                new_pick = record.pick_status if pick_status is None else pick_status
+                new_rating = record.rating if rating is None else rating
+                if (new_pick, new_rating) != (record.pick_status, record.rating):
+                    entries.append((record.id, record.pick_status, record.rating, new_pick, new_rating))
+        if entries:
+            self.catalog.set_marks((image_id, pick, stars) for image_id, _op, _or, pick, stars in entries)
+            self._set_memory_marks((image_id, pick, stars) for image_id, _op, _or, pick, stars in entries)
+            noun = "shot" if self.combine_pairs.get() else "file"
+            self.undo_stack.push(MarkChange(mark_change_label(pick_status, rating, len(rows), noun), entries))
+            self._update_undo_menu()
+            if len(rows) > 1:
+                self.status.set(f"{mark_done_text(pick_status, rating, len(rows), noun)} \u2014 Ctrl+Z to undo")
         next_iid = ""
         if advance and single and self.advance_after_mark.get():
-            next_iid = self.tree.next(str(targets[0].id))
+            next_iid = self._next_row_after(rows[0])
         if self.sort_key.get() in RESORT_KEYS:
             # Row order depends on the changed field, so rebuild.
             self.refresh_records()
             if next_iid and self.tree.exists(next_iid):
                 self._select_only(next_iid)
             return
-        minimum = self._min_rating()
-        for record in targets:
-            iid = str(record.id)
-            if self.tree.exists(iid):
-                self.tree.item(iid, values=self._row_values(record), tags=(record.pick_status,))
-            # A row that no longer matches stays until the user moves away.
-            if record_matches_filters(record, self.pick_filter.get(), minimum):
-                self._stale_ids.discard(record.id)
-            else:
-                self._stale_ids.add(record.id)
+        for shot in shots:
+            for record in shot.records:
+                iid = str(record.id)
+                if not self.tree.exists(iid):
+                    continue
+                self.tree.item(iid, values=self._row_values(record), tags=self._row_tags(record))
+                # A row that no longer matches stays until the user moves away.
+                if self._row_matches(record):
+                    self._stale_ids.discard(record.id)
+                else:
+                    self._stale_ids.add(record.id)
         if next_iid:
             self._select_only(next_iid)
             return
         self._show_details(self.current_record)
-        self._refresh_rating_widgets(self.current_record.rating)
+        self._refresh_rating_widgets(self._shot_of(self.current_record).rating)
         self.update_selection_status()
+
+    def _shots_of(self, rows) -> list[Shot]:
+        shots: dict[str, Shot] = {}
+        for record in rows:
+            shots.setdefault(record.pair_group_id, self._shot_of(record))
+        return list(shots.values())
+
+    def _set_memory_marks(self, marks) -> None:
+        for image_id, pick, stars in marks:
+            record = self._records_by_id.get(image_id)
+            if record is not None:
+                record.pick_status = pick  # type: ignore[assignment]
+                record.rating = stars
+
+    def _next_row_after(self, row: ImageRecord) -> str:
+        """The row below, skipping other files of the same shot."""
+        iid = self.tree.next(str(row.id))
+        while iid and self._rows.get(iid) is not None and self._rows[iid].pair_group_id == row.pair_group_id:
+            iid = self.tree.next(iid)
+        return iid
+
+    # ---- undo / redo ----
+
+    def _update_undo_menu(self) -> None:
+        if not hasattr(self, "edit_menu"):
+            return
+        usable = self.catalog is not None and self._can_mark()
+        for index, name, label in ((0, "Undo", self.undo_stack.undo_label), (1, "Redo", self.undo_stack.redo_label)):
+            self.edit_menu.entryconfigure(
+                index, label=f"{name} {label}" if label else name,
+                state=tk.NORMAL if usable and label else tk.DISABLED,
+            )
+
+    def undo(self) -> None:
+        self._step_history(redo=False)
+
+    def redo(self) -> None:
+        self._step_history(redo=True)
+
+    def _step_history(self, redo: bool) -> None:
+        if not self._can_mark() or self.catalog is None:
+            return
+        change = self.undo_stack.pop_redo() if redo else self.undo_stack.pop_undo()
+        if change is None:
+            self.status.set("Nothing to redo." if redo else "Nothing to undo.")
+            return
+        if redo:
+            marks = [(image_id, pick, stars) for image_id, _op, _or, pick, stars in change.entries]
+        else:
+            marks = [(image_id, pick, stars) for image_id, pick, stars, _np, _nr in change.entries]
+        self.catalog.set_marks(marks)
+        self._set_memory_marks(marks)
+        combined = self.combine_pairs.get()
+        row_ids: list[int] = []
+        for image_id, _pick, _stars in marks:
+            record = self._records_by_id.get(image_id)
+            if record is None:
+                continue
+            row = self._shot_of(record).primary if combined else record
+            if row.id not in row_ids:
+                row_ids.append(row.id)
+        self.refresh_records()
+        if row_ids:
+            self._restore_selection_ids(row_ids, row_ids[0])
+        self.status.set(f"{'Redid' if redo else 'Undid'} {change.label}")
+        self._update_undo_menu()
 
     def _select_only(self, iid: str) -> None:
         self.tree.selection_set(iid)
@@ -1248,8 +1564,7 @@ class ImageManagerApp(tk.Tk):
         return "break"
 
     def selected_records(self) -> list[ImageRecord]:
-        selected_ids = {int(item_id) for item_id in self.tree.selection()}
-        selected = [record for record in self.records if record.id in selected_ids]
+        selected = [self._rows[iid] for iid in self.tree.selection() if iid in self._rows]
         if selected:
             return selected
         return [self.current_record] if self.current_record else []
@@ -1284,16 +1599,17 @@ class ImageManagerApp(tk.Tk):
         if not self.catalog:
             messagebox.showinfo(NDEX_IMAGE_MANAGER_TITLE, "Scan a folder first.")
             return
-        records = self.catalog.list_images(pick_filter="Pick")
-        if not records:
+        shots = self.catalog.list_shots(pick_filter="Pick")
+        if not shots:
             messagebox.showinfo(NDEX_IMAGE_MANAGER_TITLE, "No picked images found. Set Pick first.")
             return
         destination = filedialog.askdirectory(title="Choose NDEX backup destination")
         if not destination:
             return
-        if not messagebox.askyesno("Backup Picked", backup_confirm_text(records, destination)):
+        if not messagebox.askyesno("Backup Picked", backup_confirm_text(shots, destination)):
             return
-        self._start_operation("backup", records, Path(destination))
+        # Every file of a picked shot (RAW and JPG) goes into the backup.
+        self._start_operation("backup", shot_files(shots), Path(destination))
 
     def export_xmp_sidecars(self) -> None:
         if not self._can_start_work():
@@ -1308,6 +1624,7 @@ class ImageManagerApp(tk.Tk):
                 "No images found. Scan a shooting folder first.",
             )
             return
+        # The XMP service gives every file of a shot the shot's single pick/rating state.
         self._start_operation("xmp", records, self.source_dir)
 
     def _start_operation(
@@ -1404,16 +1721,21 @@ class ImageManagerApp(tk.Tk):
 
         # Hand over exactly the picked JPGs. Passing the whole folder would let
         # Auto Selector scan .dsb_cache thumbnails and select every RAW.
-        records = self.catalog.list_images(pick_filter="Pick")
+        shots = self.catalog.list_shots(pick_filter="Pick")
         files = frame_ready_paths(
             record.file_path
-            for record in records
+            for record in shot_files(shots)
             if record.media_type == "jpg" and Path(record.file_path).suffix.casefold() in (".jpg", ".jpeg")
         )
+        without_jpg = sum(1 for shot in shots if not shot.has_jpg)
         if not files:
-            messagebox.showinfo(NDEX_IMAGE_MANAGER_TITLE, "No picked JPG files to send to Auto Selector.")
+            note = f"\n\n{no_jpg_text(without_jpg, sent=True)}" if without_jpg else ""
+            messagebox.showinfo(NDEX_IMAGE_MANAGER_TITLE, f"No picked JPG files to send to Auto Selector.{note}")
             return
-        if not messagebox.askyesno("Send Picks to Auto Selector", send_confirm_text(len(files), "JPG", "Auto Selector")):
+        question = send_confirm_text(len(files), "JPG", "Auto Selector")
+        if without_jpg:
+            question += f"\n\n{no_jpg_text(without_jpg)}"
+        if not messagebox.askyesno("Send Picks to Auto Selector", question):
             return
         handoff = record_select_handoff(
             self.source_dir or files[0].parent, files, target="auto_selector"
@@ -1434,6 +1756,8 @@ class ImageManagerApp(tk.Tk):
                 NDEX_IMAGE_MANAGER_TITLE,
                 "Could not find NDEX Auto Selector. Build or install it first.",
             )
+        elif without_jpg:
+            self.status.set(f"Sent {plural(len(files), 'picked JPG')}. {no_jpg_text(without_jpg, sent=True)}")
 
     def send_picks_to_frame(self) -> None:
         if not self._can_start_work():
@@ -1444,10 +1768,10 @@ class ImageManagerApp(tk.Tk):
         from ndex_common.manifest import frame_ready_paths
         from ndex_common.workflow import record_select_handoff
 
-        records = self.catalog.list_images(pick_filter="Pick")
-        files = frame_ready_paths(record.file_path for record in records if record.media_type == "jpg")
+        shots = self.catalog.list_shots(pick_filter="Pick")
+        files = frame_ready_paths(record.file_path for record in shot_files(shots) if record.media_type == "jpg")
         if not files:
-            files = frame_ready_paths(record.file_path for record in records)
+            files = frame_ready_paths(record.file_path for record in shot_files(shots))
         if not files:
             messagebox.showinfo(
                 NDEX_IMAGE_MANAGER_TITLE,
@@ -1481,10 +1805,18 @@ class ImageManagerApp(tk.Tk):
     def open_export_dialog(self) -> None:
         if not self._can_start_work():
             return
-        records = self.selected_records()
-        if not records:
+        rows = self.selected_records()
+        if not rows:
             messagebox.showinfo(NDEX_IMAGE_MANAGER_TITLE, "Select one or more images first.")
             return
+        if self.combine_pairs.get():
+            # A combined row stands for its whole shot: export every file of it.
+            shots = self._shots_of(rows)
+            records = shot_files(shots)
+            heading = f"Export {plural(len(shots), 'selected shot')} ({file_counts_text(records)})"
+        else:
+            records = rows
+            heading = f"Export {len(records)} selected image(s)"
 
         dialog = tk.Toplevel(self)
         dialog.title("Export Selected Images")
@@ -1503,7 +1835,7 @@ class ImageManagerApp(tk.Tk):
 
         ttk.Label(
             body,
-            text=f"Export {len(records)} selected image(s)",
+            text=heading,
             style="Card.TLabel",
         ).grid(row=0, column=0, columnspan=3, sticky=tk.W, pady=(0, 12))
 
@@ -1651,7 +1983,7 @@ class ImageManagerApp(tk.Tk):
             return
 
         viewer = tk.Toplevel(self)
-        viewer.title(record.display_name)
+        viewer.title(self._row_title(record))
         fullscreen_bg = self._preview_background_color()
         fullscreen_fg = "#111827" if self.preview_background.get() == "Light Gray" else "#d7dee8"
         fullscreen_muted = "#374151" if self.preview_background.get() == "Light Gray" else "#9fb0c4"
@@ -1743,12 +2075,13 @@ class ImageManagerApp(tk.Tk):
             if not current:
                 return
             image_path = current.display_source or current.thumbnail_path
-            viewer.title(current.display_name)
+            viewer.title(self._row_title(current))
             metadata_label.configure(text=self._fullscreen_detail_text(current))
-            _refresh_star_labels(fullscreen_stars, current.rating)
+            current_shot = self._shot_of(current)
+            _refresh_star_labels(fullscreen_stars, current_shot.rating)
             position = next((i for i, item in enumerate(self.records) if item.id == current.id), 0)
             counter_label.configure(text=position_text(position, len(self.records)))
-            badge_text, badge_color = PICK_BADGES.get(current.pick_status, PICK_BADGES["Unrated"])
+            badge_text, badge_color = PICK_BADGES.get(current_shot.pick_status, PICK_BADGES["Unrated"])
             badge_label.configure(text=badge_text, bg=badge_color)
             if not image_path or not image_path.exists():
                 image_label.configure(image="", text=preview_unavailable_text(current))
@@ -1759,7 +2092,7 @@ class ImageManagerApp(tk.Tk):
                     max_size = (max(viewer.winfo_width(), 64), max(viewer.winfo_height() - 140, 64))
                     image.thumbnail(max_size, Image.Resampling.LANCZOS)
                     self.fullscreen_image = ImageTk.PhotoImage(image)
-                    image_label.configure(image=self.fullscreen_image, text=current.display_name)
+                    image_label.configure(image=self.fullscreen_image, text=self._row_title(current))
             except OSError:
                 image_label.configure(image="", text=preview_unavailable_text(current))
 
@@ -1860,19 +2193,40 @@ class ImageManagerApp(tk.Tk):
             self.summary_text.set("Select an image to see EXIF summary.")
         self.detail_text.configure(state=tk.DISABLED)
 
+    def _row_title(self, record: ImageRecord) -> str:
+        if self.combine_pairs.get():
+            shot = self._shot_of(record)
+            return f"{shot.stem} ({shot.type_label})" if len(shot.records) > 1 else record.display_name
+        return record.display_name
+
+    def _file_lines(self, record: ImageRecord) -> list[str]:
+        shot = self._shot_of(record)
+        if self.combine_pairs.get() and len(shot.records) > 1:
+            return [f"Files: {' + '.join(shot.file_names)}"]
+        return [f"File: {record.display_name}"]
+
     def _simple_detail_lines(self, record: ImageRecord) -> list[str]:
+        shot = self._shot_of(record)
         return [
-            f"File: {record.display_name}",
+            *self._file_lines(record),
             f"Capture: {record.effective_datetime:%Y-%m-%d %H:%M:%S}",
             f"Camera: {record.camera_model or '-'}",
             f"Lens: {record.lens_model or '-'}",
             f"Exposure: {record.exposure_time or '-'} / f/{record.aperture or '-'} / ISO {record.iso or '-'}",
-            f"Selection: {record.pick_status} / Rating: {_rating_text(record.rating)}",
+            f"Selection: {shot.pick_status} / Rating: {_rating_text(shot.rating)}",
         ]
 
     def _full_detail_lines(self, record: ImageRecord) -> list[str]:
+        shot = self._shot_of(record)
+        combined = self.combine_pairs.get() and len(shot.records) > 1
+        paths = [f"Path: {member.file_path}" for member in shot.records] if combined else [f"Path: {record.file_path}"]
+        sizes = (
+            [f"Files: {', '.join(f'{m.type_label} {m.file_size or chr(45)}' for m in shot.records)}"]
+            if combined else []
+        )
         return [
-                f"Path: {record.file_path}",
+                *paths,
+                *sizes,
                 f"Capture: {record.effective_datetime:%Y-%m-%d %H:%M:%S}",
                 f"Modified: {record.file_modified_datetime:%Y-%m-%d %H:%M:%S}",
                 f"Camera: {record.camera_model or '-'}",
@@ -1885,13 +2239,14 @@ class ImageManagerApp(tk.Tk):
                 f"Color: {record.color_space or '-'} / GPS: {record.gps or '-'}",
                 f"Pair: {record.pair_status} / Proxy: {record.proxy_status}",
                 f"Backup: {record.backup_status}",
-                f"Selection: {record.pick_status} / Rating: {_rating_text(record.rating)}",
+                f"Selection: {shot.pick_status} / Rating: {_rating_text(shot.rating)}",
                 f"Note: {record.note or '-'}",
         ]
 
     def _fullscreen_detail_text(self, record: ImageRecord) -> str:
+        shot = self._shot_of(record)
         return (
-            f"{record.display_name}   {_rating_text(record.rating)}   {record.pick_status}\n"
+            f"{self._row_title(record)}   {_rating_text(shot.rating)}   {shot.pick_status}\n"
             f"{self._summary_line(record)}"
         )
 

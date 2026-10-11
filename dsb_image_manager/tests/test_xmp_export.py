@@ -101,7 +101,24 @@ class XmpExportTests(unittest.TestCase):
             self.assertTrue((root / "IMG_0004.xmp").exists())
             self.assertTrue((root / "IMG_0004.JPG.xmp").exists())
             self.assertIn('xmp:Rating="5"', (root / "IMG_0004.xmp").read_text(encoding="utf-8"))
-            self.assertIn('xmp:Rating="2"', (root / "IMG_0004.JPG.xmp").read_text(encoding="utf-8"))
+            # Marks belong to the shot, so the JPG sidecar carries the pair's state.
+            jpg_xmp = (root / "IMG_0004.JPG.xmp").read_text(encoding="utf-8")
+            self.assertIn('xmp:Rating="5"', jpg_xmp)
+            self.assertIn("NDEX Pick", jpg_xmp)
+
+    def test_export_writes_every_file_of_a_shot_that_has_state(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            raw, jpg = root / "IMG_0006.CR3", root / "IMG_0006.JPG"
+            raw.write_bytes(b"fake raw")
+            jpg.write_bytes(b"fake jpg")
+
+            summary = XmpExportService().export(
+                [_make_record(raw), _make_record(jpg, pick_status="Reject", rating=1)]
+            )
+
+            self.assertEqual(summary.written, 2)
+            self.assertIn("NDEX Reject", (root / "IMG_0006.xmp").read_text(encoding="utf-8"))
 
     def test_export_records_parse_and_value_errors_per_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
