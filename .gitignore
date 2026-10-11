@@ -33,3 +33,6 @@ archive/
 
 # Agent scratch state
 .superpowers/
+
+# Claude Code agent worktrees
+.claude/
