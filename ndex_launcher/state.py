@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ndex_common import session as workflow_session
+from ndex_common.i18n import _
 from ndex_common.report import JobReport, latest_reports_by_app
 from ndex_common.settings import load_all
 
@@ -45,7 +46,7 @@ class StepState:
     def result_text(self) -> str:
         """What the app's most recent finished job did, for the card."""
         if self.last_result is None:
-            return "No job results yet"
+            return _("No job results yet")
         return self.last_result.headline
 
     @property
@@ -69,12 +70,12 @@ class StepState:
     def status_text(self) -> str:
         folder_ready = bool(self.last_folder) and Path(self.last_folder).is_dir()
         if self.handoff_ready and not folder_ready:
-            return f"Last handoff: {folder_display_name(self.last_manifest)}"
+            return _("Last handoff: {name}").format(name=folder_display_name(self.last_manifest))
         if not self.last_folder:
-            return "No previous session"
+            return _("No previous session")
         if not folder_ready:
-            return f"Last folder missing: {folder_display_name(self.last_folder)}"
-        return f"Last: {folder_display_name(self.last_folder)}"
+            return _("Last folder missing: {name}").format(name=folder_display_name(self.last_folder))
+        return _("Last: {name}").format(name=folder_display_name(self.last_folder))
 
 
 def gather_workflow_state() -> list[StepState]:
@@ -84,31 +85,31 @@ def gather_workflow_state() -> list[StepState]:
     steps = [
         StepState(
             key="ndex_one",
-            title="1. Backup - NDEX One",
-            short_title="Backup",
+            title=_("1. Backup - NDEX One"),
+            short_title=_("Backup"),
             number="01",
-            description="Copy camera or SD files into the date-based library.",
+            description=_("Copy camera or SD files into the date-based library."),
         ),
         StepState(
             key="image_manager",
-            title="2. Select & Rate - Image Manager",
-            short_title="Select & Rate",
+            title=_("2. Select & Rate - Image Manager"),
+            short_title=_("Select & Rate"),
             number="02",
-            description="Browse pairs, pick, rate, and export XMP sidecars.",
+            description=_("Browse pairs, pick, rate, and export XMP sidecars."),
         ),
         StepState(
             key="auto_selector",
-            title="3. Extract - Auto Selector",
-            short_title="Extract",
+            title=_("3. Extract - Auto Selector"),
+            short_title=_("Extract"),
             number="03",
-            description="Match selected JPGs to RAW masters and write XMP.",
+            description=_("Match selected JPGs to RAW masters and write XMP."),
         ),
         StepState(
             key="frame",
-            title="4. Frame & Export - NDEX Frame",
-            short_title="Frame & Export",
+            title=_("4. Frame & Export - NDEX Frame"),
+            short_title=_("Frame & Export"),
             number="04",
-            description="Place masters on a crop-free canvas for Instagram.",
+            description=_("Place masters on a crop-free canvas for Instagram."),
         ),
     ]
 

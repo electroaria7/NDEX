@@ -70,6 +70,7 @@ python -m PyInstaller `
   --collect-all PySide6 `
   --hidden-import PIL.ImageCms `
   --add-data "$repoRoot\assets\branding;assets\branding" `
+  --add-data "$repoRoot\ndex_common\locales;ndex_common\locales" `
   --add-data "$appRoot\resources;ndex_frame\resources" `
   --icon "$repoRoot\assets\branding\ndex_icon.ico" `
   --version-file $versionFile `

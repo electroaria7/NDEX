@@ -27,6 +27,7 @@ python -m PyInstaller `
   --workpath $workPath `
   --specpath $workPath `
   --add-data "$repoRoot\assets\branding;assets\branding" `
+  --add-data "$repoRoot\ndex_common\locales;ndex_common\locales" `
   --icon "$repoRoot\assets\branding\ndex_icon.ico" `
   $entryPoint
 

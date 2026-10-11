@@ -18,6 +18,7 @@ from pathlib import Path
 from tkinter import messagebox, ttk
 from typing import Callable, Sequence
 
+from ndex_common.i18n import _, ngettext
 from ndex_common.report import JobReport, default_index, including, recent_reports
 from ndex_common.retry import RetryPlan, plan_retry, retryable, supports_retry
 from ndex_common.theme import (
@@ -59,10 +60,12 @@ def open_job_reports(
     found = including(found, select, apps=apps)
     if not found:
         messagebox.showinfo(
-            "Job Results",
-            "No job results yet.\n\n"
-            "Backups, extracts, exports, and picks sent to Frame are recorded "
-            "once they finish, and show up here.",
+            _("Job Results"),
+            _(
+                "No job results yet.\n\n"
+                "Backups, extracts, exports, and picks sent to Frame are recorded "
+                "once they finish, and show up here."
+            ),
             parent=parent,
         )
         return None
@@ -85,7 +88,7 @@ class JobReportWindow(tk.Toplevel):
         select: Path | None = None,
     ) -> None:
         super().__init__(parent)
-        self.title(f"{title} - Job Results")
+        self.title(_("{title} - Job Results").format(title=title))
         self.geometry("980x600")
         self.minsize(760, 460)
         self.brand_images: list[tk.PhotoImage] = []
@@ -115,7 +118,7 @@ class JobReportWindow(tk.Toplevel):
 
         footer = ttk.Frame(body, style="Footer.TFrame")
         footer.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(SPACE_MD, 0))
-        self.close_button = ttk.Button(footer, text="Close", command=self.destroy)
+        self.close_button = ttk.Button(footer, text=_("Close"), command=self.destroy)
         self.close_button.pack(side=tk.RIGHT)
         self.bind("<Escape>", lambda _event: self.destroy())
 
@@ -140,7 +143,7 @@ class JobReportWindow(tk.Toplevel):
         card.rowconfigure(1, weight=1)
         card.columnconfigure(0, weight=1)
 
-        ttk.Label(card, text="Recent jobs", style="CardSection.TLabel").grid(
+        ttk.Label(card, text=_("Recent jobs"), style="CardSection.TLabel").grid(
             row=0, column=0, sticky="w", pady=(0, SPACE_SM)
         )
 
@@ -148,8 +151,8 @@ class JobReportWindow(tk.Toplevel):
         # (the Launcher); one app's window already says whose jobs these are.
         mixed = len({report.app for report in self.reports}) > 1
         self.job_list = ttk.Treeview(card, columns=("app", "job"), show="headings", selectmode="browse")
-        self.job_list.heading("app", text="App")
-        self.job_list.heading("job", text="Job")
+        self.job_list.heading("app", text=_("App"))
+        self.job_list.heading("job", text=_("Job"))
         self.job_list.column("app", width=96, minwidth=60, stretch=False)
         self.job_list.column("job", width=120, minwidth=100, stretch=True)
         self.job_list.configure(displaycolumns=("app", "job") if mixed else ("job",))
@@ -207,26 +210,26 @@ class JobReportWindow(tk.Toplevel):
         second_row.pack(anchor="w", fill=tk.X, pady=(SPACE_SM, 0))
 
         self.retry_button = ttk.Button(
-            first_row, text="Retry Failed", style="Accent.TButton", command=self._retry_failed
+            first_row, text=_("Retry Failed"), style="Accent.TButton", command=self._retry_failed
         )
         if self.retry is not None:
             self.retry_button.pack(side=tk.LEFT, padx=(0, SPACE_SM))
 
         # The Launcher cannot run a job. Its button opens the app that can,
         # at this very job, and that app's own Retry button takes it from there.
-        self.open_app_button = ttk.Button(first_row, text="Retry in app...", command=self._open_in_app)
+        self.open_app_button = ttk.Button(first_row, text=_("Retry in app..."), command=self._open_in_app)
         if self.retry is None and self.open_in_app is not None:
             self.open_app_button.pack(side=tk.LEFT, padx=(0, SPACE_SM))
 
-        self.copy_button = ttk.Button(first_row, text="Copy Problem Paths", command=self._copy_problems)
+        self.copy_button = ttk.Button(first_row, text=_("Copy Problem Paths"), command=self._copy_problems)
         self.copy_button.pack(side=tk.LEFT)
 
-        ttk.Label(second_row, text="Open folder:", style="CardMuted.TLabel").pack(side=tk.LEFT, padx=(0, SPACE_SM))
-        self.source_button = ttk.Button(second_row, text="Source", command=self._open_source)
+        ttk.Label(second_row, text=_("Open folder:"), style="CardMuted.TLabel").pack(side=tk.LEFT, padx=(0, SPACE_SM))
+        self.source_button = ttk.Button(second_row, text=_("Source"), command=self._open_source)
         self.source_button.pack(side=tk.LEFT)
-        self.destination_button = ttk.Button(second_row, text="Destination", command=self._open_destination)
+        self.destination_button = ttk.Button(second_row, text=_("Destination"), command=self._open_destination)
         self.destination_button.pack(side=tk.LEFT, padx=(SPACE_SM, 0))
-        self.manifest_button = ttk.Button(second_row, text="Manifest", command=self._open_manifest_folder)
+        self.manifest_button = ttk.Button(second_row, text=_("Manifest"), command=self._open_manifest_folder)
         self.manifest_button.pack(side=tk.LEFT, padx=(SPACE_SM, 0))
 
     def _wrap_detail(self, event: tk.Event) -> None:
@@ -246,7 +249,7 @@ class JobReportWindow(tk.Toplevel):
         self.detail_title.configure(text=f"{report.app_label} - {report.type_label}")
         counts = f"{report.display_time}   {report.count_summary}"
         if report.cancelled:
-            counts = f"{counts}   (cancelled)"
+            counts = f"{counts}   " + _("(cancelled)")
         self.detail_counts.configure(text=counts)
         self.detail_folders.configure(text=_folder_lines(report))
 
@@ -265,7 +268,7 @@ class JobReportWindow(tk.Toplevel):
         self.retry_button.state(
             ["!disabled"] if self.retry is not None and retryable(report) else ["disabled"]
         )
-        self.open_app_button.configure(text=f"Retry in {report.app_label}...")
+        self.open_app_button.configure(text=_("Retry in {app}...").format(app=report.app_label))
         self.open_app_button.state(
             ["!disabled"] if self.open_in_app is not None and retryable(report) else ["disabled"]
         )
@@ -309,7 +312,12 @@ class JobReportWindow(tk.Toplevel):
         self.clipboard_append("\n".join(paths))
         messagebox.showinfo(
             self.title(),
-            f"Copied {len(paths)} path(s) to the clipboard.\n\n"
+            ngettext(
+                "Copied {count} path to the clipboard.",
+                "Copied {count} paths to the clipboard.",
+                len(paths),
+            ).format(count=len(paths))
+            + "\n\n"
             + _where_to_retry(self.current, self.retry is not None),
             parent=self,
         )
@@ -330,7 +338,7 @@ class JobReportWindow(tk.Toplevel):
         try:
             reveal_folder(folder)
         except OSError as exc:
-            messagebox.showerror(self.title(), f"Could not open the folder:\n{exc}", parent=self)
+            messagebox.showerror(self.title(), _("Could not open the folder:\n{error}").format(error=exc), parent=self)
 
 
 def reveal_folder(folder: Path) -> bool:
@@ -353,20 +361,20 @@ def _where_to_retry(report: JobReport, here: bool) -> str:
     the answer is always another window.
     """
     if not supports_retry(report):
-        return "Re-run the job with the same folders to retry them."
+        return _("Re-run the job with the same folders to retry them.")
     if here:
-        return "Retry Failed runs the ones that are still on disk."
-    return f"Open {report.app_label} and use Job Results there to retry them."
+        return _("Retry Failed runs the ones that are still on disk.")
+    return _("Open {app} and use Job Results there to retry them.").format(app=report.app_label)
 
 
 
 def _folder_lines(report: JobReport) -> str:
     lines = []
     if report.source:
-        lines.append(f"Source: {report.source}")
+        lines.append(_("Source: {path}").format(path=report.source))
     if report.destination:
-        lines.append(f"Destination: {report.destination}")
-    lines.append(f"Manifest: {report.manifest_path.name}")
+        lines.append(_("Destination: {path}").format(path=report.destination))
+    lines.append(_("Manifest: {name}").format(name=report.manifest_path.name))
     return "\n".join(lines)
 
 
@@ -378,7 +386,7 @@ def _item_segments(report: JobReport) -> list[tuple[str, str]]:
     """
     grouped = report.items_by_status()
     if not grouped:
-        return [("This job recorded no per-file items.", "")]
+        return [(_("This job recorded no per-file items."), "")]
 
     runs: list[tuple[str, str]] = []
     for status, items in grouped.items():
@@ -391,7 +399,7 @@ def _item_segments(report: JobReport) -> list[tuple[str, str]]:
                 if item.folder:
                     runs.append((f"{item.folder}\n", "muted"))
             else:
-                line = item.path or "(no path)"
+                line = item.path or _("(no path)")
                 if item.detail:
                     line += f" — {item.detail}"
                 runs.append((f"{line}\n", "row"))

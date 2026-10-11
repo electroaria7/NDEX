@@ -5,7 +5,9 @@ from tkinter import font as tkfont
 from tkinter import messagebox, ttk
 
 from ndex_common.branding import NDEX_LAUNCHER_TITLE
+from ndex_common import i18n
 from ndex_common.crashlog import install_crash_logging
+from ndex_common.i18n import _
 from ndex_common.launch import launch_app
 from ndex_common.report_dialog import open_job_reports
 from ndex_common.settings import settings_path
@@ -22,7 +24,8 @@ from ndex_launcher.state import StepState, gather_workflow_state
 # Four cards need room for the headings as well as their bodies. Larger fonts
 # can raise this threshold further through the measured heading widths.
 COMPACT_LAYOUT_WIDTH = 1000
-TAGLINE = "Start with 01 Backup. Each step hands its folder to the next."
+def tagline() -> str:
+    return _("Start with 01 Backup. Each step hands its folder to the next.")
 
 
 def uses_compact_card_layout(width: int, required_width: int = COMPACT_LAYOUT_WIDTH) -> bool:
@@ -52,7 +55,7 @@ class LauncherApp(tk.Tk):
         header = build_app_header(
             self,
             title=NDEX_LAUNCHER_TITLE,
-            tagline=TAGLINE,
+            tagline=tagline(),
             holder=self.brand_images,
             compact=True,
         )
@@ -89,14 +92,45 @@ class LauncherApp(tk.Tk):
         footer = ttk.Frame(self, padding=(20, 4, 20, 12), style="Footer.TFrame")
         footer.grid(row=2, column=0, sticky="ew")
         footer.columnconfigure(2, weight=1)
-        ttk.Button(footer, text="Refresh Status", command=self.refresh_status).grid(row=0, column=0)
-        ttk.Button(footer, text="Job Results...", command=self.open_job_results).grid(
+        ttk.Button(footer, text=_("Refresh Status"), command=self.refresh_status).grid(row=0, column=0)
+        ttk.Button(footer, text=_("Job Results..."), command=self.open_job_results).grid(
             row=0, column=1, padx=(8, 0)
         )
+        self._language_note = tk.StringVar(value="")
+        ttk.Label(footer, textvariable=self._language_note, style="Small.Muted.TLabel").grid(
+            row=0, column=2, sticky="e", padx=(12, 12)
+        )
+        self._build_language_selector(footer)
         # The path stays available, just out of the way: hover for the full text.
-        settings_label = ttk.Label(footer, text="Settings file", style="Small.Muted.TLabel", cursor="hand2")
-        settings_label.grid(row=0, column=2, sticky="e")
-        add_tooltip(settings_label, lambda: f"Shared settings: {settings_path()}")
+        settings_label = ttk.Label(footer, text=_("Settings file"), style="Small.Muted.TLabel", cursor="hand2")
+        settings_label.grid(row=0, column=5, sticky="e", padx=(16, 0))
+        add_tooltip(settings_label, lambda: _("Shared settings: {path}").format(path=settings_path()))
+
+    def _language_choices(self) -> list[tuple[str, str]]:
+        """``(setting value, label)`` pairs: System default first, then every language."""
+        return [(i18n.SYSTEM, _("System default"))] + i18n.available_languages()
+
+    def _build_language_selector(self, footer: ttk.Frame) -> None:
+        choices = self._language_choices()
+        self._language_codes = [code for code, _label in choices]
+        ttk.Label(footer, text=_("Language"), style="Small.Muted.TLabel").grid(row=0, column=3, sticky="e")
+        combo = ttk.Combobox(
+            footer, values=[label for _code, label in choices], state="readonly", width=16
+        )
+        saved = i18n.configured_language()
+        combo.current(self._language_codes.index(saved) if saved in self._language_codes else 0)
+        combo.grid(row=0, column=4, sticky="e", padx=(6, 0))
+        combo.bind("<<ComboboxSelected>>", self._on_language_selected)
+        self.language_combo = combo
+
+    def _on_language_selected(self, _event: tk.Event | None = None) -> None:
+        code = self._language_codes[self.language_combo.current()]
+        try:
+            i18n.set_language(code)
+        except OSError as exc:
+            messagebox.showerror(NDEX_LAUNCHER_TITLE, _("Could not save the language: {error}").format(error=exc))
+            return
+        self._language_note.set(_("Restart NDEX apps to apply the language."))
 
     def _resize_viewport(self, event: tk.Event) -> None:
         self._fit_body(event.width, event.height)
@@ -236,7 +270,7 @@ class LauncherApp(tk.Tk):
         # Buttons sit at the bottom so the four cards line up in the 1x4 row.
         buttons = ttk.Frame(card, style="CardInner.TFrame")
         buttons.pack(side=tk.BOTTOM, fill=tk.X, anchor="s")
-        continue_label = "Continue" if step.has_session else "Open"
+        continue_label = _("Continue") if step.has_session else _("Open")
         ttk.Button(
             buttons,
             text=continue_label,
@@ -246,7 +280,7 @@ class LauncherApp(tk.Tk):
         if step.has_session:
             ttk.Button(
                 buttons,
-                text="Start Fresh",
+                text=_("Start Fresh"),
                 command=lambda s=step: self._launch(s.key, ["--open"]),
             ).pack(anchor="w", fill=tk.X, pady=(6, 0))
 
@@ -272,12 +306,12 @@ class LauncherApp(tk.Tk):
         try:
             launched = launch_app(app_key, args)
         except OSError as exc:
-            messagebox.showerror(NDEX_LAUNCHER_TITLE, f"Launch failed: {exc}")
+            messagebox.showerror(NDEX_LAUNCHER_TITLE, _("Launch failed: {error}").format(error=exc))
             return
         if not launched:
             messagebox.showerror(
                 NDEX_LAUNCHER_TITLE,
-                "Could not find the app executable. Build or install it first.",
+                _("Could not find the app executable. Build or install it first."),
             )
 
 
@@ -288,6 +322,7 @@ def run_app() -> None:
 
 def main() -> int:
     install_crash_logging("NDEX Launcher")
+    i18n.init("launcher")
     run_app()
     return 0
 
