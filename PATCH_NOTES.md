@@ -12,7 +12,7 @@ This beta adds a shared language selector and wider RAW support, reworks Image M
 
 Not verified in this release: Lightroom/Evoto XMP interpretation, upgrades from older installs, high-DPI multi-monitor use, real portrait RAW orientation, and Korean translations.
 
-Validation: VALIDATION_PLACEHOLDER
+Validation: **729 source tests passed, one skipped** (shared/One 287, Image Manager 112, Auto Selector 73, Launcher 27, Frame 230). All five EXEs and the installer were rebuilt; the packaged Korean-path backup, catalog scan, RAW/XMP copy and repeat-run preservation, and Frame export smoke checks passed, each EXE ran 35 seconds without stderr or crash logs, and the bundled locales were loaded from a packaged Launcher. Details: [release validation](docs/Release_Validation_0.9.6.md).
 
 Review: [0.9.6 review and follow-up roadmap](docs/obsidian/NDEX/15_0.9.6_검수_추가작업_2026-10-11.md). Evidence summary: [review log](docs/logs/2026-10-11-release-0.9.6-review.log).
 
