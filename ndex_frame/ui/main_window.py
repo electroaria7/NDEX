@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
-from PySide6.QtCore import QSignalBlocker, Qt, QTimer, Slot
+from PySide6.QtCore import QPoint, QSignalBlocker, QSize, Qt, QTimer, Slot
 from PySide6.QtGui import (
     QCloseEvent,
     QColor,
@@ -14,7 +14,9 @@ from PySide6.QtGui import (
     QIcon,
     QImage,
     QKeyEvent,
+    QGuiApplication,
     QKeySequence,
+    QPainter,
     QPixmap,
     QShortcut,
 )
@@ -44,6 +46,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ndex_common.i18n import _, ngettext
 from ndex_common.branding import APP_ICON_ICO, NDEX_FRAME_TITLE, get_branding_asset_path
 from ndex_common.retry import path_key
 from ndex_common.theme import DANGER, TEXT_PRIMARY, apply_qt_theme
@@ -54,12 +57,12 @@ from ndex_frame.core.models import AspectRatio, FramePreset, OutputProfile, Rend
 from ndex_frame.services.export_job import ExportRequest, ExportResult, plan_export
 from ndex_frame.services.importer import RAW_SUFFIXES
 from ndex_frame.services.presets import PresetStore
+from ndex_frame.services.thumbnails import ThumbnailCache
 from ndex_frame.ui.elided_label import ElidedLabel
 from ndex_frame.ui.preset_dialog import (
     ExportCompletionDialog,
     ExportPreflightDialog,
     FramePresetDialog,
-    ManagePresetsDialog,
     colour_notes,
     completion_title,
     describe_preflight,
@@ -70,8 +73,10 @@ from ndex_frame.ui.framing_widgets import (
     make_photo_size_preset_buttons,
     make_ratio_preset_buttons,
 )
+from ndex_frame.ui.presets_manager import PresetsManagerDialog
 from ndex_frame.ui.preview_widget import PreviewWidget
 from ndex_frame.ui.profile_dialog import OutputProfileDialog
+from ndex_frame.ui.thumbnail_loader import THUMBNAIL_SIZE, ThumbnailLoader
 from ndex_frame.ui.workspace import WorkspaceController
 
 
@@ -80,6 +85,7 @@ class MainWindow(QMainWindow):
         self,
         controller: WorkspaceController,
         preset_store: PresetStore | None = None,
+        thumbnail_cache: ThumbnailCache | None = None,
     ) -> None:
         super().__init__()
         self.controller = controller
@@ -101,6 +107,19 @@ class MainWindow(QMainWindow):
         self._close_pending = False
         self._close_ready = False
         self.handoff_path: Path | None = None
+        self._last_presets_dialog: PresetsManagerDialog | None = None
+        self._item_by_path: dict[Path, QListWidgetItem] = {}
+        ratio = QGuiApplication.primaryScreen().devicePixelRatio() if QGuiApplication.primaryScreen() else 1.0
+        self.thumbnail_loader = ThumbnailLoader(
+            thumbnail_cache or ThumbnailCache(controller.preview_cache.root / "thumbs"),
+            device_pixel_ratio=ratio,
+            parent=self,
+        )
+        self._thumbnail_placeholder = self._make_thumbnail_placeholder()
+        self._thumbnail_timer = QTimer(self)
+        self._thumbnail_timer.setSingleShot(True)
+        self._thumbnail_timer.setInterval(30)
+        self._thumbnail_timer.timeout.connect(self.load_visible_thumbnails)
         self.setWindowTitle(NDEX_FRAME_TITLE)
         self.resize(1180, 760)
         self.setAcceptDrops(True)
@@ -118,6 +137,7 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event: QCloseEvent) -> None:
         if self._close_ready:
+            self.thumbnail_loader.shutdown()
             super().closeEvent(event)
             return
         self._interactive_dialogs = False
@@ -125,6 +145,7 @@ class MainWindow(QMainWindow):
         self.request_cancel()
         if self.controller.shutdown():
             self._close_ready = True
+            self.thumbnail_loader.shutdown()
             super().closeEvent(event)
         else:
             self.setEnabled(False)
@@ -242,17 +263,17 @@ class MainWindow(QMainWindow):
         toolbar.addWidget(self.open_files_button)
         toolbar.addWidget(self.open_folder_button)
         toolbar.addSeparator()
-        frame_preset_label = QLabel("Frame (border && ratio) ")
+        frame_preset_label = QLabel("Frame ")
         self.frame_preset_combo = QComboBox()
         frame_preset_label.setBuddy(self.frame_preset_combo)
         self.frame_preset_combo.setAccessibleName("Frame Preset")
-        tip = "The border, background and aspect ratio around each photo. A * means you changed it."
+        tip = "The border, background and aspect ratio around each photo. (edited) means you changed it."
         frame_preset_label.setToolTip(tip)
         self.frame_preset_combo.setToolTip(tip)
         toolbar.addWidget(frame_preset_label)
         toolbar.addWidget(self.frame_preset_combo)
         toolbar.addSeparator()
-        output_profile_label = QLabel("Output (size && format) ")
+        output_profile_label = QLabel("Output ")
         self.output_profile_combo = QComboBox()
         output_profile_label.setBuddy(self.output_profile_combo)
         self.output_profile_combo.setAccessibleName("Output Profile")
@@ -295,6 +316,10 @@ class MainWindow(QMainWindow):
         self.thumbnail_view.setMinimumWidth(190)
         self.thumbnail_view.setTextElideMode(Qt.TextElideMode.ElideMiddle)
         self.thumbnail_view.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.thumbnail_view.setIconSize(QSize(THUMBNAIL_SIZE, THUMBNAIL_SIZE))
+        self.thumbnail_view.setUniformItemSizes(True)
+        self.thumbnail_view.setVerticalScrollMode(QListWidget.ScrollMode.ScrollPerPixel)
+        self.thumbnail_view.verticalScrollBar().setSingleStep(24)
         left_layout.addWidget(self.images_label)
         left_layout.addWidget(self.thumbnail_view)
 
@@ -450,6 +475,8 @@ class MainWindow(QMainWindow):
         self.frame_preset_combo.currentIndexChanged.connect(self._frame_preset_chosen)
         self.output_profile_combo.currentIndexChanged.connect(self._output_profile_chosen)
         self.thumbnail_view.currentItemChanged.connect(self._thumbnail_selected)
+        self.thumbnail_view.verticalScrollBar().valueChanged.connect(self._schedule_thumbnails)
+        self.thumbnail_loader.thumbnailReady.connect(self._thumbnail_ready)
         self.scale_slider.valueChanged.connect(self.scale_spin.setValue)
         self.scale_spin.valueChanged.connect(self.scale_slider.setValue)
         self.scale_spin.valueChanged.connect(self._framing_controls_changed)
@@ -491,8 +518,12 @@ class MainWindow(QMainWindow):
             self.output_profile_combo.clear()
             for output in outputs:
                 self.output_profile_combo.addItem(output.name, output)
-            self._select_combo(self.frame_preset_combo, self.controller.state.working_frame.id)
-            self._select_combo(self.output_profile_combo, self.controller.state.output_profile.id)
+            if not self._select_combo(self.frame_preset_combo, self.controller.state.working_frame.id):
+                if self.preset_store is not None:
+                    self._select_combo(self.frame_preset_combo, self.preset_store.default_frame().id)
+            if not self._select_combo(self.output_profile_combo, self.controller.state.output_profile.id):
+                if self.preset_store is not None:
+                    self._select_combo(self.output_profile_combo, self.preset_store.default_output().id)
         frame = self.frame_preset_combo.currentData()
         output = self.output_profile_combo.currentData()
         if frame is not None:
@@ -501,12 +532,13 @@ class MainWindow(QMainWindow):
             self.controller.state.output_profile = output
 
     @staticmethod
-    def _select_combo(combo: QComboBox, preset_id: str) -> None:
+    def _select_combo(combo: QComboBox, preset_id: str) -> bool:
         for index in range(combo.count()):
             preset = combo.itemData(index)
             if preset is not None and preset.id == preset_id:
                 combo.setCurrentIndex(index)
-                return
+                return True
+        return False
 
     @Slot()
     def _frame_preset_chosen(self) -> None:
@@ -532,16 +564,46 @@ class MainWindow(QMainWindow):
 
     @Slot()
     def _manage_presets(self) -> None:
-        chooser = ManagePresetsDialog(self)
-        if self._interactive_dialogs:
-            if chooser.exec() != QDialog.DialogCode.Accepted:
-                return
-        elif chooser.choice is None:
+        if self.preset_store is None:
             return
-        if chooser.choice == "frame":
-            self._edit_frame_preset()
-        elif chooser.choice == "output":
-            self._edit_output_profile()
+        dialog = PresetsManagerDialog(
+            self.preset_store,
+            self,
+            current_frame=self._stored_frame(),
+            current_output=self.controller.state.output_profile,
+            on_use_frame=self._use_frame_preset,
+            on_use_output=self._use_output_profile,
+        )
+        self._last_presets_dialog = dialog
+        working = self.controller.state.working_frame
+        stored_before = self._stored_frame()
+        if self._interactive_dialogs:
+            dialog.exec()
+        # Presets may have been created, renamed or deleted in there.
+        self._reload_preset_combos()
+        state = self.controller.state
+        if working.id == state.working_frame.id and self._stored_frame() == stored_before:
+            # Nothing changed for this preset: keep the user's unsaved edits.
+            state.working_frame = working
+        self._sync_controls()
+        self._request_selected_preview()
+
+    def _stored_frame(self) -> FramePreset:
+        """The preset the working frame came from (the combo keeps its stored copy)."""
+        stored = self.frame_preset_combo.currentData()
+        return stored if stored is not None else self.controller.state.working_frame
+
+    def _use_frame_preset(self, preset: FramePreset) -> None:
+        self.controller.state.working_frame = preset
+        self._reload_preset_combos()
+        self._sync_controls()
+        self._request_selected_preview()
+
+    def _use_output_profile(self, profile: OutputProfile) -> None:
+        self.controller.state.output_profile = profile
+        self._reload_preset_combos()
+        self._sync_controls()
+        self._request_selected_preview()
 
     @Slot()
     def _save_frame_preset(self) -> None:
@@ -695,7 +757,7 @@ class MainWindow(QMainWindow):
 
     @Slot()
     def _choose_files(self) -> None:
-        names, _ = QFileDialog.getOpenFileNames(self, "Open Master Images", "", "Images (*.jpg *.jpeg *.png *.tif *.tiff)")
+        names, _filter = QFileDialog.getOpenFileNames(self, "Open Master Images", "", "Images (*.jpg *.jpeg *.png *.tif *.tiff)")
         if names:
             self.handoff_path = None
             self.controller.import_paths([Path(name) for name in names])
@@ -757,6 +819,7 @@ class MainWindow(QMainWindow):
     def _refresh_sources(self) -> None:
         selected = self.controller.state.selected_path
         self.images_label.setText(f"Images ({len(self.controller.state.sources)})")
+        self._item_by_path = {}
         with QSignalBlocker(self.thumbnail_view):
             self.thumbnail_view.clear()
             for source in self.controller.state.sources:
@@ -764,12 +827,77 @@ class MainWindow(QMainWindow):
                 item = QListWidgetItem(f"{source.path.name}\n{self._status_for(source.path)}{badge}")
                 item.setToolTip(str(source.path))
                 item.setData(Qt.ItemDataRole.UserRole, source.path)
+                item.setIcon(self._icon_for(source.path))
                 if source.warnings:
                     item.setToolTip("\n".join((source.path.name, *(f"⚠ {text}" for text in source.warnings))))
                 self.thumbnail_view.addItem(item)
+                self._item_by_path[source.path] = item
                 if source.path == selected:
                     self.thumbnail_view.setCurrentItem(item)
         self._sync_controls()
+        self._schedule_thumbnails()
+
+    def _make_thumbnail_placeholder(self) -> QIcon:
+        ratio = self.thumbnail_loader.ratio
+        side = round(THUMBNAIL_SIZE * ratio)
+        pixmap = QPixmap(side, side)
+        pixmap.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor("#E6E8EC"))
+        painter.drawRoundedRect(pixmap.rect().adjusted(2, 2, -2, -2), 6 * ratio, 6 * ratio)
+        painter.end()
+        pixmap.setDevicePixelRatio(ratio)
+        return QIcon(pixmap)
+
+    def _icon_for(self, path: Path) -> QIcon:
+        pixmap = self.thumbnail_loader.pixmap_for(path)
+        return QIcon(pixmap) if pixmap is not None else self._thumbnail_placeholder
+
+    @Slot()
+    def _schedule_thumbnails(self, *_args: object) -> None:
+        """Coalesce scroll/resize/refresh bursts into one request."""
+        self._thumbnail_timer.start()
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._schedule_thumbnails()
+
+    def visible_thumbnail_paths(self, margin: int = 8) -> list[Path]:
+        """Paths of the rows on screen, nearest the viewport first, plus ``margin`` rows each side."""
+        view = self.thumbnail_view
+        count = view.count()
+        if count == 0:
+            return []
+        rect = view.viewport().rect()
+        first = view.indexAt(rect.topLeft()).row()
+        last = view.indexAt(QPoint(rect.left(), rect.bottom())).row()
+        first = 0 if first < 0 else first
+        last = count - 1 if last < 0 else last
+        rows = list(range(first, last + 1))
+        for offset in range(1, margin + 1):
+            if last + offset < count:
+                rows.append(last + offset)
+            if first - offset >= 0:
+                rows.append(first - offset)
+        paths = []
+        for row in rows:
+            path = view.item(row).data(Qt.ItemDataRole.UserRole)
+            if path is not None:
+                paths.append(path)
+        return paths
+
+    @Slot()
+    def load_visible_thumbnails(self) -> None:
+        self.thumbnail_loader.request(self.visible_thumbnail_paths())
+
+    @Slot(object)
+    def _thumbnail_ready(self, path: Path) -> None:
+        item = self._item_by_path.get(path)
+        pixmap = self.thumbnail_loader.pixmap_for(path)
+        if item is not None and pixmap is not None:
+            item.setIcon(QIcon(pixmap))
 
     @Slot(object, object)
     def _thumbnail_selected(self, current: QListWidgetItem | None, previous: QListWidgetItem | None) -> None:
@@ -796,12 +924,14 @@ class MainWindow(QMainWindow):
         return ""
 
     def _refresh_frame_preset_marker(self) -> None:
-        """Show '*' after the preset name once the working frame no longer matches it."""
+        """Mark the preset name '(edited)' once the working frame no longer matches it."""
         index = self.frame_preset_combo.currentIndex()
         preset = self.frame_preset_combo.currentData()
         if index < 0 or preset is None:
             return
-        name = preset.name + ("*" if self.controller.state.working_frame != preset else "")
+        name = preset.name
+        if self.controller.state.working_frame != preset:
+            name = "{name} (edited)".format(name=preset.name)
         if self.frame_preset_combo.itemText(index) != name:
             self.frame_preset_combo.setItemText(index, name)
 

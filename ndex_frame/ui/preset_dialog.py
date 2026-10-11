@@ -514,26 +514,3 @@ class ExportCompletionDialog(QDialog):
         if self._output_directory is None:
             return
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(self._output_directory)))
-
-
-class ManagePresetsDialog(QDialog):
-    """Small chooser so Manage Presets can open the Frame or Output editor."""
-
-    def __init__(self, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self.choice: str | None = None
-        self.setWindowTitle("Manage Presets")
-        layout = QVBoxLayout(self)
-        self.edit_frame_button = QPushButton("Edit Frame Preset")
-        self.edit_output_button = QPushButton("Edit Output Profile")
-        self.edit_frame_button.clicked.connect(lambda: self._choose("frame"))
-        self.edit_output_button.clicked.connect(lambda: self._choose("output"))
-        layout.addWidget(self.edit_frame_button)
-        layout.addWidget(self.edit_output_button)
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Cancel)
-        buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
-
-    def _choose(self, kind: str) -> None:
-        self.choice = kind
-        self.accept()

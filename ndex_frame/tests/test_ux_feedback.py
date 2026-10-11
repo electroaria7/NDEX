@@ -266,12 +266,12 @@ class WindowFeedbackTests(unittest.TestCase):
         self.assertIn("1 RAW file skipped", message)
         self.assertIn("BAD_0001.jpg isn't a readable image", message)
 
-    def test_frame_preset_shows_asterisk_when_edited(self) -> None:
+    def test_frame_preset_shows_edited_marker(self) -> None:
         window = self.window
         name = window.frame_preset_combo.currentData().name
         self.assertEqual(window.frame_preset_combo.currentText(), name)
         window.background_preset_buttons[3].click()
-        self.assertEqual(window.frame_preset_combo.currentText(), name + "*")
+        self.assertEqual(window.frame_preset_combo.currentText(), name + " (edited)")
 
     def test_reset_override_enabled_only_with_an_override(self) -> None:
         window = self.window
@@ -305,8 +305,8 @@ class WindowFeedbackTests(unittest.TestCase):
     def test_toolbar_labels_and_cancel_wording(self) -> None:
         window = self.window
         labels = [label.text().strip() for label in window.findChildren(QLabel)]
-        self.assertIn("Frame (border && ratio)", labels)
-        self.assertIn("Output (size && format)", labels)
+        self.assertIn("Frame", labels)
+        self.assertIn("Output", labels)
         self.assertEqual(window.cancel_button.text(), "Stop After This Photo")
         self.assertEqual(window.job_results_button.shortcut().toString(), "Ctrl+J")
         self.assertEqual(window.open_files_button.shortcut().toString(), "Ctrl+O")
