@@ -8,6 +8,7 @@ from ndex_common.filecopy import copy_verified
 from ..core.file_types import backup_type_folder
 from ..core.models import BackupSummary, DuplicatePolicy, ImageRecord
 from .operations import ProgressCallback, operation_records
+from ndex_common.i18n import _
 
 
 class BackupService:
@@ -71,4 +72,4 @@ class BackupService:
             candidate = destination_path.with_name(f"{stem}_{index:03d}{suffix}")
             if not candidate.exists():
                 return candidate, "copy"
-        raise RuntimeError(f"Could not resolve duplicate name for {destination_path}")
+        raise RuntimeError(_("Could not resolve duplicate name for {path}").format(path=destination_path))

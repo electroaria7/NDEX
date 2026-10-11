@@ -37,6 +37,16 @@ class CacheManager:
         thumbnail = self.ensure_placeholder_thumbnail(image_path)
         return None, thumbnail, "failed"
 
+    def thumbnail_for(self, record) -> Path | None:
+        """The scan-time thumbnail of a record; rebuilt only if the file went missing."""
+        existing = getattr(record, "thumbnail_path", None)
+        if existing and Path(existing).exists():
+            return Path(existing)
+        source = getattr(record, "display_source", None)
+        if source and Path(source).exists() and Path(source).suffix.lower() in JPG_EXTENSIONS:
+            return self.ensure_jpg_thumbnail(Path(source))
+        return self.ensure_placeholder_thumbnail(Path(record.file_path))
+
     def ensure_jpg_thumbnail(self, image_path: Path, source_key: Path | None = None) -> Path | None:
         target = self.thumbnail_dir / f"{_safe_cache_stem(source_key or image_path)}_thumb.jpg"
         if _is_valid_image(target):

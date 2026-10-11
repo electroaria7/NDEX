@@ -30,11 +30,11 @@ class HelperTests(unittest.TestCase):
         self.assertEqual([rec(pick=p).pick_glyph for p in ("Maybe", "Reject", "Unrated")], ["?", "\u2715", ""])
 
     def test_filter_labels_map_to_existing_internal_values(self):
-        self.assertEqual(tk_app.value_for(tk_app.FILE_FILTER_LABELS, "Pairs (RAW+JPG)"), "paired")
-        self.assertEqual(tk_app.value_for(tk_app.FILE_FILTER_LABELS, "Unpaired RAW"), "raw_only")
-        self.assertEqual(tk_app.value_for(tk_app.FILE_FILTER_LABELS, "RAW only"), "raw")
-        self.assertEqual(tk_app.label_for(tk_app.FILE_FILTER_LABELS, "proxy_failed"), "Preview failed")
-        self.assertEqual(tk_app.value_for(tk_app.RATING_FILTER_LABELS, "3\u2605+"), "3")
+        self.assertEqual(tk_app.value_for(tk_app.file_filter_options(), "Pairs (RAW+JPG)"), "paired")
+        self.assertEqual(tk_app.value_for(tk_app.file_filter_options(), "Unpaired RAW"), "raw_only")
+        self.assertEqual(tk_app.value_for(tk_app.file_filter_options(), "RAW only"), "raw")
+        self.assertEqual(tk_app.label_for(tk_app.file_filter_options(), "proxy_failed"), "Preview failed")
+        self.assertEqual(tk_app.value_for(tk_app.rating_filter_options(), "3\u2605+"), "3")
 
     def test_filter_match_and_texts(self):
         self.assertTrue(tk_app.record_matches_filters(rec(pick="Pick", rating=3), "Pick", 3))

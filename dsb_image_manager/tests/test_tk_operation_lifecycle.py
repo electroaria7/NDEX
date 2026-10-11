@@ -191,7 +191,8 @@ class TkOperationLifecycleTests(unittest.TestCase):
         self.app.attributes("-alpha", 0)
         self.app.deiconify()
         self.app.update_idletasks()
-        self.pump_until(lambda: self.app.choose_button.winfo_width() > 1)
+        self.pump_until(lambda: all(w.winfo_ismapped() for w in (
+            self.app.choose_button, self.app.cancel_button, self.app.work_progress)))
         self.assertEqual(self.app.winfo_width(), 1040)
         for widget in (self.app.choose_button, self.app.cancel_button, self.app.work_progress):
             self.assertGreaterEqual(widget.winfo_width(), widget.winfo_reqwidth())

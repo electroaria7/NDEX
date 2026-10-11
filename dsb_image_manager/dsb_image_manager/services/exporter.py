@@ -8,6 +8,7 @@ from ndex_common.filecopy import copy_verified
 
 from ..core.models import DuplicatePolicy, ExportOptions, ExportSummary, ImageRecord
 from .operations import ProgressCallback, operation_records
+from ndex_common.i18n import _
 
 INVALID_FILENAME_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
@@ -85,4 +86,4 @@ def resolve_duplicate(destination_path: Path, duplicate_policy: DuplicatePolicy)
         candidate = destination_path.with_name(f"{stem}_{index:03d}{suffix}")
         if not candidate.exists():
             return candidate, "copy"
-    raise RuntimeError(f"Could not resolve duplicate name for {destination_path}")
+    raise RuntimeError(_("Could not resolve duplicate name for {path}").format(path=destination_path))
