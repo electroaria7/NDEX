@@ -186,7 +186,7 @@ def open_app(case: unittest.TestCase, source: Path, result, geometry: str = "132
         app = tk_app.ImageManagerApp()
     except tk.TclError as exc:
         case.skipTest(f"Tk display unavailable: {exc}")
-    case.addCleanup(app.destroy)
+    case.addCleanup(close_app, app)
     app.geometry(geometry)
     app.attributes("-alpha", 0)
     app.deiconify()
@@ -195,6 +195,21 @@ def open_app(case: unittest.TestCase, source: Path, result, geometry: str = "132
     app._scan_finished(result.catalog_path)
     pump(app, 0.4)
     return app
+
+
+def close_app(app):
+    """Destroy the app, first stopping a scan a slow machine may still be running.
+
+    destroy() defers closing while a job runs, which would leave a live Tk app
+    behind for the following tests.
+    """
+    try:
+        if getattr(app, "_active_job", None) is not None:
+            app.cancel_work()
+            pump(app, 60, lambda: app._active_job is None)
+    except tk.TclError:
+        pass
+    app.destroy()
 
 
 def pump(app, seconds=0.3, until=None):
@@ -384,9 +399,10 @@ class GridAppTests(unittest.TestCase):
 
     def test_streaming_rows_add_tiles_progressively(self):
         app = self.app
-        app.scan_folder()
-        # Rows land before the scan ends; the grid follows the row list.
-        pump(app, 10, lambda: app._active_job is None)
+        with patch.object(tk_app, "ImageScanner", return_value=ImageScanner(FastMetadata())):
+            app.scan_folder()
+            # Rows land before the scan ends; the grid follows the row list.
+            self.assertTrue(pump(app, 60, lambda: app._active_job is None), "scan did not finish")
         pump(app, 0.4)
         self.assertEqual(len(app.records), self.COUNT)
         self.assertEqual(self.grid._n, self.COUNT)

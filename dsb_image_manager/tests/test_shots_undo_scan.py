@@ -329,11 +329,24 @@ class ShotUiTests(unittest.TestCase):
             self.app = tk_app.ImageManagerApp()
         except tk.TclError as exc:
             self.skipTest(f"Tk display unavailable: {exc}")
-        self.addCleanup(self.app.destroy)
+        self.addCleanup(self._close_app)
         self.app.withdraw()
         self.app.source_dir = self.source
         self.app._scan_finished(self.result.catalog_path)
         self.app.update()
+
+    def _close_app(self):
+        # destroy() only defers while a scan runs; stop it so no live Tk app outlives the test.
+        try:
+            if self.app._active_job is not None:
+                self.app.cancel_work()
+                deadline = time.time() + 60
+                while self.app._active_job is not None and time.time() < deadline:
+                    self.app.update()
+                    time.sleep(0.01)
+        except tk.TclError:
+            pass
+        self.app.destroy()
 
     def rows(self):
         return list(self.app.tree.get_children())
