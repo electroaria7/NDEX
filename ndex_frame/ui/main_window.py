@@ -6,7 +6,18 @@ from dataclasses import replace
 from pathlib import Path
 
 from PySide6.QtCore import QSignalBlocker, Qt, QTimer, Slot
-from PySide6.QtGui import QCloseEvent, QColor, QIcon, QImage, QPixmap
+from PySide6.QtGui import (
+    QCloseEvent,
+    QColor,
+    QDragEnterEvent,
+    QDropEvent,
+    QIcon,
+    QImage,
+    QKeyEvent,
+    QKeySequence,
+    QPixmap,
+    QShortcut,
+)
 from PySide6.QtWidgets import (
     QColorDialog,
     QComboBox,
@@ -35,11 +46,13 @@ from PySide6.QtWidgets import (
 
 from ndex_common.branding import APP_ICON_ICO, NDEX_FRAME_TITLE, get_branding_asset_path
 from ndex_common.retry import path_key
-from ndex_common.theme import apply_qt_theme
+from ndex_common.theme import DANGER, TEXT_PRIMARY, apply_qt_theme
 from ndex_frame.core.framing_choices import normalize_hex_color
+from ndex_frame.core.messages import RAW_HINT, describe_error
 from ndex_frame.core.geometry import resolve_canvas
 from ndex_frame.core.models import AspectRatio, FramePreset, OutputProfile, RenderPlan, SourceItem
 from ndex_frame.services.export_job import ExportRequest, ExportResult, plan_export
+from ndex_frame.services.importer import RAW_SUFFIXES
 from ndex_frame.services.presets import PresetStore
 from ndex_frame.ui.elided_label import ElidedLabel
 from ndex_frame.ui.preset_dialog import (
@@ -47,6 +60,9 @@ from ndex_frame.ui.preset_dialog import (
     ExportPreflightDialog,
     FramePresetDialog,
     ManagePresetsDialog,
+    colour_notes,
+    completion_title,
+    describe_preflight,
     summarize_preflight,
 )
 from ndex_frame.ui.framing_widgets import (
@@ -77,6 +93,7 @@ class MainWindow(QMainWindow):
         self._retry_previous_output: Path | None = None
         self.last_export_result: ExportResult | None = None
         self._last_completion_dialog: ExportCompletionDialog | None = None
+        self._last_preflight_dialog: ExportPreflightDialog | None = None
         self._source_export_status: dict[Path, str] = {}
         self._known_source_paths: set[Path] = set()
         self._export_total = 0
@@ -86,6 +103,7 @@ class MainWindow(QMainWindow):
         self.handoff_path: Path | None = None
         self.setWindowTitle(NDEX_FRAME_TITLE)
         self.resize(1180, 760)
+        self.setAcceptDrops(True)
         apply_qt_theme(self)
         icon_path = get_branding_asset_path(APP_ICON_ICO)
         if icon_path.exists():
@@ -94,6 +112,7 @@ class MainWindow(QMainWindow):
         self._build_workspace()
         self._reload_preset_combos()
         self._connect_signals()
+        self._install_shortcuts()
         self._sync_controls()
         self._refresh_sources()
 
@@ -122,16 +141,97 @@ class MainWindow(QMainWindow):
         self._interactive_dialogs = enabled
 
     def sync_output_folder_label(self) -> None:
-        directory = self.controller.state.output_directory
-        self.output_folder_label.setText("Not selected" if directory is None else str(directory))
         self._sync_controls()
+
+    def _update_output_folder_label(self) -> None:
+        directory = self.controller.state.output_directory
+        label = self.output_folder_label
+        if directory is None:
+            label.setText("Output folder: Not selected — choose where framed photos go")
+            label.setToolTip("")
+            label.setStyleSheet("")
+        elif not directory.is_dir():
+            label.setText(f"Output folder: {directory} (folder not found)")
+            label.setToolTip(str(directory))
+            label.setStyleSheet(f"color: {DANGER};")
+        else:
+            label.setText(f"Output folder: {directory}")
+            label.setToolTip(str(directory))
+            label.setStyleSheet("")
 
     def refresh_thumbnails(self) -> None:
         self._refresh_sources()
 
     def request_cancel(self) -> None:
-        self.cancel_button.setText("Cancelling…")
+        self.cancel_button.setText("Stopping…")
         self.controller.cancel_export()
+
+    def _install_shortcuts(self) -> None:
+        """Keyboard routes. Buttons carry their own shortcuts so a disabled one stays inert."""
+        self.open_files_button.setShortcut(QKeySequence("Ctrl+O"))
+        self.open_folder_button.setShortcut(QKeySequence("Ctrl+Shift+O"))
+        self.export_all_button.setShortcut(QKeySequence("Ctrl+E"))
+        self.export_selected_button.setShortcut(QKeySequence("Ctrl+Shift+E"))
+        self.job_results_button.setShortcut(QKeySequence("Ctrl+J"))
+        self.open_files_button.setToolTip("Open photos (Ctrl+O)")
+        self.open_folder_button.setToolTip("Open a folder of photos (Ctrl+Shift+O)")
+        self.job_results_button.setToolTip("See what recent exports wrote and failed on (Ctrl+J)")
+        self._escape_shortcut = QShortcut(QKeySequence(Qt.Key.Key_Escape), self)
+        self._escape_shortcut.activated.connect(self._escape_pressed)
+
+    @Slot()
+    def _escape_pressed(self) -> None:
+        if self.controller._export_thread is not None and self.cancel_button.isEnabled():
+            self.request_cancel()
+
+    def step_selection(self, delta: int) -> bool:
+        """Move to the previous (-1) or next (+1) photo in the list."""
+        count = self.thumbnail_view.count()
+        if count == 0:
+            return False
+        row = self.thumbnail_view.currentRow()
+        target = max(0, min(count - 1, (row if row >= 0 else 0) + delta))
+        if target == row:
+            return False
+        self.thumbnail_view.setCurrentRow(target)
+        return True
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:
+        # Widgets that use the arrows (list, spin boxes, sliders, combos) handle
+        # them first; what reaches the window steps through the photos.
+        if event.modifiers() == Qt.KeyboardModifier.NoModifier:
+            key = event.key()
+            step = {Qt.Key.Key_Up: -1, Qt.Key.Key_Down: 1}.get(key)
+            if step is None and not self.thumbnail_view.hasFocus():
+                step = {Qt.Key.Key_Left: -1, Qt.Key.Key_Right: 1}.get(key)
+            if step is not None:
+                self.step_selection(step)
+                event.accept()
+                return
+        super().keyPressEvent(event)
+
+    def dragEnterEvent(self, event: QDragEnterEvent) -> None:
+        if event.mimeData().hasUrls() and self.controller._export_thread is None:
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event: QDropEvent) -> None:
+        paths = [Path(url.toLocalFile()) for url in event.mimeData().urls() if url.isLocalFile()]
+        self.import_dropped(paths)
+        event.acceptProposedAction()
+
+    def import_dropped(self, paths: list[Path]) -> None:
+        """Files or folders dropped on the window open like Open Files / Open Folder."""
+        paths = [path for path in paths if path.exists()]
+        if not paths:
+            return
+        if self.controller._export_thread is not None:
+            self.show_nonfatal_error("Wait for the export to finish before opening more photos.")
+            return
+        self.handoff_path = None
+        folder = paths[0] if len(paths) == 1 and paths[0].is_dir() else None
+        self.controller.import_paths(paths, origin=folder.name if folder else "")
 
     def _build_toolbar(self) -> None:
         toolbar = QToolBar("Workspace", self)
@@ -142,17 +242,30 @@ class MainWindow(QMainWindow):
         toolbar.addWidget(self.open_files_button)
         toolbar.addWidget(self.open_folder_button)
         toolbar.addSeparator()
-        frame_preset_label = QLabel("Frame Preset  ")
+        frame_preset_label = QLabel("Frame (border && ratio) ")
         self.frame_preset_combo = QComboBox()
         frame_preset_label.setBuddy(self.frame_preset_combo)
         self.frame_preset_combo.setAccessibleName("Frame Preset")
+        tip = "The border, background and aspect ratio around each photo. A * means you changed it."
+        frame_preset_label.setToolTip(tip)
+        self.frame_preset_combo.setToolTip(tip)
         toolbar.addWidget(frame_preset_label)
         toolbar.addWidget(self.frame_preset_combo)
         toolbar.addSeparator()
-        output_profile_label = QLabel("Output Profile  ")
+        output_profile_label = QLabel("Output (size && format) ")
         self.output_profile_combo = QComboBox()
         output_profile_label.setBuddy(self.output_profile_combo)
         self.output_profile_combo.setAccessibleName("Output Profile")
+        tip = "How big the finished files are and which format they are saved in."
+        output_profile_label.setToolTip(tip)
+        self.output_profile_combo.setToolTip(tip)
+        for combo, characters in ((self.frame_preset_combo, 9), (self.output_profile_combo, 14)):
+            # Size to a few characters, not the longest preset name, so the toolbar fits.
+            combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+            combo.setMinimumContentsLength(characters)
+        for label in (frame_preset_label, output_profile_label):
+            # The theme's muted grey is too faint on the white toolbar.
+            label.setStyleSheet(f"color: {TEXT_PRIMARY};")
         toolbar.addWidget(output_profile_label)
         toolbar.addWidget(self.output_profile_combo)
         self.manage_presets_button = QPushButton("Manage Presets")
@@ -294,25 +407,30 @@ class MainWindow(QMainWindow):
         actions_row = QHBoxLayout()
         actions_row.setSpacing(10)
         self.output_folder_button = QPushButton("Output Folder")
-        self.output_folder_label = ElidedLabel("Not selected")
+        self.output_folder_label = ElidedLabel("Output folder: Not selected — choose where framed photos go")
         self.output_folder_label.setObjectName("mutedLabel")
         self.output_folder_label.setAccessibleName("Output folder")
         self.result_summary_label = ElidedLabel()
         self.result_summary_label.setObjectName("mutedLabel")
         self.export_progress_bar = QProgressBar()
         self.export_progress_bar.setAccessibleName("Export progress")
-        self.export_progress_bar.setTextVisible(True)
-        self.export_progress_bar.setMinimumWidth(180)
+        self.export_progress_bar.setTextVisible(False)
+        self.export_progress_bar.setMinimumWidth(120)
         self.export_progress_bar.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
         self.export_progress_bar.hide()
+        # The one place the running file is named (the status bar stays quiet).
+        self.export_progress_label = ElidedLabel()
+        self.export_progress_label.hide()
         self.export_selected_button = QPushButton("Export Selected")
         self.export_all_button = QPushButton("Export All")
         self.export_all_button.setObjectName("primaryButton")
-        self.cancel_button = QPushButton("Cancel")
+        self.cancel_button = QPushButton("Stop After This Photo")
+        self.cancel_button.setToolTip("Finish the photo being exported, then stop (Esc)")
         self.cancel_button.hide()
         output_row.addWidget(self.output_folder_button)
         output_row.addWidget(self.output_folder_label, 1)
         actions_row.addWidget(self.result_summary_label, 1)
+        actions_row.addWidget(self.export_progress_label, 1)
         actions_row.addWidget(self.export_progress_bar, 1)
         actions_row.addWidget(self.export_selected_button)
         actions_row.addWidget(self.export_all_button)
@@ -349,6 +467,7 @@ class MainWindow(QMainWindow):
         self.controller.selectionChanged.connect(lambda _path: self._sync_controls())
         self.controller.previewReady.connect(self._show_preview)
         self.controller.errorOccurred.connect(self.show_nonfatal_error)
+        self.controller.importStatus.connect(self._show_import_status)
         self.controller.busyChanged.connect(self._busy_changed)
         self.controller.exportProgress.connect(self._export_progress)
         self.controller.exportFinished.connect(self._export_finished)
@@ -432,20 +551,23 @@ class MainWindow(QMainWindow):
             x=self.x_spin.value(),
             y=self.y_spin.value(),
         )
-        self._edit_frame_preset(current)
+        self._edit_frame_preset(current, save_as=True)
 
-    def _edit_frame_preset(self, preset: FramePreset | None = None) -> None:
+    def _edit_frame_preset(self, preset: FramePreset | None = None, *, save_as: bool = False) -> None:
         dialog = FramePresetDialog(
             preset or self.controller.state.working_frame,
             self,
             store=self.preset_store,
+            save_as=save_as,
         )
         if self._interactive_dialogs:
             if dialog.exec() != QDialog.DialogCode.Accepted:
                 return
             if self.preset_store is not None:
                 frames = {item.id: item for item in self.preset_store.list_frames()}
-                self.controller.state.working_frame = frames.get(dialog.build_preset().id) or self.preset_store.default_frame()
+                saved = dialog.saved_preset
+                chosen_id = saved.id if saved is not None else dialog.build_preset().id
+                self.controller.state.working_frame = frames.get(chosen_id) or self.preset_store.default_frame()
         self._reload_preset_combos()
         self._sync_controls()
         self._request_selected_preview()
@@ -583,7 +705,12 @@ class MainWindow(QMainWindow):
         name = QFileDialog.getExistingDirectory(self, "Open Master Folder")
         if name:
             self.handoff_path = None
-            self.controller.import_paths([Path(name)])
+            self.controller.import_paths([Path(name)], origin=Path(name).name)
+
+    @Slot(str)
+    def _show_import_status(self, message: str) -> None:
+        # Stays until the next thing worth saying: it is the answer to "what did I just open?".
+        self.statusBar().showMessage(message)
 
     @Slot()
     def _choose_output_folder(self) -> None:
@@ -633,9 +760,12 @@ class MainWindow(QMainWindow):
         with QSignalBlocker(self.thumbnail_view):
             self.thumbnail_view.clear()
             for source in self.controller.state.sources:
-                item = QListWidgetItem(f"{source.path.name}\n{self._status_for(source.path)}")
+                badge = "  ⚠" if source.warnings else ""
+                item = QListWidgetItem(f"{source.path.name}\n{self._status_for(source.path)}{badge}")
                 item.setToolTip(str(source.path))
                 item.setData(Qt.ItemDataRole.UserRole, source.path)
+                if source.warnings:
+                    item.setToolTip("\n".join((source.path.name, *(f"⚠ {text}" for text in source.warnings))))
                 self.thumbnail_view.addItem(item)
                 if source.path == selected:
                     self.thumbnail_view.setCurrentItem(item)
@@ -650,9 +780,36 @@ class MainWindow(QMainWindow):
         directory = self.controller.state.output_directory
         return directory is not None and directory.is_dir()
 
+    def _export_block_reason(self) -> str:
+        """Why exporting is unavailable right now, or '' when it is available."""
+        state = self.controller.state
+        if self.controller._export_thread is not None:
+            return "An export is already running"
+        if self._busy:
+            return "Wait for the photos to finish opening"
+        if not state.sources:
+            return "Open photos first"
+        if state.output_directory is None:
+            return "Choose an output folder first"
+        if not state.output_directory.is_dir():
+            return "The output folder wasn't found — choose another one"
+        return ""
+
+    def _refresh_frame_preset_marker(self) -> None:
+        """Show '*' after the preset name once the working frame no longer matches it."""
+        index = self.frame_preset_combo.currentIndex()
+        preset = self.frame_preset_combo.currentData()
+        if index < 0 or preset is None:
+            return
+        name = preset.name + ("*" if self.controller.state.working_frame != preset else "")
+        if self.frame_preset_combo.itemText(index) != name:
+            self.frame_preset_combo.setItemText(index, name)
+
     def _sync_controls(self) -> None:
         state = self.controller.state
         frame = state.working_frame
+        self._update_output_folder_label()
+        self._refresh_frame_preset_marker()
         self.ratio_label.setText(f"{frame.ratio.width}:{frame.ratio.height}")
         self.background_label.setText(frame.background)
         blockers = [
@@ -677,7 +834,8 @@ class MainWindow(QMainWindow):
         exporting = self.controller._export_thread is not None
         # An import ending mid-export clears _busy; the export thread still
         # keeps the buttons off until the job itself is done.
-        can_export = (not self._busy) and (not exporting) and self._output_folder_ready() and bool(state.sources)
+        block_reason = self._export_block_reason()
+        can_export = not block_reason
         for control in (
             self.open_files_button,
             self.open_folder_button,
@@ -703,7 +861,19 @@ class MainWindow(QMainWindow):
             has_selection and state.is_modified(state.selected_path)
         )
         self.export_all_button.setEnabled(can_export)
-        self.export_selected_button.setEnabled(can_export and state.selected_path is not None)
+        selected_ok = can_export and state.selected_path is not None
+        self.export_selected_button.setEnabled(selected_ok)
+        self.export_all_button.setToolTip(block_reason or "Export every photo (Ctrl+E)")
+        self.export_selected_button.setToolTip(
+            block_reason or ("Export the selected photo (Ctrl+Shift+E)" if selected_ok else "Select a photo first")
+        )
+        has_override = state.selected_path is not None and state.is_modified(state.selected_path)
+        self.reset_override_button.setEnabled(has_override and not exporting)
+        self.reset_override_button.setToolTip(
+            "" if has_override else "This photo already uses the shared framing"
+        )
+        self.apply_all_button.setEnabled(bool(state.sources) and not exporting)
+        self.apply_all_button.setToolTip("" if state.sources else "Open photos first")
 
     @Slot()
     def _reset_override(self) -> None:
@@ -712,6 +882,20 @@ class MainWindow(QMainWindow):
 
     @Slot()
     def _apply_all(self) -> None:
+        count = len(self.controller.state.sources)
+        if self._interactive_dialogs and count > 1:
+            text = f"Apply this framing to all {count} photos?"
+            if self.controller.state.overrides:
+                text += " Individual adjustments will be replaced."
+            answer = QMessageBox.question(
+                self,
+                "Apply Framing to All",
+                text,
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
         self.controller.apply_current_framing_to_all()
         self._refresh_sources()
 
@@ -761,12 +945,15 @@ class MainWindow(QMainWindow):
         if path != self.controller.state.selected_path:
             return
         _scale, x, y = self.controller.state.effective_framing(path)
-        self.preview_widget.set_preview(QPixmap.fromImage(image), plan, background, x, y)
+        ratio = self.controller.state.working_frame.ratio
+        self.preview_widget.set_preview(
+            QPixmap.fromImage(image), plan, background, x, y, (ratio.width, ratio.height)
+        )
 
     def queue_source(self, source: Path) -> None:
         self.handoff_path = None
         if source.is_dir():
-            self.controller.import_paths([source])
+            self.controller.import_paths([source], origin=source.name)
         else:
             self.show_nonfatal_error(f"Source folder does not exist: {source}")
 
@@ -780,16 +967,35 @@ class MainWindow(QMainWindow):
             self.show_nonfatal_error(f"Could not read handoff: {path}")
             return
         files = handoff_files(payload)
+        listed = [Path(str(raw)) for raw in payload.get("files") or ()]
+        listed += [
+            Path(str(entry["path"]))
+            for entry in payload.get("items") or ()
+            if isinstance(entry, dict) and entry.get("path")
+        ]
+        raw_count = len({str(item).casefold() for item in listed if item.suffix.casefold() in RAW_SUFFIXES})
         if not files:
             self.handoff_path = None
-            self.show_nonfatal_error("Handoff has no JPG/PNG/TIFF files Frame can import.")
+            if raw_count:
+                noun = "RAW file" if raw_count == 1 else "RAW files"
+                self.show_nonfatal_error(
+                    f"No photos opened from Image Manager · {raw_count} {noun} skipped ({RAW_HINT})"
+                )
+            else:
+                self.show_nonfatal_error("Handoff has no JPG/PNG/TIFF files Frame can import.")
             return
         self.handoff_path = path
-        self.controller.import_paths(files)
+        self.controller.import_paths(files, origin="Image Manager", extra_raw=raw_count)
 
     @Slot(str)
     def show_nonfatal_error(self, message: str) -> None:
         self.statusBar().showMessage(message, 10000)
+
+    def _block_error(self, title: str, message: str) -> None:
+        """An error that stops what the user just asked for: say it in a dialog, not only a status line."""
+        self.statusBar().showMessage(message, 15000)
+        if self._interactive_dialogs:
+            QMessageBox.warning(self, title, message)
 
     def _export_request(
         self, sources: list[SourceItem] | None, collision_policy: str
@@ -825,29 +1031,44 @@ class MainWindow(QMainWindow):
         self.export_progress_bar.setValue(0)
         self.export_progress_bar.setFormat("%v / %m")
         self.export_progress_bar.show()
+        self.export_progress_label.setText(f"Starting export of {len(selected)}…")
+        self.export_progress_label.show()
         self.controller.start_export(selected, collision_policy)
 
     def _prompt_export(self, sources: list[SourceItem] | None) -> None:
-        if not self._output_folder_ready() or not self.controller.state.sources:
+        reason = self._export_block_reason()
+        if reason:
+            self.show_nonfatal_error(reason)
             return
+        directory = self.controller.state.output_directory
+        chosen = list(sources) if sources is not None else list(self.controller.state.sources)
         try:
-            counts = self.preflight(sources)
+            skip_request = self._export_request(sources, "skip")
+            snapshot = plan_export(skip_request)
+            rename_snapshot = plan_export(replace(skip_request, collision_policy="rename"))
         except Exception as error:
-            self.show_nonfatal_error(str(error) or error.__class__.__name__)
+            self._block_error("Can't start the export", describe_error(error, folder=directory))
             return
-        dialog = ExportPreflightDialog(counts, has_conflicts=counts.conflicted > 0, parent=self)
+        counts = summarize_preflight(snapshot)
+        info = describe_preflight(
+            snapshot,
+            rename_snapshot=rename_snapshot if counts.conflicted else None,
+            notes=colour_notes(chosen),
+        )
+        dialog = ExportPreflightDialog(
+            counts, has_conflicts=counts.conflicted > 0, parent=self, info=info
+        )
+        self._last_preflight_dialog = dialog
         if self._interactive_dialogs:
             if dialog.exec() != QDialog.DialogCode.Accepted:
                 return
-        elif dialog.collision_policy() is None:
-            dialog.rename_radio.setChecked(True)
         policy = dialog.collision_policy()
         if policy not in {"skip", "rename"}:
             return
         try:
             self.confirm_export(sources, policy)
         except Exception as error:
-            self.show_nonfatal_error(str(error) or error.__class__.__name__)
+            self._block_error("Can't start the export", describe_error(error, folder=directory))
 
     def _export_selected(self) -> None:
         path = self.controller.state.selected_path
@@ -864,10 +1085,12 @@ class MainWindow(QMainWindow):
         self.cancel_button.setVisible(exporting)
         if exporting:
             self.export_progress_bar.show()
+            self.export_progress_label.show()
         else:
             self.export_progress_bar.hide()
+            self.export_progress_label.hide()
         if not exporting:
-            self.cancel_button.setText("Cancel")
+            self.cancel_button.setText("Stop After This Photo")
         self._sync_controls()
 
     @Slot(object)
@@ -877,18 +1100,22 @@ class MainWindow(QMainWindow):
         name = getattr(getattr(progress, "source", None), "name", "")
         self.export_progress_bar.setRange(0, total)
         self.export_progress_bar.setValue(index)
-        self.export_progress_bar.setFormat("%v / %m")
         self.export_progress_bar.setToolTip(name)
         self.export_progress_bar.show()
-        self.statusBar().showMessage(f"{name} · {index} / {total}".strip(" ·"))
+        text = f"Exporting {index} of {total}"
+        self.export_progress_label.setText(f"{text} — {name}" if name else text)
+        self.export_progress_label.setToolTip(self.export_progress_label.text())
+        self.export_progress_label.show()
 
     @Slot(object)
     def _export_finished(self, result: object) -> None:
         self.last_export_result = result  # type: ignore[assignment]
         self.cancel_button.hide()
-        self.cancel_button.setText("Cancel")
+        self.cancel_button.setText("Stop After This Photo")
         self.export_progress_bar.hide()
         self.export_progress_bar.reset()
+        self.export_progress_label.hide()
+        self.export_progress_label.clear()
         for item in getattr(result, "items", ()):
             if item.state == "exported":
                 self._source_export_status[item.source] = "Exported"
@@ -903,10 +1130,33 @@ class MainWindow(QMainWindow):
                 self._export_total - result.exported - result.skipped - result.failed,
             )
         output_dir = getattr(result, "output_dir", None) or self.controller.state.output_directory
-        dialog = ExportCompletionDialog(result, cancelled, output_dir, self)
+        dialog = ExportCompletionDialog(
+            result,
+            cancelled,
+            output_dir,
+            self,
+            on_view_results=lambda: QTimer.singleShot(0, self._open_job_results),
+            view_results_available=self._job_results_available(),
+        )
         self._last_completion_dialog = dialog
-        summary = dialog.summary_label.text()
-        self.statusBar().showMessage(summary, 15000)
-        if self._interactive_dialogs:
-            dialog.exec()
+        self.statusBar().showMessage(completion_title(result, cancelled), 15000)
         self._refresh_sources()
+        if self._interactive_dialogs:
+            # The job is written to Job Results after this handler returns, so
+            # showing the dialog a beat later lets "View in Job Results" find it.
+            QTimer.singleShot(0, lambda: self._show_completion(dialog))
+
+    @staticmethod
+    def _job_results_available() -> bool:
+        from ndex_frame.ui.report_dialog import frame_reports
+
+        try:
+            return bool(frame_reports(limit=1))
+        except Exception:
+            return False
+
+    def _show_completion(self, dialog: ExportCompletionDialog) -> None:
+        if not self._interactive_dialogs:
+            return
+        dialog.set_job_results_available(self._job_results_available())
+        dialog.exec()

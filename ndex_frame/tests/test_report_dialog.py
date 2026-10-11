@@ -300,7 +300,7 @@ class FrameRetryTests(unittest.TestCase):
         self.controller.importFailed.emit("unreadable")
 
         self.assertEqual(self.state.output_directory, before)
-        self.assertEqual(window.output_folder_label.text(), str(before))
+        self.assertTrue(window.output_folder_label.text().endswith(str(before)))
 
     def test_a_retry_import_forgets_the_handoff(self) -> None:
         window = self._window()

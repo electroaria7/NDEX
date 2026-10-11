@@ -100,7 +100,7 @@ class ColorPreparationTests(unittest.TestCase):
         prepared = prepare_master(self.no_icc_path, MetadataPolicy())
 
         self.assertEqual(prepared.image.mode, "RGB")
-        self.assertIn("색상 프로필 없음", prepared.warnings)
+        self.assertIn("No colour profile — treated as sRGB", prepared.warnings)
         self.assertTrue(prepared.icc_bytes)
         self.assertIn("sRGB", profile_description(prepared.icc_bytes))
 
@@ -211,7 +211,7 @@ class ColorPreparationTests(unittest.TestCase):
         prepared = prepare_master(self.lab_profile_path, MetadataPolicy())
         self.addCleanup(prepared.image.close)
         self.assertEqual(prepared.image.mode, "RGB")
-        self.assertIn("색상 프로필 변환 실패, 기본 변환 사용", prepared.warnings)
+        self.assertIn("Colour profile could not be applied — used a basic conversion", prepared.warnings)
 
     def test_prepared_bytes_round_trip_with_icc_and_without_gps(self) -> None:
         prepared = prepare_master(self.exif_path, MetadataPolicy(remove_gps=True))

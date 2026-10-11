@@ -14,6 +14,7 @@ from PySide6.QtGui import QImage
 from ndex_common import settings
 
 from ndex_frame.core.geometry import build_render_plan, resolve_canvas
+from ndex_frame.core.messages import ImportSummary, describe_error, import_status_text
 from ndex_frame.core.models import FramePreset, ImageOverride, MetadataPolicy, OutputProfile, SourceItem
 from ndex_frame.imaging.color import prepare_master
 from ndex_frame.services.cache import CacheError, PreviewCache
@@ -25,7 +26,7 @@ from ndex_frame.services.export_job import (
     plan_export,
     run_export,
 )
-from ndex_frame.services.importer import analyze_source, discover_files
+from ndex_frame.services.importer import analyze_source, scan_paths
 
 
 class WorkspaceState:
@@ -89,15 +90,23 @@ class WorkspaceState:
 
 
 class _ImportSignals(QObject):
-    completed = Signal(object, object, str)
+    completed = Signal(object, object, str, str)
     failed = Signal(object, str)
 
 
 class _ImportRunnable(QRunnable):
-    def __init__(self, paths: list[Path], recursive: bool) -> None:
+    def __init__(
+        self,
+        paths: list[Path],
+        recursive: bool,
+        origin: str = "",
+        extra_raw: int = 0,
+    ) -> None:
         super().__init__()
         self.paths = paths
         self.recursive = recursive
+        self.origin = origin
+        self.extra_raw = extra_raw
         self.cancel = CancelToken()
         self.signals = _ImportSignals()
         self.source_folder = next((path.resolve() for path in paths if path.is_dir()), None)
@@ -107,27 +116,31 @@ class _ImportRunnable(QRunnable):
         # One unreadable file must not take the rest of the batch with it:
         # the good ones open, the bad ones are named.
         sources = []
-        problems = []
+        problems: list[tuple[str, str]] = []
         try:
-            files = discover_files(self.paths, self.recursive)
+            scan = scan_paths(self.paths, self.recursive)
         except Exception as error:
-            self.signals.failed.emit(self, str(error) or error.__class__.__name__)
+            self.signals.failed.emit(self, describe_error(error))
             return
-        for path in files:
+        for path in scan.files:
             if self.cancel.is_cancelled():
-                self.signals.completed.emit(self, [], "")
+                self.signals.completed.emit(self, [], "", "")
                 return
             try:
                 sources.append(analyze_source(path))
             except Exception as error:
-                problems.append(f"{path.name}: {str(error) or error.__class__.__name__}")
+                problems.append((path.name, str(error) or error.__class__.__name__))
+        summary = ImportSummary(
+            opened=len(sources),
+            raw_skipped=len(scan.raw_skipped) + self.extra_raw,
+            unsupported=len(scan.unsupported),
+            unreadable=tuple(problems),
+        )
+        status = import_status_text(summary, self.origin)
         if not sources:
-            self.signals.failed.emit(self, "; ".join(problems) or "No images could be opened.")
+            self.signals.failed.emit(self, status)
             return
-        warning = ""
-        if problems:
-            warning = f"Could not open {len(problems)} file(s): " + "; ".join(problems[:3])
-        self.signals.completed.emit(self, sources, warning)
+        self.signals.completed.emit(self, sources, "", status)
 
 
 class _PreviewSignals(QObject):
@@ -195,6 +208,8 @@ class WorkspaceController(QObject):
     # Job-shaped outcomes a window can act on, next to the human-readable
     # errorOccurred that still fires for the status bar.
     importFailed = Signal(str)
+    # One line saying what an import opened and what it left out.
+    importStatus = Signal(str)
     exportAborted = Signal(str)
     exportProgress = Signal(object)
     exportFinished = Signal(object)
@@ -229,12 +244,19 @@ class WorkspaceController(QObject):
         self._shutdown_timer.timeout.connect(self._poll_shutdown)
         self._export_error = ""
 
-    def import_paths(self, paths: list[Path], *, recursive: bool = False) -> None:
+    def import_paths(
+        self,
+        paths: list[Path],
+        *,
+        recursive: bool = False,
+        origin: str = "",
+        extra_raw: int = 0,
+    ) -> None:
         if self._shutting_down:
             return
         if self._current_import is not None:
             self._current_import.cancel.cancel()
-        job = _ImportRunnable(paths, recursive)
+        job = _ImportRunnable(paths, recursive, origin, extra_raw)
         self._current_import = job
         self._jobs.add(job)
         job.signals.completed.connect(self._finish_import, Qt.ConnectionType.QueuedConnection)
@@ -242,8 +264,10 @@ class WorkspaceController(QObject):
         self.busyChanged.emit(True)
         self.thread_pool.start(job)
 
-    @Slot(object, object, str)
-    def _finish_import(self, job: QRunnable, sources: list[SourceItem], warning: str = "") -> None:
+    @Slot(object, object, str, str)
+    def _finish_import(
+        self, job: QRunnable, sources: list[SourceItem], warning: str = "", status: str = ""
+    ) -> None:
         self._jobs.discard(job)
         if job is not self._current_import or self._shutting_down:
             return
@@ -252,6 +276,8 @@ class WorkspaceController(QObject):
         if warning:
             self.errorOccurred.emit(warning)
         self.state.replace_sources(sources)
+        if status:
+            self.importStatus.emit(status)
         source_folder = getattr(job, "source_folder", None)
         if source_folder is not None:
             try:

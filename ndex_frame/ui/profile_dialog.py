@@ -28,7 +28,6 @@ from ndex_frame.services.presets import PresetStore
 
 _UNSAFE = re.compile(r"[^A-Za-z0-9]+")
 _FORMATS = ("jpeg", "png", "webp")
-_CHROMA = ("4:4:4", "4:2:2", "4:2:0")
 _SIZING_MODES = (
     ("fixed_width", "Fixed width"),
     ("fixed_height", "Fixed height"),
@@ -101,19 +100,17 @@ class OutputProfileDialog(QDialog):
         advanced = QFormLayout(self.advanced_group)
         self.quality_spin = QSpinBox()
         self.quality_spin.setRange(1, 100)
-        self.chroma_combo = QComboBox()
-        for chroma in _CHROMA:
-            self.chroma_combo.addItem(chroma, chroma)
-        self.color_space_combo = QComboBox()
-        self.color_space_combo.addItem("sRGB", "sRGB")
-        self.embed_icc_checkbox = QCheckBox("Embed ICC")
-        self.preserve_capture_checkbox = QCheckBox("Preserve capture metadata")
-        self.preserve_copyright_checkbox = QCheckBox("Preserve copyright")
-        self.remove_gps_checkbox = QCheckBox("Remove GPS")
+        # The encoder always writes sRGB with the profile embedded at 4:4:4, so
+        # this is a statement of fact rather than a set of greyed-out controls.
+        self.encoder_info_label = QLabel()
+        self.encoder_info_label.setObjectName("mutedLabel")
+        self.encoder_info_label.setWordWrap(True)
+        self.preserve_capture_checkbox = QCheckBox("Keep capture info")
+        self.preserve_copyright_checkbox = QCheckBox("Keep copyright")
+        self.remove_gps_checkbox = QCheckBox("Remove GPS location")
+        self.advanced_form = advanced
         advanced.addRow("Quality", self.quality_spin)
-        advanced.addRow("Chroma", self.chroma_combo)
-        advanced.addRow("Color space", self.color_space_combo)
-        advanced.addRow(self.embed_icc_checkbox)
+        advanced.addRow("Colour", self.encoder_info_label)
         advanced.addRow(self.preserve_capture_checkbox)
         advanced.addRow(self.preserve_copyright_checkbox)
         advanced.addRow(self.remove_gps_checkbox)
@@ -143,6 +140,7 @@ class OutputProfileDialog(QDialog):
         layout.addWidget(buttons)
 
         self.sizing_mode_combo.currentIndexChanged.connect(self._sizing_mode_changed)
+        self.format_combo.currentIndexChanged.connect(self._format_changed)
         self.width_spin.valueChanged.connect(self._refresh_computed_size)
         self.height_spin.valueChanged.connect(self._refresh_computed_size)
         self.long_edge_spin.valueChanged.connect(self._refresh_computed_size)
@@ -161,18 +159,18 @@ class OutputProfileDialog(QDialog):
         self.height_spin.setValue(profile.sizing.height or 1440)
         self.long_edge_spin.setValue(profile.sizing.long_edge or profile.sizing.width or 1080)
         self.quality_spin.setValue(profile.quality)
-        self._set_combo(self.chroma_combo, "4:4:4")
-        self._set_combo(self.color_space_combo, profile.color_space)
-        self.embed_icc_checkbox.setChecked(True)
-        self.chroma_combo.setEnabled(False)
-        self.embed_icc_checkbox.setEnabled(False)
-        self.chroma_combo.setToolTip("v0.1 encoder always writes 4:4:4")
-        self.embed_icc_checkbox.setToolTip("v0.1 encoder always embeds the sRGB ICC profile")
+        self.encoder_info_label.setText(f"{profile.color_space} · ICC profile embedded · 4:4:4")
         self.preserve_capture_checkbox.setChecked(profile.metadata.preserve_capture)
         self.preserve_copyright_checkbox.setChecked(profile.metadata.preserve_copyright)
         self.remove_gps_checkbox.setChecked(profile.metadata.remove_gps)
         self._sizing_mode_changed()
+        self._format_changed()
         self._refresh_action_buttons()
+
+    def _format_changed(self) -> None:
+        """PNG is lossless: a quality number would do nothing, so hide it."""
+        lossy = self.format_combo.currentData() != "png"
+        self.advanced_form.setRowVisible(self.quality_spin, lossy)
 
     @staticmethod
     def _set_combo(combo: QComboBox, value: str) -> None:
@@ -224,7 +222,7 @@ class OutputProfileDialog(QDialog):
             self.format_combo.currentData(),
             self.quality_spin.value(),
             "4:4:4",
-            self.color_space_combo.currentData(),
+            self._profile.color_space,
             True,
             MetadataPolicy(
                 self.preserve_capture_checkbox.isChecked(),
@@ -245,6 +243,9 @@ class OutputProfileDialog(QDialog):
         self._apply_profile(profile)
 
     def _duplicate(self) -> None:
+        # Name the copy so it can be told apart from the profile it came from.
+        if self.name_edit.text().strip() == self._profile.name:
+            self.name_edit.setText(f"{self._profile.name} copy")
         self._persist(self.build_profile(save_as=True))
         self.accept()
 

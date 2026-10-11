@@ -10,6 +10,7 @@ from threading import Event
 from typing import Literal
 
 from ndex_frame.core.geometry import build_render_plan, resolve_canvas
+from ndex_frame.core.messages import describe_error
 from ndex_frame.core.models import FramePreset, ImageOverride, OutputProfile, RenderPlan, SourceItem
 from ndex_frame.core.validation import validate_output_directory
 from ndex_frame.imaging.color import prepare_master
@@ -222,7 +223,9 @@ def run_export(
             results.append(ExportItemResult(item.source.path, item.destination, "exported"))
             _notify_progress(progress, ExportProgress(index, total, item.source.path, "exported"))
         except Exception as error:
-            message = str(error) or error.__class__.__name__
+            message = describe_error(
+                error, name=item.source.path.name, folder=snapshot.output_dir
+            )
             results.append(ExportItemResult(item.source.path, item.destination, "failed", message))
             _notify_progress(progress, ExportProgress(index, total, item.source.path, "failed", message))
         finally:

@@ -48,7 +48,7 @@ class ExportJobTests(unittest.TestCase):
         self.temporary.cleanup()
 
     def source(self, path: Path | None = None) -> SourceItem:
-        return SourceItem(path or self.source_path, 40, 20, False, ("색상 프로필 없음",))
+        return SourceItem(path or self.source_path, 40, 20, False, ("No colour profile — treated as sRGB",))
 
     def request(
         self,

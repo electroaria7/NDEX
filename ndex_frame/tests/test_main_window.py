@@ -91,8 +91,9 @@ class MainWindowTests(unittest.TestCase):
         self.assertFalse(window.export_progress_bar.isHidden())
         self.assertEqual(window.export_progress_bar.maximum(), 3)
         self.assertEqual(window.export_progress_bar.value(), 1)
-        self.assertEqual(window.export_progress_bar.format(), "%v / %m")
+        self.assertEqual(window.export_progress_label.text(), "Exporting 1 of 3 — one.jpg")
         self.assertEqual(window.export_progress_bar.toolTip(), "one.jpg")
+        self.assertEqual(window.statusBar().currentMessage(), "")
         window._export_progress(ExportProgress(2, 3, Path("two.jpg"), "exported"))
         self.assertEqual(window.export_progress_bar.value(), 2)
         window.set_interactive_dialogs(False)
@@ -113,9 +114,11 @@ class MainWindowTests(unittest.TestCase):
 
         self.assertEqual(window.width(), 960)
         self.assertEqual(window.minimumSizeHint().width(), original_minimum)
-        self.assertEqual(window.output_folder_label.text(), str(path))
+        self.assertEqual(window.output_folder_label.text(), f"Output folder: {path} (folder not found)")
         self.assertEqual(window.output_folder_label.toolTip(), str(path))
-        self.assertEqual(window.output_folder_label.accessibleDescription(), str(path))
+        self.assertEqual(
+            window.output_folder_label.accessibleDescription(), window.output_folder_label.text()
+        )
         for button in (window.output_folder_button, window.export_selected_button, window.export_all_button):
             position = button.mapTo(window, QPoint())
             self.assertTrue(window.rect().contains(position))
@@ -199,6 +202,7 @@ class MainWindowTests(unittest.TestCase):
         self.state.replace_sources([first, second])
         window = MainWindow(controller=self.controller)
         self.addCleanup(window.close)
+        window.set_interactive_dialogs(False)
         window.ratio_preset_buttons[2].click()
         window.background_preset_buttons[1].click()
         window.photo_size_preset_buttons[0].click()

@@ -49,7 +49,7 @@ class ColorRegressionTests(unittest.TestCase):
         prepared = prepare_master(path, MetadataPolicy())
         self.addCleanup(prepared.image.close)
         self.assertEqual(prepared.image.mode, "RGB")
-        self.assertNotIn("색상 프로필 변환 실패, 기본 변환 사용", prepared.warnings)
+        self.assertNotIn("Colour profile could not be applied — used a basic conversion", prepared.warnings)
         red, green, blue = prepared.image.getpixel((0, 0))
         self.assertGreater(red, green + 60)
 
@@ -62,7 +62,7 @@ class ColorRegressionTests(unittest.TestCase):
             prepared = prepare_master(path, MetadataPolicy())
         self.addCleanup(prepared.image.close)
         self.assertEqual(prepared.image.mode, "RGB")
-        self.assertIn("색상 프로필 변환 실패, 기본 변환 사용", prepared.warnings)
+        self.assertIn("Colour profile could not be applied — used a basic conversion", prepared.warnings)
 
     def test_16_bit_grayscale_is_scaled_not_clipped(self) -> None:
         path = self.root / "gray16.png"

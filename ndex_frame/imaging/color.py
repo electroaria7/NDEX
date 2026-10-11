@@ -7,6 +7,7 @@ from pathlib import Path
 from PIL import Image, ImageCms, ImageOps
 from PIL.ExifTags import IFD
 
+from ndex_frame.core.messages import NO_PROFILE_WARNING, PROFILE_FAILED_WARNING
 from ndex_frame.core.models import MetadataPolicy
 
 _ORIENTATION_TAG = 274
@@ -88,10 +89,10 @@ def prepare_master(path: Path, policy: MetadataPolicy) -> PreparedImage:
                 )
             except (ImageCms.PyCMSError, OSError):
                 rgb = _to_rgb(oriented)
-                warnings.append("색상 프로필 변환 실패, 기본 변환 사용")
+                warnings.append(PROFILE_FAILED_WARNING)
         else:
             rgb = _to_rgb(oriented)
-            warnings.append("색상 프로필 없음")
+            warnings.append(NO_PROFILE_WARNING)
 
         return PreparedImage(
             image=rgb.copy(),

@@ -13,7 +13,12 @@ from PySide6.QtWidgets import QApplication, QRadioButton
 
 from ndex_frame.core.models import AspectRatio, FramePreset, MetadataPolicy, OutputProfile, OutputSizing
 from ndex_frame.services.presets import PresetStore
-from ndex_frame.ui.preset_dialog import ExportPreflightDialog, FramePresetDialog, PreflightCounts
+from ndex_frame.ui.preset_dialog import (
+    ExportPreflightDialog,
+    FramePresetDialog,
+    PreflightCounts,
+    PreflightInfo,
+)
 from ndex_frame.ui.profile_dialog import OutputProfileDialog, custom_preset_id
 
 
@@ -57,14 +62,8 @@ class ProfileDialogTests(unittest.TestCase):
         self.assertEqual(dialog.advanced_group.title(), "Advanced")
         self.assertEqual(dialog.format_combo.currentData(), "jpeg")
         self.assertEqual(dialog.quality_spin.value(), 95)
-        self.assertEqual(dialog.chroma_combo.currentData(), "4:4:4")
-        self.assertFalse(dialog.chroma_combo.isEnabled())
-        self.assertEqual(dialog.color_space_combo.currentData(), "sRGB")
-        self.assertTrue(dialog.embed_icc_checkbox.isChecked())
-        self.assertFalse(dialog.embed_icc_checkbox.isEnabled())
+        self.assertEqual(dialog.encoder_info_label.text(), "sRGB · ICC profile embedded · 4:4:4")
         dialog.quality_spin.setValue(80)
-        dialog.chroma_combo.setCurrentIndex(dialog.chroma_combo.findData("4:2:0"))
-        dialog.embed_icc_checkbox.setChecked(False)
         saved = dialog.build_profile()
         self.assertEqual(saved.quality, 80)
         self.assertEqual(saved.chroma_subsampling, "4:4:4")
@@ -74,10 +73,52 @@ class ProfileDialogTests(unittest.TestCase):
         mismatched = replace(self.instagram_profile, chroma_subsampling="4:2:0", embed_icc=False)
         dialog = OutputProfileDialog(mismatched, AspectRatio(3, 4))
         self.addCleanup(dialog.close)
-        self.assertEqual(dialog.chroma_combo.currentData(), "4:4:4")
-        self.assertTrue(dialog.embed_icc_checkbox.isChecked())
-        self.assertFalse(dialog.chroma_combo.isEnabled())
-        self.assertFalse(dialog.embed_icc_checkbox.isEnabled())
+        self.assertEqual(dialog.encoder_info_label.text(), "sRGB · ICC profile embedded · 4:4:4")
+        saved = dialog.build_profile()
+        self.assertEqual(saved.chroma_subsampling, "4:4:4")
+        self.assertTrue(saved.embed_icc)
+
+    def test_quality_is_hidden_for_png_and_metadata_wording_is_positive(self) -> None:
+        dialog = OutputProfileDialog(self.instagram_profile, AspectRatio(3, 4))
+        self.addCleanup(dialog.close)
+        dialog.show()
+        self.assertTrue(dialog.quality_spin.isVisible())
+        dialog.format_combo.setCurrentIndex(dialog.format_combo.findData("png"))
+        self.assertFalse(dialog.quality_spin.isVisible())
+        dialog.format_combo.setCurrentIndex(dialog.format_combo.findData("jpeg"))
+        self.assertTrue(dialog.quality_spin.isVisible())
+        self.assertEqual(dialog.preserve_capture_checkbox.text(), "Keep capture info")
+        self.assertEqual(dialog.preserve_copyright_checkbox.text(), "Keep copyright")
+        self.assertEqual(dialog.remove_gps_checkbox.text(), "Remove GPS location")
+
+    def test_duplicated_presets_are_named_copy(self) -> None:
+        dialog = OutputProfileDialog(self.instagram_profile, AspectRatio(3, 4))
+        self.addCleanup(dialog.close)
+        dialog._duplicate()
+        self.assertEqual(dialog.name_edit.text(), "Instagram Feed HQ copy")
+        frame = FramePreset(
+            "builtin.white-3x4", "White 3:4", 1, AspectRatio(3, 4), "#FFFFFF", 1.0, 0.0, 0.0, True
+        )
+        frame_dialog = FramePresetDialog(frame)
+        self.addCleanup(frame_dialog.close)
+        frame_dialog._duplicate()
+        self.assertEqual(frame_dialog.saved_preset.name, "White 3:4 copy")
+
+    def test_save_as_dialog_has_one_primary_save_preset_button(self) -> None:
+        frame = FramePreset(
+            "builtin.white-3x4", "White 3:4", 1, AspectRatio(3, 4), "#FFFFFF", 1.0, 0.0, 0.0, True
+        )
+        dialog = FramePresetDialog(frame, save_as=True)
+        self.addCleanup(dialog.close)
+        self.assertEqual(dialog.windowTitle(), "Save as Frame Preset")
+        self.assertEqual(dialog.save_preset_button.text(), "Save Preset")
+        self.assertFalse(dialog.save_preset_button.isHidden())
+        for hidden in (dialog.duplicate_button, dialog.save_button, dialog.save_as_button, dialog.delete_button):
+            self.assertTrue(hidden.isHidden())
+        self.assertEqual(dialog.name_edit.text(), "White 3:4 copy")
+        dialog.save_preset_button.click()
+        self.assertTrue(dialog.saved_preset.id.startswith("custom."))
+        self.assertEqual(dialog.saved_preset.name, "White 3:4 copy")
 
     def test_builtin_actions_duplicate_custom_actions_save(self) -> None:
         builtin = OutputProfileDialog(self.instagram_profile, AspectRatio(3, 4))
@@ -202,25 +243,56 @@ class ProfileDialogTests(unittest.TestCase):
         instagram_copies = [
             preset
             for preset in store.list_outputs()
-            if preset.name == "Instagram Feed HQ" and not preset.builtin
+            if preset.name == "Instagram Feed HQ copy" and not preset.builtin
         ]
         self.assertEqual(len(instagram_copies), 2)
         self.assertEqual(len({preset.id for preset in instagram_copies}), 2)
         self.assertTrue(all(preset.id.startswith("custom.") for preset in instagram_copies))
 
-    def test_preflight_dialog_requires_skip_or_rename_without_overwrite(self) -> None:
-        dialog = ExportPreflightDialog(PreflightCounts(1, 0, 2, 0), has_conflicts=True)
+    def test_preflight_dialog_defaults_to_skip_and_labels_both_choices(self) -> None:
+        info = PreflightInfo(
+            total=3,
+            size_text="1080 × 1440 px",
+            format_text="JPEG · quality 95",
+            colour_text="sRGB (profile embedded)",
+            metadata_text="Capture info kept · Copyright kept · GPS location removed",
+            destination="D:\\Framed",
+            example="IMG_1001.JPG → IMG_1001.jpg",
+            rename_example="IMG_1001_01.jpg",
+            notes=("3 photos have no colour profile (treated as sRGB)",),
+        )
+        dialog = ExportPreflightDialog(PreflightCounts(1, 0, 2, 0), has_conflicts=True, info=info)
         self.addCleanup(dialog.close)
-        texts = [dialog.exportable_label.text(), dialog.skipped_label.text(), dialog.conflicted_label.text(), dialog.invalid_label.text()]
-        self.assertEqual(texts, ["Exportable: 1", "Skipped: 0", "Conflicted: 2", "Invalid: 0"])
-        self.assertEqual(dialog.skip_radio.text(), "Skip existing")
-        self.assertEqual(dialog.rename_radio.text(), "Auto rename")
-        self.assertIsNone(dialog.collision_policy())
-        self.assertFalse(dialog.export_button.isEnabled())
+        self.assertEqual(dialog.windowTitle(), "Export 3 photos")
+        self.assertEqual(dialog.skip_radio.text(), "Skip existing (2 files already exported)")
+        self.assertEqual(dialog.rename_radio.text(), "Keep both — save as IMG_1001_01.jpg")
+        self.assertEqual(dialog.collision_policy(), "skip")
+        self.assertEqual(dialog.export_button.text(), "Export 1 Photo")
+        self.assertTrue(dialog.export_button.isEnabled())
+        self.assertEqual(dialog.detail_labels["Output size"].text(), "1080 × 1440 px")
+        self.assertEqual(dialog.detail_labels["Example"].text(), "IMG_1001.JPG → IMG_1001.jpg")
+        self.assertEqual(dialog.originals_label.text(), "Originals are never changed.")
+        self.assertIn("no colour profile", dialog.notes_label.text())
+        self.assertTrue(dialog.invalid_label.isHidden())
         radios = dialog.findChildren(QRadioButton)
         self.assertTrue(all("overwrite" not in radio.text().lower() for radio in radios))
         dialog.rename_radio.setChecked(True)
         self.assertEqual(dialog.collision_policy(), "rename")
+        self.assertEqual(dialog.export_button.text(), "Export 3 Photos")
+
+    def test_preflight_dialog_without_conflicts_exports_everything(self) -> None:
+        dialog = ExportPreflightDialog(PreflightCounts(4, 0, 0, 0), has_conflicts=False)
+        self.addCleanup(dialog.close)
+        self.assertEqual(dialog.windowTitle(), "Export 4 photos")
+        self.assertEqual(dialog.collision_policy(), "rename")
+        self.assertEqual(dialog.export_button.text(), "Export 4 Photos")
+
+    def test_skip_existing_with_nothing_new_disables_export(self) -> None:
+        dialog = ExportPreflightDialog(PreflightCounts(0, 0, 2, 0), has_conflicts=True)
+        self.addCleanup(dialog.close)
+        self.assertEqual(dialog.collision_policy(), "skip")
+        self.assertFalse(dialog.export_button.isEnabled())
+        dialog.rename_radio.setChecked(True)
         self.assertTrue(dialog.export_button.isEnabled())
 
 
