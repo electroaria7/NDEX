@@ -9,23 +9,25 @@ from src.backup_executor import execute_backup
 from src.branding import NDEX_ONE_TITLE
 from src.config import ConfigManager
 from src.file_types import FILE_TYPE_ORDER, get_file_type_definitions, get_visible_file_types
-from src.gui import run_app
+from src.gui import preview_status_label, run_app
 from src.logger import AppLogger
 from src.metadata import MetadataExtractor
 from src.scanner import analyze_source, same_folder
 
+from ndex_common import i18n
 from ndex_common.crashlog import install_crash_logging
+from ndex_common.i18n import _
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=f"{NDEX_ONE_TITLE} - Data Sort Backup")
-    parser.add_argument("--source", type=Path, help="Source folder to scan")
-    parser.add_argument("--destination", type=Path, help="Backup destination root")
+    parser.add_argument("--source", type=Path, help=_("Source folder to scan"))
+    parser.add_argument("--destination", type=Path, help=_("Backup destination root"))
     parser.add_argument(
         "--duplicate-policy",
         choices=["rename", "skip", "overwrite", "smart"],
         default="rename",
-        help=(
+        help=_(
             "How to handle duplicate filenames. "
             "'smart' skips files whose content (SHA-256) already exists at the destination "
             "and renames when content differs."
@@ -36,26 +38,26 @@ def build_parser() -> argparse.ArgumentParser:
         dest="enabled_types",
         action="append",
         choices=FILE_TYPE_ORDER,
-        help="File type to include. Repeat to include multiple types.",
+        help=_("File type to include. Repeat to include multiple types."),
     )
-    parser.add_argument("--dry-run", action="store_true", help="Preview only, do not copy")
+    parser.add_argument("--dry-run", action="store_true", help=_("Preview only, do not copy"))
     parser.add_argument(
         "--verify-mode",
         choices=["none", "size", "sha256"],
         default=None,
-        help="Copy verification mode. Default comes from settings.",
+        help=_("Copy verification mode. Default comes from settings."),
     )
-    parser.add_argument("--analyze", action="store_true", help="Analyze files and print a summary")
-    parser.add_argument("--backup", action="store_true", help="Run the backup after analysis")
+    parser.add_argument("--analyze", action="store_true", help=_("Analyze files and print a summary"))
+    parser.add_argument("--backup", action="store_true", help=_("Run the backup after analysis"))
     parser.add_argument(
         "--open",
         action="store_true",
-        help="Open the GUI with folder arguments preloaded (used by NDEX handoff)",
+        help=_("Open the GUI with folder arguments preloaded (used by NDEX handoff)"),
     )
     parser.add_argument(
         "--retry",
         type=Path,
-        help="Open Job Results at this backup manifest so its failed files can be retried.",
+        help=_("Open Job Results at this backup manifest so its failed files can be retried."),
     )
     return parser
 
@@ -65,29 +67,29 @@ def print_summary(summary) -> None:
         return
     counts = summary.counts
     total = sum(counts.values())
-    print(f"Source: {summary.source_dir}")
-    print(f"Destination: {summary.backup_root}")
-    print(f"Total files: {total}")
-    print(f"Files: {_format_type_counts(counts)}")
+    print(_("Source: {path}").format(path=summary.source_dir))
+    print(_("Destination: {path}").format(path=summary.backup_root))
+    print(_("Total files: {total}").format(total=total))
+    print(_("Files: {types}").format(types=_format_type_counts(counts)))
     if summary.date_range[0] and summary.date_range[1]:
         start = summary.date_range[0].strftime("%Y-%m-%d")
         end = summary.date_range[1].strftime("%Y-%m-%d")
-        print(f"Date range: {start} ~ {end}")
+        print(_("Date range: {start} ~ {end}").format(start=start, end=end))
     print("")
-    print("Folder preview:")
+    print(_("Folder preview:"))
     for row in summary.preview_rows:
         print(
             f"  {row.folder_rel_path.as_posix()} | "
-            f"{_format_type_counts(row.type_counts)} | {row.status}"
+            f"{_format_type_counts(row.type_counts)} | {preview_status_label(row.status)}"
         )
 
 
 def run_cli(args: argparse.Namespace) -> int:
     if not args.source or not args.destination:
-        raise SystemExit("--source and --destination are required for CLI mode.")
+        raise SystemExit(_("--source and --destination are required for CLI mode."))
 
     if same_folder(args.source, args.destination):
-        raise SystemExit("--destination must be different from --source.")
+        raise SystemExit(_("--destination must be different from --source."))
 
     root_dir = get_user_data_dir()
     config = ConfigManager()
@@ -123,11 +125,19 @@ def run_cli(args: argparse.Namespace) -> int:
         if sys.stdout is not None:
             print("")
             print(
-                "Backup result: "
-                f"copied={result.copied}, verified={result.verified}, "
-                f"verification_failed={result.verification_failed}, skipped={result.skipped}, "
-                f"overwritten={result.overwritten}, errors={result.errors}, "
-                f"cancelled={result.cancelled}"
+                _(
+                    "Backup result: copied={copied}, verified={verified}, "
+                    "verification_failed={verification_failed}, skipped={skipped}, "
+                    "overwritten={overwritten}, errors={errors}, cancelled={cancelled}"
+                ).format(
+                    copied=result.copied,
+                    verified=result.verified,
+                    verification_failed=result.verification_failed,
+                    skipped=result.skipped,
+                    overwritten=result.overwritten,
+                    errors=result.errors,
+                    cancelled=result.cancelled,
+                )
             )
         if not result.dry_run:
             from ndex_common.workflow import record_backup
@@ -144,10 +154,11 @@ def _format_type_counts(counts: dict[str, int]) -> str:
         if count:
             label = "JPG" if file_type == "jpg" else definitions[file_type]["label"].split(" ")[-1]
             parts.append(f"{label}: {count}")
-    return " / ".join(parts) if parts else "None"
+    return " / ".join(parts) if parts else _("None")
 
 
 def main() -> int:
+    i18n.init("ndex_one")
     install_crash_logging("NDEX One")
     parser = build_parser()
     args = parser.parse_args()

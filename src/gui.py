@@ -18,51 +18,84 @@ from .logger import AppLogger, format_display_line
 from .metadata import MetadataExtractor
 from .scanner import analyze_source, build_scan_items, same_folder
 
+from ndex_common import i18n
+from ndex_common.i18n import _, ngettext
 from ndex_common.launch import launch_app
 from ndex_common.theme import CARD_BG, ScrollableFrame, apply_tk_theme, apply_window_icon, build_app_header, style_text_widget
 
-VERIFY_MODE_LABELS = {
-    "size": "Quick check (file size)",
-    "sha256": "Full check (every byte)",
-    "none": "No check",
-}
-VERIFY_LABEL_TO_MODE = {label: mode for mode, label in VERIFY_MODE_LABELS.items()}
-VERIFY_MODE_HINTS = {
-    "size": "Compares file sizes. Fast.",
-    "sha256": "Compares every byte. Slower, safest for memory cards.",
-    "none": "Fastest, but a bad copy would go unnoticed.",
-}
+# Display text is looked up when needed, not at import, so the language chosen
+# in main() applies. The internal keys ("size", "rename", "smart", ...) are what
+# the saved config holds; labels are only ever derived from them for display.
 
-# The internal keys ("rename", "smart", ...) are what the saved config holds.
-DUPLICATE_POLICY_LABELS = {
-    "rename": "Keep both (rename new copy)",
-    "smart": "Skip identical files",
-    "skip": "Skip same-name files",
-    "overwrite": "Overwrite existing",
-}
-DUPLICATE_LABEL_TO_POLICY = {label: policy for policy, label in DUPLICATE_POLICY_LABELS.items()}
-DUPLICATE_POLICY_HINTS = {
-    "rename": "If a file with the same name exists, the new copy is saved as IMG_0001_001.JPG.",
-    "smart": (
-        "Skips files whose content is exactly the same; a different photo with the "
-        "same name is saved as a renamed copy."
-    ),
-    "skip": "Leaves existing files alone, even if the photo differs.",
-    "overwrite": "Replaces existing files. The old version cannot be recovered.",
-}
 
-EMPTY_STATE_TEXT = (
-    "1. Choose the card or folder to copy from.\n"
-    "2. Choose where backups are kept.\n"
-    "3. Press Analyze."
-)
-RULE_HINT_BEFORE = "Photos go into Year\\Month\\MonthDay\\type folders by the date taken."
-INVALID_SOURCE_MESSAGE = (
-    "This folder doesn't exist. Reinsert the card or choose it again with Browse."
-)
-CANCEL_HINT = "Cancel is available while copying."
-ANALYZING_SUFFIX = "reading dates only; nothing is copied yet"
-STOPPING_STATUS = "Stopping after the current file… files already copied are kept."
+def verify_mode_labels() -> dict[str, str]:
+    return {
+        "size": _("Quick check (file size)"),
+        "sha256": _("Full check (every byte)"),
+        "none": _("No check"),
+    }
+
+
+def verify_mode_hints() -> dict[str, str]:
+    return {
+        "size": _("Compares file sizes. Fast."),
+        "sha256": _("Compares every byte. Slower, safest for memory cards."),
+        "none": _("Fastest, but a bad copy would go unnoticed."),
+    }
+
+
+def duplicate_policy_labels() -> dict[str, str]:
+    return {
+        "rename": _("Keep both (rename new copy)"),
+        "smart": _("Skip identical files"),
+        "skip": _("Skip same-name files"),
+        "overwrite": _("Overwrite existing"),
+    }
+
+
+def duplicate_policy_hints() -> dict[str, str]:
+    return {
+        "rename": _("If a file with the same name exists, the new copy is saved as IMG_0001_001.JPG."),
+        "smart": _(
+            "Skips files whose content is exactly the same; a different photo with the "
+            "same name is saved as a renamed copy."
+        ),
+        "skip": _("Leaves existing files alone, even if the photo differs."),
+        "overwrite": _("Replaces existing files. The old version cannot be recovered."),
+    }
+
+
+def empty_state_text() -> str:
+    return _(
+        "1. Choose the card or folder to copy from.\n"
+        "2. Choose where backups are kept.\n"
+        "3. Press Analyze."
+    )
+
+
+def rule_hint_before() -> str:
+    return _("Photos go into Year\\Month\\MonthDay\\type folders by the date taken.")
+
+
+def invalid_source_message() -> str:
+    return _("This folder doesn't exist. Reinsert the card or choose it again with Browse.")
+
+
+def cancel_hint() -> str:
+    return _("Cancel is available while copying.")
+
+
+def analyzing_suffix() -> str:
+    return _("reading dates only; nothing is copied yet")
+
+
+def stopping_status() -> str:
+    return _("Stopping after the current file… files already copied are kept.")
+
+
+def preview_status_label(status: str) -> str:
+    """Folder-preview status for display; ``status`` stays the internal English key."""
+    return {"Existing": _("Existing"), "Mixed": _("Mixed"), "New": _("New")}.get(status, status)
 
 
 def format_size(num_bytes: int) -> str:
@@ -77,8 +110,8 @@ def format_size(num_bytes: int) -> str:
     return f"{size:.1f} GB"  # pragma: no cover - the loop always returns
 
 
-def _plural(count: int, word: str) -> str:
-    return f"{count} {word}" if count == 1 else f"{count} {word}s"
+def _files(count: int) -> str:
+    return ngettext("{count} file", "{count} files", count).format(count=count)
 
 
 def grouped_counts(counts: dict[str, int]) -> dict[str, int]:
@@ -96,7 +129,7 @@ def format_type_counts(counts: dict[str, int], pattern: str = "{group} {count}",
     """"JPG 24 · RAW 18", or "None" when there are no files."""
     return separator.join(
         pattern.format(group=group, count=count) for group, count in grouped_counts(counts).items()
-    ) or "None"
+    ) or _("None")
 
 
 def format_day_span(date_range) -> str:
@@ -106,57 +139,66 @@ def format_day_span(date_range) -> str:
         return ""
     first_day, last_day = first.date(), last.date()
     if first_day == last_day:
-        return f"1 day ({first_day:%Y-%m-%d})"
+        one_day = ngettext("{count} day", "{count} days", 1).format(count=1)
+        return f"{one_day} ({first_day:%Y-%m-%d})"
     days = (last_day - first_day).days + 1
-    return f"{days} days ({first_day:%Y-%m-%d} to {last_day:%Y-%m-%d})"
+    return _("{days} ({first} to {last})").format(
+        days=ngettext("{count} day", "{count} days", days).format(count=days),
+        first=f"{first_day:%Y-%m-%d}",
+        last=f"{last_day:%Y-%m-%d}",
+    )
 
 
 def free_space_warning(total_size: int, free_space: int | None) -> str:
     """A warning when the destination disk is too small, else an empty string."""
     if free_space is None or free_space >= total_size:
         return ""
-    return (
-        f"Not enough free space: {format_size(total_size)} needed, "
-        f"only {format_size(free_space)} free on the destination."
+    return _("Not enough free space: {needed} needed, only {free} free on the destination.").format(
+        needed=format_size(total_size), free=format_size(free_space)
     )
 
 
 def fallback_note(count: int) -> str:
     if count <= 0:
         return ""
-    if count == 1:
-        return "1 file had no capture date; its modified date was used."
-    return f"{count} files had no capture date; their modified date was used."
+    return ngettext(
+        "{count} file had no capture date; its modified date was used.",
+        "{count} files had no capture date; their modified date was used.",
+        count,
+    ).format(count=count)
 
 
 def example_folder_text(summary) -> str:
     """A live example of where the first file will go."""
     if not summary.items:
-        return RULE_HINT_BEFORE
+        return rule_hint_before()
     first = min(summary.items, key=lambda item: (item.capture_datetime, str(item.source_path).lower()))
-    return f"Folders will look like: {first.destination_dir}"
+    return _("Folders will look like: {path}").format(path=first.destination_dir)
 
 
 def build_confirmation(summary, policy_label: str, verify_label: str, dry_run: bool) -> tuple[str, str]:
     """Title and body of the dialog shown before copying, built from the analysis."""
     lines = [
-        f"Copy {_plural(len(summary.items), 'file')} ({format_size(summary.total_size)}) "
-        f"to {summary.backup_root}?"
+        _("Copy {files} ({size}) to {destination}?").format(
+            files=_files(len(summary.items)),
+            size=format_size(summary.total_size),
+            destination=summary.backup_root,
+        )
     ]
     detail = format_type_counts(summary.counts, separator=", ") if summary.items else ""
     span = format_day_span(summary.date_range)
     if detail or span:
         lines.append(" · ".join(part for part in (detail, span) if part))
-    lines.append(f"If a file already exists: {policy_label}")
-    lines.append(f"After copying: {verify_label}")
-    lines.append("Nothing is deleted from the source.")
+    lines.append(_("If a file already exists: {policy}").format(policy=policy_label))
+    lines.append(_("After copying: {check}").format(check=verify_label))
+    lines.append(_("Nothing is deleted from the source."))
     if dry_run:
-        lines.append("Nothing will be copied.")
+        lines.append(_("Nothing will be copied."))
     else:
         warning = free_space_warning(summary.total_size, summary.free_space)
         if warning:
             lines.extend(["", warning])
-    return ("Start Dry Run" if dry_run else "Start Backup"), "\n".join(lines)
+    return (_("Start Dry Run") if dry_run else _("Start Backup")), "\n".join(lines)
 
 
 def not_run_count(result) -> int:
@@ -167,26 +209,30 @@ def not_run_count(result) -> int:
 def build_completion_status(result) -> str:
     """The one-line outcome shown in the status bar after a backup finishes."""
     if result.cancelled:
-        return (
-            f"Stopped: {result.copied} copied; {not_run_count(result)} not run "
-            "(see Job Results to retry)."
+        return _("Stopped: {copied} copied; {not_run} not run (see Job Results to retry).").format(
+            copied=result.copied, not_run=not_run_count(result)
         )
     if result.dry_run:
-        return (
-            f"Dry run done: {_plural(result.copied, 'file')} would be copied, "
-            f"{result.skipped} skipped. Nothing was copied."
+        return _("Dry run done: {files} would be copied, {skipped} skipped. Nothing was copied.").format(
+            files=_files(result.copied), skipped=result.skipped
         )
     if result.total and result.skipped == result.total and not result.errors:
-        return f"Nothing new to copy: all {result.total} files were already in the backup."
+        return _("Nothing new to copy: all {total} files were already in the backup.").format(
+            total=result.total
+        )
     if result.copied and result.verified == result.copied:
-        copied = f"{result.copied} copied and verified"
+        copied = _("{copied} copied and verified").format(copied=result.copied)
     elif result.copied and not result.verified:
-        copied = f"{result.copied} copied (not verified)"
+        copied = _("{copied} copied (not verified)").format(copied=result.copied)
     elif result.copied:
-        copied = f"{result.copied} copied, {result.verified} verified"
+        copied = _("{copied} copied, {verified} verified").format(
+            copied=result.copied, verified=result.verified
+        )
     else:
-        copied = "0 copied"
-    return f"Done: {copied}, {result.skipped} skipped, {result.errors} errors."
+        copied = _("0 copied")
+    return _("Done: {copied}, {skipped} skipped, {errors} errors.").format(
+        copied=copied, skipped=result.skipped, errors=result.errors
+    )
 
 
 class Tooltip:
@@ -229,6 +275,7 @@ class DSBApp(tk.Tk):
         retry_manifest: Path | None = None,
     ):
         super().__init__()
+        i18n.init("ndex_one") if i18n.current_language() == i18n.DEFAULT_LANGUAGE and not i18n.available_languages() else None
         self.title(NDEX_ONE_TITLE)
         initial_height = min(820, max(600, self.winfo_screenheight() - 120))
         self.geometry(f"1220x{initial_height}")
@@ -263,14 +310,16 @@ class DSBApp(tk.Tk):
         self.destination_var = tk.StringVar(
             value=str(initial_destination) if initial_destination else remembered_destination
         )
+        duplicate_labels = duplicate_policy_labels()
+        verify_labels = verify_mode_labels()
         self.duplicate_var = tk.StringVar(
-            value=DUPLICATE_POLICY_LABELS.get(
-                self.settings.get("duplicate_policy", "rename"), DUPLICATE_POLICY_LABELS["rename"]
+            value=duplicate_labels.get(
+                self.settings.get("duplicate_policy", "rename"), duplicate_labels["rename"]
             )
         )
         self.verify_var = tk.StringVar(
-            value=VERIFY_MODE_LABELS.get(
-                self.settings.get("verify_mode", "size"), VERIFY_MODE_LABELS["size"]
+            value=verify_labels.get(
+                self.settings.get("verify_mode", "size"), verify_labels["size"]
             )
         )
         self.dry_run_var = tk.BooleanVar(value=self.settings.get("dry_run", False))
@@ -283,10 +332,10 @@ class DSBApp(tk.Tk):
             for file_type in FILE_TYPE_ORDER
         }
         self.type_checkbuttons: dict[str, ttk.Checkbutton] = {}
-        self.status_var = tk.StringVar(value="Ready.")
-        self.summary_var = tk.StringVar(value=EMPTY_STATE_TEXT)
-        self._summary_text = EMPTY_STATE_TEXT
-        self.rule_var = tk.StringVar(value=RULE_HINT_BEFORE)
+        self.status_var = tk.StringVar(value=_("Ready."))
+        self.summary_var = tk.StringVar(value=empty_state_text())
+        self._summary_text = empty_state_text()
+        self.rule_var = tk.StringVar(value=rule_hint_before())
         self.duplicate_hint_var = tk.StringVar()
         self.verify_hint_var = tk.StringVar()
         self._wrap_labels: list[tuple[ttk.Label, tk.Misc, int]] = []
@@ -309,7 +358,7 @@ class DSBApp(tk.Tk):
         header = build_app_header(
             self,
             title=NDEX_ONE_TITLE,
-            tagline="Analyze camera files, preview the folder tree, then run a safe backup.",
+            tagline=_("Analyze camera files, preview the folder tree, then run a safe backup."),
             holder=self.brand_images,
         )
         header.grid(row=0, column=0, sticky="ew")
@@ -334,21 +383,21 @@ class DSBApp(tk.Tk):
         for frame in (left, right):
             frame.columnconfigure(1, weight=1)
 
-        ttk.Label(left, text="Source Folder", style="CardSection.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Label(left, text=_("Source Folder"), style="CardSection.TLabel").grid(row=0, column=0, sticky="w")
         source_entry = ttk.Entry(left, textvariable=self.source_var)
         source_entry.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(2, 6))
-        source_browse = ttk.Button(left, text="Browse", command=self._browse_source)
+        source_browse = ttk.Button(left, text=_("Browse"), command=self._browse_source)
         source_browse.grid(row=1, column=2, padx=(8, 0))
         self._input_controls.extend((source_entry, source_browse))
 
-        ttk.Label(left, text="Backup Destination", style="CardSection.TLabel").grid(row=2, column=0, sticky="w")
+        ttk.Label(left, text=_("Backup Destination"), style="CardSection.TLabel").grid(row=2, column=0, sticky="w")
         destination_entry = ttk.Entry(left, textvariable=self.destination_var)
         destination_entry.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(2, 6))
-        destination_browse = ttk.Button(left, text="Browse", command=self._browse_destination)
+        destination_browse = ttk.Button(left, text=_("Browse"), command=self._browse_destination)
         destination_browse.grid(row=3, column=2, padx=(8, 0))
         self._input_controls.extend((destination_entry, destination_browse))
 
-        ttk.Label(left, text="File Types", style="CardSection.TLabel").grid(row=4, column=0, sticky="w")
+        ttk.Label(left, text=_("File Types"), style="CardSection.TLabel").grid(row=4, column=0, sticky="w")
         types_frame = ttk.Frame(left, style="CardInner.TFrame")
         types_frame.grid(row=5, column=0, columnspan=3, sticky="ew", pady=(2, 6))
         types_frame.columnconfigure(0, weight=1)
@@ -386,22 +435,22 @@ class DSBApp(tk.Tk):
         options = ttk.Frame(left, style="CardInner.TFrame")
         options.grid(row=6, column=0, columnspan=3, sticky="ew")
         options.columnconfigure(1, weight=1)
-        ttk.Label(options, text="Duplicates", style="CardSection.TLabel").grid(row=0, column=0, sticky="w", padx=(0, 10))
+        ttk.Label(options, text=_("Duplicates"), style="CardSection.TLabel").grid(row=0, column=0, sticky="w", padx=(0, 10))
         duplicate_combo = ttk.Combobox(
             options,
             textvariable=self.duplicate_var,
-            values=list(DUPLICATE_POLICY_LABELS.values()),
+            values=list(duplicate_policy_labels().values()),
             state="readonly",
         )
         duplicate_combo.grid(row=0, column=1, sticky="ew")
         duplicate_hint = ttk.Label(options, textvariable=self.duplicate_hint_var, style="CardMuted.TLabel", justify="left")
         duplicate_hint.grid(row=1, column=0, columnspan=2, sticky="w", pady=(2, 6))
 
-        ttk.Label(options, text="Verify copy", style="CardSection.TLabel").grid(row=2, column=0, sticky="w", padx=(0, 10))
+        ttk.Label(options, text=_("Verify copy"), style="CardSection.TLabel").grid(row=2, column=0, sticky="w", padx=(0, 10))
         verify_combo = ttk.Combobox(
             options,
             textvariable=self.verify_var,
-            values=list(VERIFY_MODE_LABELS.values()),
+            values=list(verify_mode_labels().values()),
             state="readonly",
         )
         verify_combo.grid(row=2, column=1, sticky="ew")
@@ -417,7 +466,7 @@ class DSBApp(tk.Tk):
 
         dry_run_button = ttk.Checkbutton(
             left,
-            text="Dry Run (preview only, do not copy files)",
+            text=_("Dry Run (preview only, do not copy files)"),
             variable=self.dry_run_var,
             style="Card.TCheckbutton",
         )
@@ -432,13 +481,13 @@ class DSBApp(tk.Tk):
         buttons.grid(row=1, column=0, sticky="ew", pady=(8, 6))
         for column in range(2):
             buttons.columnconfigure(column, weight=1, uniform="actions")
-        self.analyze_button = ttk.Button(buttons, text="Analyze", command=self._start_analysis)
-        self.backup_button = ttk.Button(buttons, text="Start Backup", command=self._start_backup)
-        self.cancel_button = ttk.Button(buttons, text="Cancel", command=self._cancel_task)
-        self.results_button = ttk.Button(buttons, text="Job Results...", command=self._open_job_results)
-        self.open_button = ttk.Button(buttons, text="Open Backup Folder", command=self._open_backup_folder)
+        self.analyze_button = ttk.Button(buttons, text=_("Analyze"), command=self._start_analysis)
+        self.backup_button = ttk.Button(buttons, text=_("Start Backup"), command=self._start_backup)
+        self.cancel_button = ttk.Button(buttons, text=_("Cancel"), command=self._cancel_task)
+        self.results_button = ttk.Button(buttons, text=_("Job Results..."), command=self._open_job_results)
+        self.open_button = ttk.Button(buttons, text=_("Open Backup Folder"), command=self._open_backup_folder)
         self.handoff_button = ttk.Button(
-            buttons, text="Open in Image Manager", command=self._open_in_image_manager
+            buttons, text=_("Open in Image Manager"), command=self._open_in_image_manager
         )
         self.analyze_button.grid(row=0, column=0, sticky="ew", padx=(0, 4))
         self.backup_button.grid(row=0, column=1, sticky="ew", padx=(4, 0))
@@ -446,9 +495,9 @@ class DSBApp(tk.Tk):
         self.results_button.grid(row=1, column=1, sticky="ew", padx=(4, 0), pady=(6, 0))
         self.open_button.grid(row=2, column=0, sticky="ew", padx=(0, 4), pady=(6, 0))
         self.handoff_button.grid(row=2, column=1, sticky="ew", padx=(4, 0), pady=(6, 0))
-        Tooltip(self.cancel_button, CANCEL_HINT)
+        Tooltip(self.cancel_button, cancel_hint())
 
-        progress_frame = ttk.LabelFrame(left_panel, text="Progress", padding=(10, 6))
+        progress_frame = ttk.LabelFrame(left_panel, text=_("Progress"), padding=(10, 6))
         progress_frame.grid(row=2, column=0, sticky="ew", pady=(4, 0))
         progress_frame.columnconfigure(0, weight=1)
         progress_frame.rowconfigure(1, minsize=38)  # room for two status lines
@@ -462,7 +511,7 @@ class DSBApp(tk.Tk):
         right.rowconfigure(3, weight=2, minsize=80)
         right.rowconfigure(5, weight=3, minsize=64)
 
-        ttk.Label(right, text="Summary", style="CardSection.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Label(right, text=_("Summary"), style="CardSection.TLabel").grid(row=0, column=0, sticky="w")
         summary_label = ttk.Label(right, textvariable=self.summary_var, justify="left", style="Card.TLabel")
         summary_label.grid(row=1, column=0, sticky="ew", pady=(4, 12))
         self._wrap_labels.append((summary_label, right, 56))
@@ -471,18 +520,21 @@ class DSBApp(tk.Tk):
         for wrapped, _container, _margin in self._wrap_labels:
             wrapped.configure(wraplength=300)
 
-        ttk.Label(right, text="Date Preview", style="CardSection.TLabel").grid(row=2, column=0, sticky="w")
+        ttk.Label(right, text=_("Date Preview"), style="CardSection.TLabel").grid(row=2, column=0, sticky="w")
         columns = ("date", "folder", "files", "status")
+        headings = {
+            "date": _("Date"), "folder": _("Folder"), "files": _("Files"), "status": _("Status"),
+        }
         self.preview_treeview = ttk.Treeview(right, columns=columns, show="headings", height=10)
         self.preview_treeview.grid(row=3, column=0, sticky="nsew", pady=(6, 0))
         for column, width in zip(columns, (90, 140, 140, 70)):
-            self.preview_treeview.heading(column, text=column.title())
+            self.preview_treeview.heading(column, text=headings[column])
             self.preview_treeview.column(column, width=width, minwidth=50, anchor="w")
         tree_scroll = ttk.Scrollbar(right, orient="vertical", command=self.preview_treeview.yview)
         tree_scroll.grid(row=3, column=1, sticky="ns", pady=(6, 0))
         self.preview_treeview.configure(yscrollcommand=tree_scroll.set)
 
-        ttk.Label(right, text="Folder Tree Preview", style="CardSection.TLabel").grid(
+        ttk.Label(right, text=_("Folder Tree Preview"), style="CardSection.TLabel").grid(
             row=4, column=0, sticky="w", pady=(12, 0)
         )
         self.folder_preview = tk.Text(right, height=10, width=20, wrap="none")
@@ -492,7 +544,7 @@ class DSBApp(tk.Tk):
         folder_scroll.grid(row=5, column=1, sticky="ns", pady=(6, 0))
         self.folder_preview.configure(yscrollcommand=folder_scroll.set)
 
-        ttk.Label(right, text="Log", style="CardSection.TLabel").grid(row=6, column=0, sticky="w", pady=(12, 0))
+        ttk.Label(right, text=_("Log"), style="CardSection.TLabel").grid(row=6, column=0, sticky="w", pady=(12, 0))
         self.log_text = tk.Text(right, height=12, width=20, wrap="word")
         style_text_widget(self.log_text)
         self.log_text.grid(row=7, column=0, sticky="nsew", pady=(6, 0))
@@ -514,8 +566,8 @@ class DSBApp(tk.Tk):
                 label.configure(wraplength=width)
 
     def _update_option_hints(self, *_args) -> None:
-        self.duplicate_hint_var.set(DUPLICATE_POLICY_HINTS[self._selected_duplicate_policy()])
-        self.verify_hint_var.set(VERIFY_MODE_HINTS[self._selected_verify_mode()])
+        self.duplicate_hint_var.set(duplicate_policy_hints()[self._selected_duplicate_policy()])
+        self.verify_hint_var.set(verify_mode_hints()[self._selected_verify_mode()])
 
     def _primary_action(self):
         """(button, command) the Enter key triggers: Analyze first, Start Backup once analyzed."""
@@ -539,20 +591,20 @@ class DSBApp(tk.Tk):
         self.current_summary = None
         if not self.is_busy:
             if had_plan:
-                self.summary_var.set("Folders or file types changed. Press Analyze to update the plan.")
-                self.status_var.set("Press Analyze to update the backup plan.")
+                self.summary_var.set(_("Folders or file types changed. Press Analyze to update the plan."))
+                self.status_var.set(_("Press Analyze to update the backup plan."))
             else:
-                self.summary_var.set(EMPTY_STATE_TEXT)
-            self.rule_var.set(RULE_HINT_BEFORE)
+                self.summary_var.set(empty_state_text())
+            self.rule_var.set(rule_hint_before())
         self._update_button_states()
 
     def _browse_source(self) -> None:
-        selected = filedialog.askdirectory(title="Select source folder")
+        selected = filedialog.askdirectory(title=_("Select source folder"))
         if selected:
             self.source_var.set(selected)
 
     def _browse_destination(self) -> None:
-        selected = filedialog.askdirectory(title="Select backup destination")
+        selected = filedialog.askdirectory(title=_("Select backup destination"))
         if selected:
             self.destination_var.set(selected)
 
@@ -587,10 +639,18 @@ class DSBApp(tk.Tk):
                 checkbutton.grid_remove()
 
     def _selected_verify_mode(self) -> str:
-        return VERIFY_LABEL_TO_MODE.get(self.verify_var.get(), "size")
+        label = self.verify_var.get()
+        for mode, text in verify_mode_labels().items():
+            if text == label:
+                return mode
+        return "size"
 
     def _selected_duplicate_policy(self) -> str:
-        return DUPLICATE_LABEL_TO_POLICY.get(self.duplicate_var.get(), "rename")
+        label = self.duplicate_var.get()
+        for policy, text in duplicate_policy_labels().items():
+            if text == label:
+                return policy
+        return "rename"
 
     def _save_settings(self) -> None:
         self.config_manager.save(
@@ -624,24 +684,24 @@ class DSBApp(tk.Tk):
         if self.is_busy or self._closing:
             return
         if not self.source_var.get().strip() or not self.destination_var.get().strip():
-            messagebox.showerror("Missing Folder", "Select both source and backup destination folders.")
+            messagebox.showerror(_("Missing Folder"), _("Select both source and backup destination folders."))
             return
         source = Path(self.source_var.get().strip())
         destination = Path(self.destination_var.get().strip())
         if not source.is_dir():
-            messagebox.showerror("Invalid Source", INVALID_SOURCE_MESSAGE)
+            messagebox.showerror(_("Invalid Source"), invalid_source_message())
             return
         if not self._destination_usable(destination):
             return
         if same_folder(source, destination):
             messagebox.showerror(
-                "Invalid Destination",
-                "The backup destination must be different from the source folder.",
+                _("Invalid Destination"),
+                _("The backup destination must be different from the source folder."),
             )
             return
         selected_types = self._selected_types()
         if not selected_types:
-            messagebox.showwarning("No File Types", "Select at least one file type to scan.")
+            messagebox.showwarning(_("No File Types"), _("Select at least one file type to scan."))
             return
 
         self._save_settings()
@@ -653,16 +713,23 @@ class DSBApp(tk.Tk):
         }
         # The analysis loop has no cancellation point, so Cancel stays disabled.
         self.is_analyzing = True
-        self._set_busy(True, f"Analyzing files — {ANALYZING_SUFFIX}. {CANCEL_HINT}")
+        self._set_busy(
+            True,
+            _("Analyzing files — {detail}. {cancel_hint}").format(
+                detail=analyzing_suffix(), cancel_hint=cancel_hint()
+            ),
+        )
         self._run_worker(self._analyze_worker)
 
     def _destination_usable(self, destination: Path) -> bool:
         """A backup root that exists as a folder, or can be created in one."""
         if destination.exists() and not destination.is_dir():
-            messagebox.showerror("Invalid Destination", "Backup destination must be a folder.")
+            messagebox.showerror(_("Invalid Destination"), _("Backup destination must be a folder."))
             return False
         if not destination.exists() and not destination.parent.exists():
-            messagebox.showerror("Invalid Destination", "Select a destination whose parent folder already exists.")
+            messagebox.showerror(
+                _("Invalid Destination"), _("Select a destination whose parent folder already exists.")
+            )
             return False
         return True
 
@@ -681,7 +748,7 @@ class DSBApp(tk.Tk):
         if self.is_busy or self._closing:
             return
         if not self.current_summary:
-            messagebox.showinfo("Backup", "Press Analyze first.")
+            messagebox.showinfo(_("Backup"), _("Press Analyze first."))
             return
 
         dry_run = self.dry_run_var.get()
@@ -701,7 +768,7 @@ class DSBApp(tk.Tk):
             "dry_run": dry_run,
             "retry": None,
         }
-        self._set_busy(True, "Starting dry run..." if dry_run else "Starting backup...")
+        self._set_busy(True, _("Starting dry run...") if dry_run else _("Starting backup..."))
         self._run_worker(self._backup_worker)
 
     def _backup_worker(self) -> None:
@@ -716,7 +783,7 @@ class DSBApp(tk.Tk):
         )
         if not result.dry_run:
             if self._record_backup_session(result) is None:
-                self.ui_queue.put(("record_warning", "Backup finished, but Job Results could not be saved."))
+                self.ui_queue.put(("record_warning", _("Backup finished, but Job Results could not be saved.")))
         self.ui_queue.put(("backup_done", result))
         if not result.dry_run and self.pending_backup["retry"] is None:
             # The folders now exist: refresh the "new" markers in the previews.
@@ -731,7 +798,7 @@ class DSBApp(tk.Tk):
     def _cancel_task(self) -> None:
         if self.is_busy and not self.is_analyzing:
             self.cancel_event.set()
-            self.status_var.set(STOPPING_STATUS)
+            self.status_var.set(stopping_status())
             self._update_button_states()
 
     def _request_close(self) -> None:
@@ -741,26 +808,28 @@ class DSBApp(tk.Tk):
             self.destroy()
             return
         if not messagebox.askyesno(
-            "Close NDEX One",
-            "A task is running. Stop after the current file and close when its results are saved?\n\n"
-            "An active analysis must finish before the window closes.",
+            _("Close NDEX One"),
+            _(
+                "A task is running. Stop after the current file and close when its results are saved?\n\n"
+                "An active analysis must finish before the window closes."
+            ),
         ):
             return
         self._closing = True
         self.cancel_event.set()
-        self.status_var.set("Closing safely. Waiting for the running task and its results...")
+        self.status_var.set(_("Closing safely. Waiting for the running task and its results..."))
         self._update_button_states()
 
     def _open_in_image_manager(self, destination: str | None = None) -> None:
         destination = self.destination_var.get().strip() if destination is None else destination
         if not destination or not Path(destination).is_dir():
-            messagebox.showerror("Missing Folder", "Backup destination does not exist.")
+            messagebox.showerror(_("Missing Folder"), _("Backup destination does not exist."))
             return
         launched = launch_app("image_manager", ["--open", "--source", destination])
         if not launched:
             messagebox.showerror(
-                "Handoff",
-                "Could not find NDEX Image Manager. Build or install it first.",
+                _("Handoff"),
+                _("Could not find NDEX Image Manager. Build or install it first."),
             )
 
     def _open_job_results(self, select: Path | None = None) -> None:
@@ -783,12 +852,12 @@ class DSBApp(tk.Tk):
         """
         if self.is_busy or self._closing:
             messagebox.showinfo(
-                NDEX_ONE_TITLE, "Wait for the running job to finish, then retry."
+                NDEX_ONE_TITLE, _("Wait for the running job to finish, then retry.")
             )
             return
         if not plan.report.destination:
             messagebox.showerror(
-                "Invalid Destination", "That job did not record a backup destination."
+                _("Invalid Destination"), _("That job did not record a backup destination.")
             )
             return
         destination = Path(plan.report.destination)
@@ -804,8 +873,11 @@ class DSBApp(tk.Tk):
             "dry_run": self.dry_run_var.get(),
             "retry": plan,
         }
-        verb = "Rehearsing" if self.pending_backup["dry_run"] else "Retrying"
-        self._set_busy(True, f"{verb} {len(plan.paths)} file(s)...")
+        if self.pending_backup["dry_run"]:
+            status = _("Rehearsing {files}...")
+        else:
+            status = _("Retrying {files}...")
+        self._set_busy(True, status.format(files=_files(len(plan.paths))))
         self._run_worker(self._retry_worker)
 
     def _retry_worker(self) -> None:
@@ -826,7 +898,7 @@ class DSBApp(tk.Tk):
         if destination.exists():
             os.startfile(destination)  # type: ignore[attr-defined]
         else:
-            messagebox.showerror("Missing Folder", "Backup destination does not exist.")
+            messagebox.showerror(_("Missing Folder"), _("Backup destination does not exist."))
 
     def _run_worker(self, target) -> None:
         self.cancel_event.clear()
@@ -862,7 +934,7 @@ class DSBApp(tk.Tk):
 
     def _process_ui_queue(self) -> None:
         # Yield to input/paint events even when a fast job fills the queue.
-        for _ in range(100):
+        for _turn in range(100):
             try:
                 item = self.ui_queue.get_nowait()
             except queue.Empty:
@@ -873,7 +945,7 @@ class DSBApp(tk.Tk):
                 self.log_text.insert("end", item[1] + "\n")
                 self.log_text.see("end")
             elif kind == "progress":
-                _, stage, current, total, name = item
+                _kind, stage, current, total, name = item
                 progress = 0 if total == 0 else (current / total) * 100
                 self.progress_var.set(progress)
                 if not self.cancel_event.is_set() and not self._closing:
@@ -889,7 +961,7 @@ class DSBApp(tk.Tk):
                     self._set_busy(False, self._analysis_done_status(summary))
                 else:
                     self.current_summary = None
-                    self._set_busy(False, "Inputs changed. Press Analyze again.")
+                    self._set_busy(False, _("Inputs changed. Press Analyze again."))
             elif kind == "backup_done":
                 result = item[1]
                 status = build_completion_status(result)
@@ -900,19 +972,21 @@ class DSBApp(tk.Tk):
                     pass
                 elif result.verification_failed or result.errors:
                     if messagebox.askyesno(
-                        "Backup Warnings",
-                        f"{result.verification_failed} file(s) failed verification and "
-                        f"{result.errors} total error(s) occurred.\n\n"
-                        "Failed files were NOT written to the backup destination, "
-                        "so existing backups are untouched.\n\n"
-                        "Open Job Results now? Use Retry Failed there to run just "
-                        "those files again.",
+                        _("Backup Warnings"),
+                        _(
+                            "{failed} file(s) failed verification and "
+                            "{errors} total error(s) occurred.\n\n"
+                            "Failed files were NOT written to the backup destination, "
+                            "so existing backups are untouched.\n\n"
+                            "Open Job Results now? Use Retry Failed there to run just "
+                            "those files again."
+                        ).format(failed=result.verification_failed, errors=result.errors),
                     ):
                         self._open_job_results()
                 elif result.total:
                     self._show_completion_dialog(status)
             elif kind == "preview_refresh":
-                _, destination, rows, lines = item
+                _kind, destination, rows, lines = item
                 if self.current_summary is not None and same_folder(
                     self.current_summary.backup_root, destination
                 ):
@@ -920,10 +994,10 @@ class DSBApp(tk.Tk):
             elif kind == "error":
                 self._closing = False
                 self._set_busy(False, item[1])
-                messagebox.showerror("Error", item[1])
+                messagebox.showerror(_("Error"), item[1])
             elif kind == "record_warning":
                 self._closing = False
-                messagebox.showwarning("Job Results", item[1])
+                messagebox.showwarning(_("Job Results"), item[1])
 
         if (self._closing and not self.is_busy and self.ui_queue.empty()
                 and not (self.worker_thread and self.worker_thread.is_alive())):
@@ -936,21 +1010,23 @@ class DSBApp(tk.Tk):
         total = len(summary.items)
         span = format_day_span(summary.date_range)
         lines = [
-            f"Source: {summary.source_dir}",
-            f"Destination: {summary.backup_root}",
-            f"Total: {_plural(total, 'file')} ({format_size(summary.total_size)})",
-            f"Files: {format_type_counts(summary.counts)}",
-            f"Dates: {span}" if span else "Dates: No supported files found",
+            _("Source: {path}").format(path=summary.source_dir),
+            _("Destination: {path}").format(path=summary.backup_root),
+            _("Total: {files} ({size})").format(files=_files(total), size=format_size(summary.total_size)),
+            _("Files: {types}").format(types=format_type_counts(summary.counts)),
+            _("Dates: {span}").format(span=span) if span else _("Dates: No supported files found"),
         ]
         if summary.free_space is not None:
-            lines.append(f"Free space at destination: {format_size(summary.free_space)}")
+            lines.append(
+                _("Free space at destination: {size}").format(size=format_size(summary.free_space))
+            )
         for note in (
             free_space_warning(summary.total_size, summary.free_space),
             fallback_note(summary.fallback_count),
         ):
             if note:
                 lines.append(note)
-        lines.append(f"Log File: {self.logger.log_path}")
+        lines.append(_("Log File: {path}").format(path=self.logger.log_path))
         summary_text = "\n".join(lines)
         self._summary_text = summary_text
         self.summary_var.set(summary_text)
@@ -968,7 +1044,7 @@ class DSBApp(tk.Tk):
                     row.date_label,
                     row.folder_rel_path.as_posix(),
                     format_type_counts(row.type_counts),
-                    row.status,
+                    preview_status_label(row.status),
                 ),
             )
 
@@ -978,18 +1054,22 @@ class DSBApp(tk.Tk):
 
     def _progress_text(self, stage: str, current: int, total: int, name: str) -> str:
         if stage == "analyze":
-            return f"Analyzing {current}/{total}: {name} — {ANALYZING_SUFFIX}"
-        verb = "Checking" if self.pending_backup and self.pending_backup.get("dry_run") else "Copying"
-        return f"{verb} {current}/{total}: {name}"
+            return _("Analyzing {current}/{total}: {name} — {detail}").format(
+                current=current, total=total, name=name, detail=analyzing_suffix()
+            )
+        if self.pending_backup and self.pending_backup.get("dry_run"):
+            template = _("Checking {current}/{total}: {name}")
+        else:
+            template = _("Copying {current}/{total}: {name}")
+        return template.format(current=current, total=total, name=name)
 
     def _analysis_done_status(self, summary) -> str:
         count = len(summary.items)
         if not count:
-            return "Analysis done: no supported files found in the source folder."
-        return (
-            f"Analysis done: {_plural(count, 'file')} ready to copy. "
-            "Press Start Backup when you are ready."
-        )
+            return _("Analysis done: no supported files found in the source folder.")
+        return _(
+            "Analysis done: {files} ready to copy. Press Start Backup when you are ready."
+        ).format(files=_files(count))
 
     def _show_completion_dialog(self, status: str) -> None:
         """A small "all done" dialog with the next steps a photographer wants."""
@@ -1001,11 +1081,11 @@ class DSBApp(tk.Tk):
         dialog.resizable(False, False)
         frame = ttk.Frame(dialog, padding=20, style="Card.TFrame")
         frame.pack(fill="both", expand=True)
-        ttk.Label(frame, text="Backup complete", style="CardSection.TLabel").pack(anchor="w")
+        ttk.Label(frame, text=_("Backup complete"), style="CardSection.TLabel").pack(anchor="w")
         ttk.Label(frame, text=status, style="Card.TLabel", wraplength=380, justify="left").pack(
             anchor="w", pady=(6, 14)
         )
-        ttk.Label(frame, text=f"Destination: {destination}", style="CardMuted.TLabel",
+        ttk.Label(frame, text=_("Destination: {path}").format(path=destination), style="CardMuted.TLabel",
                   wraplength=380, justify="left").pack(anchor="w", pady=(0, 14))
         row = ttk.Frame(frame, style="CardInner.TFrame")
         row.pack(fill="x")
@@ -1015,18 +1095,18 @@ class DSBApp(tk.Tk):
             command()
 
         ttk.Button(
-            row, text="Open Backup Folder",
+            row, text=_("Open Backup Folder"),
             command=lambda: run(lambda: self._open_backup_folder(destination)),
         ).pack(
             side="left", padx=(0, 6)
         )
         ttk.Button(
-            row, text="Open in Image Manager",
+            row, text=_("Open in Image Manager"),
             command=lambda: run(lambda: self._open_in_image_manager(destination)),
         ).pack(
             side="left", padx=(0, 6)
         )
-        close = ttk.Button(row, text="Close", style="Accent.TButton", command=dialog.destroy)
+        close = ttk.Button(row, text=_("Close"), style="Accent.TButton", command=dialog.destroy)
         close.pack(side="right")
         dialog.bind("<Escape>", lambda _e: dialog.destroy())
         dialog.bind("<Return>", lambda _e: dialog.destroy())
@@ -1053,15 +1133,21 @@ class DSBApp(tk.Tk):
         )
 
     def _render_backup_result(self, result) -> None:
-        header = "Dry run result (nothing was copied)" if result.dry_run else "Backup result"
-        verb = "would be copied" if result.dry_run else "copied"
+        if result.dry_run:
+            first = _("Dry run result (nothing was copied): {copied} of {total} would be copied")
+        else:
+            first = _("Backup result: {copied} of {total} copied")
         lines = [
-            f"{header}: {result.copied} of {result.total} {verb}",
-            f"  Verified {result.verified} · Verify failed {result.verification_failed}",
-            f"  Skipped {result.skipped} · Overwritten {result.overwritten} · Errors {result.errors}",
+            first.format(copied=result.copied, total=result.total),
+            _("  Verified {verified} · Verify failed {failed}").format(
+                verified=result.verified, failed=result.verification_failed
+            ),
+            _("  Skipped {skipped} · Overwritten {overwritten} · Errors {errors}").format(
+                skipped=result.skipped, overwritten=result.overwritten, errors=result.errors
+            ),
         ]
         if result.cancelled:
-            lines.append(f"  Stopped early; {not_run_count(result)} files not run.")
+            lines.append(_("  Stopped early; {count} files not run.").format(count=not_run_count(result)))
         self.summary_var.set(self._summary_text + "\n\n" + "\n".join(lines))
 
     def _set_busy(self, busy: bool, status: str, progress: float | None = 0.0) -> None:

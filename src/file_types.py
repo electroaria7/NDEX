@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from ndex_common.i18n import _
 from ndex_common.raw_formats import BRAND_ORDER, RAW_FORMATS, extensions_for_brand
 
 
@@ -22,6 +23,8 @@ def _build_raw_brands() -> dict[str, dict]:
             label = fmt.brand_label
             types[fmt.type_key] = {
                 "label": f"{fmt.brand_label} RAW (.{fmt.type_key.upper()})",
+                "brand": fmt.brand_label,
+                "ext": fmt.type_key.upper(),
                 "extensions": {extension},
             }
         brands[brand_key] = {"label": label, "types": types}
@@ -63,8 +66,13 @@ def get_file_type_for_path(file_path: Path) -> str:
 
 
 def get_file_type_label(file_type: str) -> str:
+    """Checkbox text for a type. The definition's English ``label`` stays the data."""
     definition = get_file_type_definitions().get(file_type)
-    return definition["label"] if definition else file_type.upper()
+    if definition is None:
+        return file_type.upper()
+    if "brand" in definition:
+        return _("{brand} RAW (.{ext})").format(brand=definition["brand"], ext=definition["ext"])
+    return definition["label"]
 
 
 def get_file_type_group(file_type: str) -> str:

@@ -15,8 +15,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Iterator, Mapping, Sequence
 
+from ndex_common.i18n import _
 from ndex_common.manifest import TYPES, load_manifest, manifests_dir
 
+# Internal keys -> English source text. Display goes through type_text() and
+# app_text() so the active language applies; the keys are what manifests hold.
 TYPE_LABELS = {
     "backup": "Backup",
     "extract": "Extract",
@@ -30,6 +33,44 @@ APP_LABELS = {
     "auto_selector": "Auto Selector",
     "frame": "NDEX Frame",
 }
+
+
+def type_text(job_type: str) -> str:
+    """Translated name of a job type (the key itself when unknown)."""
+    names = {
+        "backup": _("Backup"),
+        "extract": _("Extract"),
+        "export": _("Export"),
+        "select_handoff": _("Send to Frame"),
+    }
+    return names.get(job_type, job_type)
+
+
+def app_text(app: str) -> str:
+    """Translated name of an app (the key itself when unknown)."""
+    names = {
+        "ndex_one": _("NDEX One"),
+        "image_manager": _("Image Manager"),
+        "auto_selector": _("Auto Selector"),
+        "frame": _("NDEX Frame"),
+    }
+    return names.get(app, app)
+
+
+def count_text(key: str) -> str:
+    """Translated word for a manifest count key such as ``copied``."""
+    names = {
+        "copied": _("copied"),
+        "exported": _("exported"),
+        "written": _("written"),
+        "selected": _("selected"),
+        "overwritten": _("overwritten"),
+        "skipped": _("skipped"),
+        "ambiguous": _("ambiguous"),
+        "missing": _("missing"),
+        "failed": _("failed"),
+    }
+    return names.get(key, key)
 
 # The job types each app writes, so "latest per app" can read the
 # latest-{app}-{type}.json pointers instead of listing the whole folder.
@@ -65,7 +106,7 @@ class JobItem:
     def name(self) -> str:
         """The file name alone, for either kind of path separator."""
         text = self.path.replace(chr(92), "/").rstrip("/")
-        return text.rsplit("/", 1)[-1] if text else "(no path)"
+        return text.rsplit("/", 1)[-1] if text else _("(no path)")
 
     @property
     def folder(self) -> str:
@@ -100,14 +141,14 @@ class JobReport:
     @property
     def type_label(self) -> str:
         if self.type == "export" and self.context.get("operation") == "xmp":
-            return "XMP Export"
+            return _("XMP Export")
         if self.type == "select_handoff" and self.context.get("target") == "auto_selector":
-            return "Send to Auto Selector"
-        return TYPE_LABELS.get(self.type, self.type)
+            return _("Send to Auto Selector")
+        return type_text(self.type)
 
     @property
     def app_label(self) -> str:
-        return APP_LABELS.get(self.app, self.app)
+        return app_text(self.app)
 
     @property
     def cancelled(self) -> bool:
@@ -126,8 +167,10 @@ class JobReport:
     @property
     def list_label(self) -> str:
         """A short row for the job list: marker, type, time, and the outcome."""
-        outcome = f"{self.failed_count} failed" if self.has_problems else self.count_summary
-        label = f"{self.type_label} (cancelled)" if self.cancelled else self.type_label
+        outcome = (
+            _("{count} failed").format(count=self.failed_count) if self.has_problems else self.count_summary
+        )
+        label = f"{self.type_label} {_('(cancelled)')}" if self.cancelled else self.type_label
         # Outcome before time: a narrow list truncates the tail, and the
         # outcome is the part worth seeing.
         text = f"{label} - {outcome} - {self.display_time}"
@@ -147,18 +190,18 @@ class JobReport:
         except ValueError:
             return self.created_at
         local = stamp.replace(tzinfo=timezone.utc).astimezone()
-        return local.strftime("%Y-%m-%d %H:%M")
+        return local.strftime(_("%Y-%m-%d %H:%M"))
 
     @property
     def count_summary(self) -> str:
         """``42 copied, 3 skipped, 1 failed`` — only non-zero counts."""
         parts = [
-            f"{int(self.counts[key])} {key}"
+            _("{count} {label}").format(count=int(self.counts[key]), label=count_text(key))
             for key in COUNT_ORDER
             if int(self.counts.get(key, 0)) > 0
         ]
         if not parts:
-            return "nothing recorded"
+            return _("nothing recorded")
         return ", ".join(parts)
 
     @property
@@ -166,7 +209,7 @@ class JobReport:
         """One line for a card or list row."""
         text = f"{self.type_label} - {self.display_time} - {self.count_summary}"
         if self.cancelled:
-            text = f"{text} (cancelled)"
+            text = f"{text} {_('(cancelled)')}"
         return text
 
     def items_by_status(self) -> dict[str, tuple[JobItem, ...]]:
