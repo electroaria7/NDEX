@@ -20,7 +20,7 @@ Validation date: 2026-10-11. Release target: [v0.9.6](https://github.com/electro
 | Frame | 230 |
 | **Total** | **729** |
 
-Suites used temporary `LOCALAPPDATA`; Qt used `QT_QPA_PLATFORM=offscreen`. The Image Manager suite was run three more times in a row after the thumbnail-worker shutdown fix (all passed; before the fix it failed about one run in three and could leave a process running). `tools/i18n_extract.py --check`: 793 messages and 35 plural entries, 0 missing, 0 unused. CI_LINE
+Suites used temporary `LOCALAPPDATA`; Qt used `QT_QPA_PLATFORM=offscreen`. The Image Manager suite was run three more times in a row after the thumbnail-worker shutdown fix (all passed; before the fix it failed about one run in three and could leave a process running). `tools/i18n_extract.py --check`: 793 messages and 35 plural entries, 0 missing, 0 unused. [CI run 38183098024](https://github.com/electroaria7/NDEX/actions/runs/38183098024) passed on Windows with Python 3.10 and 3.12 at `2ef7bdf`. An earlier 3.10 run was cancelled at the 30-minute limit: a streaming-scan test timed out on the slower runner and left a live Tk window; the test cleanup now stops the scan before closing (test-only change, no application code affected).
 
 RAW formats were checked with 19 real CC0 samples (Canon CR3/CR2/CRW, Sony ARW/SR2/SRF, Nikon NEF/NRW); see [RAW compatibility](RAW_Compatibility.md). Embedded previews were also extracted from CR2 and ARW files in a Korean-named folder (5184×3456 and 7008×4672).
 
