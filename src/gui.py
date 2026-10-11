@@ -380,8 +380,7 @@ class DSBApp(tk.Tk):
         # A useful initial sash position must not depend on the canvas's tiny request size.
         self.after_idle(lambda: body.sashpos(0, max(500, int(body.winfo_width() * 0.48))))
 
-        for frame in (left, right):
-            frame.columnconfigure(1, weight=1)
+        left.columnconfigure(1, weight=1)
 
         ttk.Label(left, text=_("Source Folder"), style="CardSection.TLabel").grid(row=0, column=0, sticky="w")
         source_entry = ttk.Entry(left, textvariable=self.source_var)
@@ -508,6 +507,8 @@ class DSBApp(tk.Tk):
         left.bind("<Configure>", self._rewrap_labels, add="+")
         left_panel.bind("<Configure>", self._rewrap_labels, add="+")
 
+        # Column 0 takes the pane width so the tables sit next to their scrollbars.
+        right.columnconfigure(0, weight=1)
         right.rowconfigure(3, weight=2, minsize=80)
         right.rowconfigure(5, weight=3, minsize=64)
 
