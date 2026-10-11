@@ -129,6 +129,7 @@ class MainWindow(QMainWindow):
             self.setWindowIcon(QIcon(str(icon_path)))
         self._build_toolbar()
         self._build_workspace()
+        self._fit_minimum_width_to_toolbar()
         self._reload_preset_combos()
         self._connect_signals()
         self._install_shortcuts()
@@ -256,6 +257,7 @@ class MainWindow(QMainWindow):
 
     def _build_toolbar(self) -> None:
         toolbar = QToolBar("Workspace", self)
+        self.toolbar = toolbar
         toolbar.setMovable(False)
         self.addToolBar(toolbar)
         self.open_files_button = QPushButton("Open Files")
@@ -280,7 +282,7 @@ class MainWindow(QMainWindow):
         tip = "How big the finished files are and which format they are saved in."
         output_profile_label.setToolTip(tip)
         self.output_profile_combo.setToolTip(tip)
-        for combo, characters in ((self.frame_preset_combo, 9), (self.output_profile_combo, 14)):
+        for combo, characters in ((self.frame_preset_combo, 14), (self.output_profile_combo, 14)):
             # Size to a few characters, not the longest preset name, so the toolbar fits.
             combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
             combo.setMinimumContentsLength(characters)
@@ -293,6 +295,12 @@ class MainWindow(QMainWindow):
         toolbar.addWidget(self.manage_presets_button)
         self.job_results_button = QPushButton("Job Results")
         toolbar.addWidget(self.job_results_button)
+
+    def _fit_minimum_width_to_toolbar(self) -> None:
+        """Never let the window get narrower than its toolbar (no » overflow menu)."""
+        self.toolbar.adjustSize()
+        needed = self.toolbar.sizeHint().width() + 8
+        self.setMinimumWidth(max(self.minimumSizeHint().width(), needed))
 
     def _build_workspace(self) -> None:
         root = QWidget()
@@ -418,7 +426,7 @@ class MainWindow(QMainWindow):
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
         splitter.setStretchFactor(2, 0)
-        splitter.setSizes([216, 664, 300])
+        splitter.setSizes([256, 624, 300])
         root_layout.addWidget(splitter, 1)
 
         footer = QWidget()
