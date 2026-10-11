@@ -105,7 +105,7 @@ KIND_NAMES = {"scan": "Scan", "backup": "Backup", "export": "Export", "xmp": "XM
 PROGRESS_VERBS = {"scan": "Scanning", "backup": "Backing up", "export": "Exporting", "xmp": "Writing XMP"}
 SHORTCUT_HINT = (
     "P Pick \u00b7 X Reject \u00b7 M Maybe \u00b7 U Clear \u00b7 0\u20135 Stars \u00b7 "
-    "\u2190/\u2192 Move \u00b7 F Full screen \u00b7 Ctrl+Z Undo \u00b7 Ctrl+O Open"
+    "\u2190/\u2192 Move \u00b7 F Full screen \u00b7 Ctrl+Z Undo"
 )
 # Keys must stay editable/usable inside these widgets, so arrows are not hijacked.
 TEXT_INPUT_CLASSES = frozenset({"TCombobox", "TEntry", "Entry", "TSpinbox", "Spinbox", "Text"})
