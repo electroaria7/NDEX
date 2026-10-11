@@ -8,14 +8,13 @@ from PySide6.QtCore import QPoint, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QMouseEvent, QPainter, QPixmap
 from PySide6.QtWidgets import QWidget
 
+from ndex_common.i18n import _
 from ndex_common.theme import PREVIEW_WELL, PREVIEW_WELL_TEXT
 from ndex_frame.core.geometry import ProjectedRenderPlan, build_render_plan, project_render_plan
 from ndex_frame.core.models import RenderPlan
 
 
 HAIRLINE = "#6B7482"
-EMPTY_TEXT = "Open photos or a folder to preview\nYou can also drag them into this window"
-DRAG_HINT = "Drag the photo to reposition"
 
 
 def caption_text(plan: RenderPlan, ratio: tuple[int, int] | None = None) -> str:
@@ -78,7 +77,7 @@ class PreviewWidget(QWidget):
         projected = self.projected_plan()
         if projected is None:
             painter.setPen(QColor(PREVIEW_WELL_TEXT))
-            painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, EMPTY_TEXT)
+            painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, _("Open photos or a folder to preview\nYou can also drag them into this window"))
             return
         canvas = QRectF(
             projected.canvas_left,
@@ -103,7 +102,7 @@ class PreviewWidget(QWidget):
         painter.drawRect(canvas.adjusted(-0.5, -0.5, 0.5, 0.5))
         self._paint_pill(painter, caption_text(self._plan, self._ratio), bottom=True)
         if self._show_hint:
-            self._paint_pill(painter, DRAG_HINT, bottom=False)
+            self._paint_pill(painter, _("Drag the photo to reposition"), bottom=False)
 
     def _paint_pill(self, painter: QPainter, text: str, *, bottom: bool) -> None:
         metrics = painter.fontMetrics()
