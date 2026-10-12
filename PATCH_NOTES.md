@@ -2,40 +2,52 @@
 
 ## 0.9.6 Beta — 2026-10-11
 
-This beta adds a shared language selector and wider RAW support, reworks Image Manager's shot browsing, undo, and grid view, and includes fixes from the 0.9.6 integration review. Packages: `NDEX_v0.9.6.zip` and `NDEX_Setup_0.9.6.exe`. The channel remains `beta`; previous releases remain available separately.
+This update focuses on browsing and selecting photos in Image Manager, reusing export settings in Frame, and broader RAW support. It also adds the foundation for choosing the interface language; Korean translations will follow.
 
-- **Localization:** Add shared i18n with English source text as keys and a language selector in the Launcher (System default, English, 한국어). The choice applies on the next app start. All five apps' UI text is wrapped. `ndex_common/locales/ko.json` contains every message key, but its values are still empty, so the UI stays in English until Korean translations are added. Catalogs can be overridden in `%LOCALAPPDATA%\NDEX\locales` without rebuilding, and an empty translation falls back to English. `tools/i18n_extract.py` keeps catalogs complete (`--check`, safe `--prune`); see [docs/Localization.md](docs/Localization.md).
-- **RAW:** Share one RAW format table covering Canon CR3, CR2, and CRW (new), Sony ARW, SRF, and SR2, Nikon NEF and NRW, plus DNG in Auto Selector. Nineteen real CC0 sample files were checked for capture dates, metadata, XMP sidecar naming, Auto Selector matching, and backup copy-and-verify. Image Manager uses the largest embedded preview with RAW orientation applied, and NDEX One enables CRW by default. See [docs/RAW_Compatibility.md](docs/RAW_Compatibility.md).
-- **Image Manager:** Show RAW+JPG files as one shot row (View → "Show RAW+JPG as one row", on by default). Pick, Maybe, Reject, and ratings apply to both files of a pair. Add Undo/Redo (Ctrl+Z, Ctrl+Y or Ctrl+Shift+Z; 100 steps), keyed by file path. Scans stream results, can be cancelled with Cancel or Esc, and reuse unchanged files on rescan. Add a virtualized thumbnail Grid view (G; Small, Medium, Large) and a single-row compact toolbar. Measured with 2,000 shots: grid switch about 9 ms, scroll p95 about 5 ms.
-- **Frame:** Show thumbnails in the image list. One Presets manager covers Frames and Outputs (New, Duplicate, Edit, Rename, Delete, Make Default, Use as current); new presets capture the current edits. Job Results is a table, the toolbar fits the minimum width, and edited photos show an "(edited)" marker. Preflight, warnings, and shortcuts from the earlier Frame UX pass are included (see below).
-- **Fixes:** Image Manager undo now works after a rescan and after a RAW partner is added. Frame preset creation uses the current edits, and "Use as current" survives closing the manager. Frame and Image Manager shut down background workers before their windows close, which fixes a Python 3.10 CI temp-folder failure and a stuck test process. The translation extractor scans every app, and its prune is safe. NDEX One's preview tables sit next to their scrollbars again. Accidental worktree gitlinks were removed, and `.claude/` is ignored.
+### Image Manager: browse and select photos
 
-Not verified in this release: Lightroom/Evoto XMP interpretation, upgrades from older installs, high-DPI multi-monitor use, real portrait RAW orientation, and Korean translations.
+- View RAW+JPG pairs as one shot row, enabled by default. Pick, Maybe, Reject, and star ratings apply to both files; separate rows remain available from the View menu.
+- Undo and redo selection/rating changes with Ctrl+Z and Ctrl+Y (or Ctrl+Shift+Z), up to 100 steps.
+- Browse thumbnails in Grid view with **G**, choosing Small, Medium, or Large thumbnails.
+- See photos appear while a folder scan runs, cancel with Esc, and reuse unchanged files on rescan.
+- Reach Pick, Maybe, Reject, Clear, export, and handoff actions from a compact, single-row toolbar.
 
-Validation: **729 source tests passed, one skipped** (shared/One 287, Image Manager 112, Auto Selector 73, Launcher 27, Frame 230). All five EXEs and the installer were rebuilt; the packaged Korean-path backup, catalog scan, RAW/XMP copy and repeat-run preservation, and Frame export smoke checks passed, each EXE ran 35 seconds without stderr or crash logs, and the bundled locales were loaded from a packaged Launcher. Details: [release validation](docs/Release_Validation_0.9.6.md).
+### Frame: manage presets and export with clearer feedback
 
-Review: [0.9.6 review and follow-up roadmap](docs/obsidian/NDEX/15_0.9.6_검수_추가작업_2026-10-11.md). Evidence summary: [review log](docs/logs/2026-10-11-release-0.9.6-review.log).
+- Identify photos with list thumbnails and an "(edited)" marker.
+- Manage Frame and Output presets in one window: create, duplicate, edit, rename, delete, set a default, or use a preset as current. New presets capture the current edits.
+- Review output size, format, color space, metadata, destination, and an example filename before exporting. Filename conflicts default to **Skip existing**.
+- See import summaries, photo warnings, actionable errors, and completion results with a table of job details. Disabled Export buttons explain what is missing.
+- Import with drag and drop or keyboard shortcuts; stop an export after the current photo with Esc or **Stop After This Photo**.
+- Keep long output paths and toolbar controls within the window. Distinguish changes to all photos from adjustments to one photo, with confirmation before applying framing to all.
+- Add a border, size caption, and drag hint to the preview, clearer output-profile descriptions, and "copy" names for duplicated presets.
 
-### Included from the icon and UI review
+### RAW support, language settings, and layout
 
-- Give Windows icons transparent outer corners and dedicated 16/24px artwork. Keep reproducible PNG/ICO generation and source provenance in `build/generate_branding.py` and `assets/branding/icon_sources.json`.
-- Use compact shared headers with a visible app name. Launcher adapts its cards to the available width and font size, reduces empty card space, and improves result-text contrast.
-- Keep One and Auto Selector's main actions and progress visible while their options scroll. One supports a 600px minimum height and wraps file-type options to fit.
-- Expose Image Manager's Pick, Maybe, Reject, Clear, export, and handoff actions in the toolbar, retaining existing busy states and confirmation dialogs.
-- Make Auto Selector's match statuses shorter and fully reachable, with font-measured status columns, horizontal scrolling, and clearer XMP option layout.
-- Prevent long Frame output paths from expanding the window. Separate output selection from export actions, keep full paths in tooltips, and distinguish settings for all photos from adjustments to the selected photo.
-- Show Frame warnings in English, with ⚠ badges in the file list and the export confirmation. Summarize imports, for example "5 of 8 opened · 2 RAW skipped".
-- Show the output folder state and explain disabled Export buttons with tooltips.
-- Show a clearer export preflight with size, format, color space, metadata, destination, and an example filename. Default filename conflicts to Skip existing.
-- Replace raw error text with actionable messages that say how to fix the problem.
-- Show a completion dialog that matches the outcome, with a failure list and a Job Results button.
-- Add keyboard shortcuts (Ctrl+O, Ctrl+Shift+O, Ctrl+E, Ctrl+Shift+E, Ctrl+J, Up/Down), drag-and-drop import, and Esc or "Stop After This Photo" to cancel an export.
-- Add a border, size caption, and drag hint to the preview canvas.
-- Name duplicated presets "copy", clarify output profile descriptions, and confirm before applying settings to all photos.
+- Add Canon **CRW** support and enable it by default in One. Use a shared format list for Canon CR3/CR2/CRW, Sony ARW/SRF/SR2, and Nikon NEF/NRW; Auto Selector also matches DNG.
+- Use the largest embedded RAW preview and apply the photo's orientation. This improves preview detail where the camera provides a larger JPEG; it does not decode RAW pixels. See the [camera/sample compatibility record](docs/RAW_Compatibility.md).
+- Choose **System default**, **English**, or **한국어** in the Launcher, effective on the next app start. **Korean translation text is not included yet**, so selecting Korean still shows English. Custom translation files can be added without reinstalling; see [translation setup](docs/Localization.md).
+- Improve small Windows icons, compact app headers, and Launcher cards that adapt to window width and font size.
+- Keep One and Auto Selector's main actions and progress visible while options scroll. One supports a 600px minimum height; Auto Selector has clearer match statuses and XMP options.
 
-Validation: **568 source tests passed** (shared/One 250, Manager 46, Auto Selector 73, Launcher 25, Frame 174), plus compilation and diff checks. Native Windows spot checks covered all five apps using isolated synthetic fixtures. Layout regressions include small windows and simulated 100%/150% Tk font scaling; these do not replace packaged or multi-monitor DPI validation.
+### Fixes
 
-After the Frame feedback changes: **603 source tests passed** (shared/One 250, Manager 46, Auto Selector 73, Launcher 26, Frame 208). Frame states were checked with offscreen captures at the default size and 1024x700; the packaged app was not rebuilt.
+- Correct Image Manager undo targets after rescanning or adding a RAW partner.
+- Save current edits when creating a Frame preset, and retain **Use as current** after closing the preset manager.
+- Finish background-worker shutdown before closing Frame and Image Manager windows.
+- Restore One's preview-table placement next to its scrollbars.
+
+### Compatibility and checks
+
+The released package was exercised through its visible GUI on a **single 2880×1800 display at 200%**. Two real portrait RAWs (Canon CR2 and Nikon NEF) displayed upright. An existing **0.9.3 → 0.9.6** installation upgraded successfully, preserving the original settings; installed files, shortcuts, and app launches were checked.
+
+**Evoto 7.3.5** read RAW-sidecar star ratings and changes through **Read Metadata From File**. NDEX's custom label/Pick do **not** map to Evoto's native color labels or flags. Lightroom, Evoto keywords and JPEG/DNG sidecars, other upgrade starting versions, other portrait formats, mixed-DPI monitors, and large RAW/SD-card workloads remain unverified.
+
+The original build passed **729 source tests (one skipped)** and packaged smoke checks. The [follow-up record](docs/Release_Validation_0.9.6_Followup.md) contains the additional GUI, XMP, upgrade, and portrait checks; [build validation](docs/Release_Validation_0.9.6.md) contains the original test results and checksums.
+
+Download the portable ZIP or Windows installer from the [0.9.6 Beta release](https://github.com/electroaria7/NDEX/releases/tag/v0.9.6). EXEs remain unsigned. Existing 1.0.1 installs should be removed before installing this beta line. This documentation update does not change the released binaries; bundled documents retain the original release snapshot.
+
+[한국어 패치노트](docs/obsidian/NDEX/16_0.9.6_패치노트_2026-10-11.md) · [Development review](docs/obsidian/NDEX/15_0.9.6_검수_추가작업_2026-10-11.md) · [Review log](docs/logs/2026-10-11-release-0.9.6-review.log)
 
 ## 0.9.5 Beta — 2026-10-10
 
