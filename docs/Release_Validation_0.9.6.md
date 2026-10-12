@@ -44,8 +44,14 @@ Publication uses a GitHub **prerelease** at `v0.9.6`; uploaded asset sizes and d
 
 ## Limits
 
+The [desktop and interoperability follow-up](Release_Validation_0.9.6_Followup.md) adds visible mouse
+interaction with all five packaged apps, a single-display 200% DPI check, and two real portrait RAWs.
+It also verifies RAW-sidecar ratings and explicit re-reading in Evoto 7.3.5, with custom-label/Pick
+mapping limitations. An in-place 0.9.3 → 0.9.6 upgrade also passed installed-payload, settings, shortcut
+and Launcher-routing checks. Lightroom interoperability remains unverified.
+
 - Korean translation values are still empty; the UI stays English until translations are added (see [Localization](Localization.md)).
-- Lightroom/Evoto XMP interpretation, real portrait RAW orientation and large SD-card performance remain unverified.
-- Fresh install, uninstall and upgrade from older installs were not repeated for this release.
-- Packaged GUI interaction and high-DPI multi-monitor checks were not completed.
+- Lightroom XMP interpretation and large SD-card performance remain unverified. Evoto 7.3.5 RAW ratings/re-reading passed, but NDEX custom labels/Pick do not map to native colors/flags; keywords and JPEG/DNG remain unverified. Real portrait CR2/NEF orientation passed in the follow-up; other portrait RAW formats remain unverified.
+- The existing 0.9.3 installation upgraded to 0.9.6 successfully in the follow-up. Other starting versions, fresh install and uninstall were not tested.
+- Basic packaged GUI workflows passed at 200% on one monitor in the follow-up. Other scales and mixed-DPI multi-monitor checks remain unverified.
 - The EXEs are unsigned and the release remains a beta.

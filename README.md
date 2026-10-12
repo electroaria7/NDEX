@@ -5,7 +5,7 @@
 **Public beta · 0.9.6**
 
 Windows desktop tools for a photo workflow: backup → select → extract masters → frame & export.
-Each app can run alone. Together they share XMP sidecars and one settings file. Actual XMP interpretation in Lightroom / Evoto still needs separate validation.
+Each app can run alone. Together they share XMP sidecars and one settings file. RAW-sidecar ratings and explicit re-reading were verified in Evoto 7.3.5; NDEX's custom labels/Pick do not become Evoto colors/flags. Lightroom interoperability remains unverified.
 
 This is a **public beta**, not a 1.0 product. EXEs are unsigned, so Windows SmartScreen may warn. Expect more changes before a stable release.
 
@@ -30,8 +30,8 @@ This is a **public beta**, not a 1.0 product. EXEs are unsigned, so Windows Smar
 Cancellation takes effect after the current file's copy, verification, or render, or the current metadata batch. One waits for analysis to finish when closing during analysis.
 The verified atomic-copy behavior from 0.9.3 remains, including preservation of existing RAW and XMP files under Auto Selector's duplicate `skip` policy.
 
-Not verified in this release: Lightroom/Evoto XMP interpretation, upgrades from older installs, high-DPI multi-monitor use, and real portrait RAW orientation. Large real-world RAW/SD-card benchmarks remain follow-up work.
-Review details: [October 9 audit](https://github.com/electroaria7/NDEX/blob/v0.9.6/docs/Improvement_Review_2026-10-09.md), [October 10 UI and task safety](https://github.com/electroaria7/NDEX/blob/v0.9.6/docs/Improvement_Review_2026-10-10.md), [release validation](https://github.com/electroaria7/NDEX/blob/v0.9.6/docs/Release_Validation_0.9.6.md).
+The [follow-up validation](docs/Release_Validation_0.9.6_Followup.md) exercised all five packaged apps with mouse input at 200% on one display, verified two real portrait RAWs (Canon CR2 and Nikon NEF), checked RAW XMP ratings/re-reading in Evoto 7.3.5, and verified an in-place 0.9.3 → 0.9.6 upgrade with existing settings preserved. Lightroom interoperability, Evoto keyword/JPEG/DNG handling, other upgrade starting versions, other portrait formats, mixed-DPI multi-monitor use and large real-world RAW/SD-card benchmarks remain unverified.
+Review details: [October 9 audit](https://github.com/electroaria7/NDEX/blob/v0.9.6/docs/Improvement_Review_2026-10-09.md), [October 10 UI and task safety](https://github.com/electroaria7/NDEX/blob/v0.9.6/docs/Improvement_Review_2026-10-10.md), [release validation](docs/Release_Validation_0.9.6.md).
 
 Capacity checks in the other apps, CSV/HTML reports, Korean translations, and release automation remain follow-up work.
 See the [consolidated roadmap](https://github.com/electroaria7/NDEX/blob/main/docs/obsidian/NDEX/Roadmap.md).
@@ -45,7 +45,7 @@ See the [consolidated roadmap](https://github.com/electroaria7/NDEX/blob/main/do
 
 **Installed (`NDEX_Setup_0.9.6.exe`)**
 
-1. Run the installer. Files go to `C:\Program Files\NDEX`.
+1. Run the installer. The verified default path on 64-bit Windows is `C:\Program Files (x86)\NDEX`; you can choose another folder during setup.
 2. Open **NDEX Launcher** from the Start menu or the desktop icon.
 3. Follow the same four cards.
 

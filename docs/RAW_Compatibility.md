@@ -125,8 +125,9 @@ The RAW files themselves are not stored in this repository.
 - **Only the largest embedded JPEG is used**, chosen by byte size. If a camera embeds a larger but lower
   quality JPEG next to a smaller good one, the larger one wins.
 - **Orientation** is applied from the RAW file's EXIF `Orientation` when the preview has no tag of its
-  own. The provided samples were all shot landscape, so portrait handling is covered by unit tests with
-  synthetic JPEGs, not by a real portrait RAW.
+  own. The original 19 samples were landscape. A [follow-up with two unmodified portrait RAWs](Release_Validation_0.9.6_Followup.md#real-portrait-samples)
+  verified Canon CR2 (orientation 8) and Nikon NEF (orientation 6), including upright loupe/grid display
+  in the packaged app. Other portrait formats/cameras remain unverified; synthetic tests cover all eight orientations.
 - **Canon sRAW/mRAW** files report the full sensor size as the image size in Image Manager (for example
   5616x3744 for a 5D Mark II sRAW2 whose real raw is 2784x1856).
 - **Fixed-lens cameras** (DSC-R1, DSC-F828, Coolpix) have no lens model tag, so the lens column is empty.

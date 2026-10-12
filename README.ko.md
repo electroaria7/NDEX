@@ -5,7 +5,7 @@
 **공개 베타 · 0.9.6**
 
 사진 작업 흐름(백업 → 선별 → 원본 추출 → 프레임·내보내기)을 위한 Windows 데스크톱 유틸리티입니다.
-각 앱은 혼자 실행할 수 있고, XMP 사이드카와 공용 설정으로 연동됩니다. Lightroom / Evoto에서의 실제 XMP 해석은 별도 검증이 필요합니다.
+각 앱은 혼자 실행할 수 있고, XMP 사이드카와 공용 설정으로 연동됩니다. Evoto 7.3.5에서 RAW XMP 별점과 명시적 다시 읽기를 확인했습니다. NDEX의 사용자 정의 라벨·Pick은 Evoto 색상·선택 플래그로 변환되지 않으며, Lightroom 연동은 아직 검증하지 않았습니다.
 
 지금은 **공개 베타**이며 1.0 안정판이 아닙니다. EXE는 코드 서명이 없어서 Windows SmartScreen이 경고할 수 있습니다. 안정 릴리스 전에 더 바뀔 수 있습니다.
 
@@ -14,7 +14,7 @@
 - 현재 버전: **0.9.6 Beta**. 패키지: `NDEX_v0.9.6.zip` (포터블), `NDEX_Setup_0.9.6.exe` (설치본). [0.9.6 Beta 릴리스](https://github.com/electroaria7/NDEX/releases/tag/v0.9.6)에서 확인하세요.
 - GitHub 태그 `v1.0.0` / `v1.0.1`은 같은 베타 줄에 안정 버전 번호를 붙인 기록입니다. `v0.9.5`를 포함한 과거 다운로드는 0.9.6 릴리스와 별도로 유지합니다.
 - 이미 `NDEX_Setup_1.0.1.exe`를 설치했다면 `0.9.6`를 설치하기 전에 제거하세요. Windows는 `0.9.6`를 `1.0.1`보다 낮은 버전으로 봅니다.
-- 변경점: [PATCH_NOTES.md](PATCH_NOTES.md).
+- 변경점: [한국어 패치노트](docs/obsidian/NDEX/16_0.9.6_패치노트_2026-10-11.md) · [전체 버전 기록](PATCH_NOTES.md).
 
 ## 빠른 시작
 
@@ -30,8 +30,8 @@
 취소는 현재 파일의 복사·검증·렌더링 또는 현재 메타데이터 묶음 처리가 끝난 뒤 적용합니다. One 분석 중 닫기를 요청하면 분석 완료를 기다립니다.
 0.9.3의 검증 후 원자적 복사와 Auto Selector 중복 `skip`의 기존 RAW·XMP 보존 동작은 유지합니다.
 
-이번 릴리스에서 검증하지 않은 항목은 Lightroom/Evoto XMP 해석, 이전 설치본 업그레이드, 고DPI 다중 모니터, 실제 세로 RAW 방향입니다. 대량 RAW·SD카드 성능도 후속 과제입니다.
-검토 기록: [10월 9일 코드 감사](https://github.com/electroaria7/NDEX/blob/v0.9.6/docs/Improvement_Review_2026-10-09.md), [10월 10일 UI·작업 안정성](https://github.com/electroaria7/NDEX/blob/v0.9.6/docs/Improvement_Review_2026-10-10.md), [0.9.6 배포 검증](https://github.com/electroaria7/NDEX/blob/v0.9.6/docs/Release_Validation_0.9.6.md).
+[후속 검증](docs/Release_Validation_0.9.6_Followup.md)에서 단일 화면 200% 배율로 배포본 앱 5개를 마우스로 조작하고, 실제 세로 RAW 2개(Canon CR2·Nikon NEF)의 방향, Evoto 7.3.5의 RAW XMP 별점·다시 읽기, 기존 설정을 유지한 0.9.3 → 0.9.6 업그레이드를 확인했습니다. Lightroom 연동, Evoto 키워드·JPEG/DNG 처리, 다른 버전에서의 업그레이드, 다른 세로 RAW 형식, 배율이 다른 다중 모니터, 대량 RAW·SD카드 성능은 아직 검증하지 않았습니다.
+검토 기록: [10월 9일 코드 감사](https://github.com/electroaria7/NDEX/blob/v0.9.6/docs/Improvement_Review_2026-10-09.md), [10월 10일 UI·작업 안정성](https://github.com/electroaria7/NDEX/blob/v0.9.6/docs/Improvement_Review_2026-10-10.md), [0.9.6 배포 검증](docs/Release_Validation_0.9.6.md).
 
 다른 앱의 실행 전 용량 점검·CSV/HTML 리포트·한국어 번역·배포 자동화는 후속 과제입니다.
 상세 계획은 [통합 로드맵](https://github.com/electroaria7/NDEX/blob/main/docs/obsidian/NDEX/Roadmap.md)을 참고하세요.
@@ -45,7 +45,7 @@
 
 **설치본 (`NDEX_Setup_0.9.6.exe`)**
 
-1. 설치 프로그램을 실행합니다. 파일은 `C:\Program Files\NDEX`에 들어갑니다.
+1. 설치 프로그램을 실행합니다. 확인한 64비트 Windows의 기본 경로는 `C:\Program Files (x86)\NDEX`이며, 설치 중 다른 폴더를 선택할 수 있습니다.
 2. 시작 메뉴 또는 바탕화면의 **NDEX Launcher**를 엽니다.
 3. 같은 네 장의 카드로 작업합니다.
 
